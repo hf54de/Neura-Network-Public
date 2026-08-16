@@ -12,7 +12,7 @@
 > nachvollziehbare Fehlermeldungen sind willkommen; eine dauerhafte Pflege oder
 > individuelle Unterstützung kann nicht zugesagt werden.
 
-![NeuronNetz graphical network editor](Screenshots%20Tutorial/06_Netzwerkstruktur.png)
+![NeuronNetz graphical network editor](Netzwerkstruktur.png)
 
 ---
 
