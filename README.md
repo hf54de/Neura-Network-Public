@@ -2,6 +2,9 @@
 
 [English](#english-version) | [Deutsch](#deutsche-version)
 
+**Current version / Aktuelle Version:** `0.9.0-beta.15`  
+[Download the latest Windows release / Aktuelle Windows-Version herunterladen](https://github.com/hf54de/Neura-Network-Public/releases/latest)
+
 > **Project status:** Public beta. NeuronNetz is a personal, non-commercial
 > learning and experimentation project. Feedback and reproducible bug reports
 > are welcome; continuous maintenance or individual support cannot be
@@ -26,16 +29,17 @@
 
 ### Quick Start
 
-1. Download the `NeuronNetz-...-Windows.zip` file from the main directory of
-   this repository. The version number is part of the file name.
+1. Open the [latest release](https://github.com/hf54de/Neura-Network-Public/releases/latest)
+   and download `NeuronNetz-...-Windows.zip`. The version number is part of
+   the file name.
 2. Extract the complete archive into a folder of your choice. Do not start the
    program directly from inside the ZIP archive.
 3. Start `NeuronNetz.exe`.
 4. Open one of the included example projects or create a new project.
 
 Python and PySide6 do not need to be installed for the packaged Windows
-version. Keep the supplied `Projekte` and `Tutorials` folders next to the EXE
-so that examples and documentation can be found.
+version. Keep the supplied `Projects_de`, `Projects_en`, and `Tutorials`
+folders next to the EXE so that examples and documentation can be found.
 
 ### System Requirements
 
@@ -62,22 +66,41 @@ A network can be drawn freely, generated automatically from a specified layer st
 | :--- | :--- |
 | **Network Design** | Create neurons and connections manually or generate complete layered networks automatically. |
 | **Training Data** | Enter data, paste it from the clipboard, or import it as CSV; assign columns to neurons and scale values automatically. |
-| **Training** | Optimize weights and bias values using an adjustable learning rate and number of epochs; use suitable starting values according to Xavier/Glorot. |
+| **Training** | Optimize weights and bias values using an adjustable learning rate, momentum, error limit, and number of epochs; use suitable starting values according to Xavier/Glorot. |
 | **Evaluation** | Evaluate the trained network using training data or independent test data without changing its parameters. |
 | **Forward Calculation** | Enter custom input values in their original units and immediately observe the resulting outputs. |
 | **Training History** | Compare multiple training runs, settings, and error curves, and restore suitable network states. |
 | **Result Analysis** | Compare target and calculated values, inspect the largest deviations, apply output-specific tolerances, and examine input influence. |
+| **Application View** | Build a freely designed application-oriented view with interactive inputs, outputs, binary input arrays, images, labels, shapes, and a simplified live network display. |
+| **Project Assistant** | Prepare an editable prompt for an external AI to develop a project idea, propose a network structure, and generate clearly formatted training data. |
 | **Documentation** | Store formatted project notes and export project and training reports. |
 
 ### Understanding, Not Just Calculating
 
 A distinctive feature of NeuronNetz is the visible link between the network representation and its calculations. Neurons can display values such as the input, weighted sum, and output. Colors and line widths make the direction and significance of the weights recognizable.
 
-The guided mathematics mode breaks down a complete learning step into clear sections: starting values, input and target values, weighted sum, activation, error and delta, and the resulting new parameters. A selected input, hidden, or output neuron can be examined individually. The experiment uses a separate copy of the network and does not modify the saved project.
+The guided mathematics mode breaks down a complete learning step into clear sections: starting values, input and target values, weighted sum, activation, error and delta, momentum contribution, and the resulting new parameters. A selected input, hidden, or output neuron can be examined individually. The experiment uses a separate copy of the network and does not modify the saved project.
+
+Training runs can be repeated with the same start conditions. NeuronNetz then
+reuses the initial weights and bias values together with the training-data
+order, making the effect of changed learning parameters directly comparable.
+
+### Application View
+
+The Application View connects a trained network with a practical scenario.
+Inputs can be changed directly while output bars, switches, indicators, and a
+simplified live network display show the reaction immediately. Cards can be
+moved, resized, colored, and arranged on a project-specific canvas. Background
+images, comments, lines, curves, arrows, rectangles, and circles can be added
+to explain the application. The complete layout is stored with the project.
 
 ### Projects and Documentation
 
-The network, its visual presentation, training history, and project settings are stored together in a project file. Training and test data can be managed in a structured project folder. A formatted project description and an optional project image can also be added. This allows the purpose, structure, and special features of a project to be documented directly alongside the network.
+The network, its visual presentation, training history, and project settings are stored together in a project file. Training and test data, exports, and the Application View are managed in a structured project folder. A formatted project description can also be added. This allows the purpose, structure, and special features of a project to be documented directly alongside the network.
+
+German and English example projects are supplied separately in `Projects_de`
+and `Projects_en`. The active project folder can be selected in the program
+settings independently of the interface language.
 
 ### Target Audience and Applications
 
@@ -126,9 +149,9 @@ cannot be guaranteed.
 
 ### Schnellstart
 
-1. Die Datei `NeuronNetz-...-Windows.zip` aus dem Hauptverzeichnis dieses
-   Repositorys herunterladen. Die Versionsnummer ist Bestandteil des
-   Dateinamens.
+1. Die [aktuelle Veröffentlichung](https://github.com/hf54de/Neura-Network-Public/releases/latest)
+   öffnen und `NeuronNetz-...-Windows.zip` herunterladen. Die Versionsnummer
+   ist Bestandteil des Dateinamens.
 2. Das vollständige Archiv in einen Ordner eigener Wahl entpacken. Das Programm
    nicht direkt aus dem geöffneten ZIP-Archiv starten.
 3. `NeuronNetz.exe` starten.
@@ -136,8 +159,9 @@ cannot be guaranteed.
    anlegen.
 
 Für die gepackte Windows-Version müssen Python und PySide6 nicht installiert
-sein. Die mitgelieferten Ordner `Projekte` und `Tutorials` sollten neben der EXE
-erhalten bleiben, damit Beispiele und Dokumentation gefunden werden.
+sein. Die mitgelieferten Ordner `Projects_de`, `Projects_en` und `Tutorials`
+sollten neben der EXE erhalten bleiben, damit Beispiele und Dokumentation
+gefunden werden.
 
 ### Systemanforderungen
 
@@ -165,22 +189,43 @@ Ein Netzwerk kann frei gezeichnet, aus einer vorgegebenen Schichtenstruktur auto
 | :--- | :--- |
 | **Netzwerkaufbau** | Neuronen und Verbindungen manuell anlegen oder vollständige Schichtnetze automatisch erzeugen. |
 | **Trainingsdaten** | Daten eingeben, aus der Zwischenablage übernehmen oder als CSV importieren; Spalten Neuronen zuordnen und Werte automatisch skalieren. |
-| **Training** | Gewichte und Bias-Werte mit einstellbarer Lernrate und Epochenzahl optimieren; geeignete Startwerte nach Xavier/Glorot verwenden. |
+| **Training** | Gewichte und Bias-Werte mit einstellbarer Lernrate, Momentum, Fehlergrenze und Epochenzahl optimieren; geeignete Startwerte nach Xavier/Glorot verwenden. |
 | **Prüfung** | Das gelernte Netzwerk mit Trainings- oder unabhängigen Testdaten berechnen, ohne die Parameter weiter zu verändern. |
 | **Vorwärtsberechnung** | Eigene Eingangswerte in ihren ursprünglichen Einheiten eingeben und die resultierenden Ausgaben sofort beobachten. |
 | **Trainingshistorie** | Mehrere Trainingsläufe, Einstellungen und Fehlerkurven miteinander vergleichen und geeignete Netzwerkzustände wiederherstellen. |
 | **Ergebnisanalyse** | Soll- und Istwerte vergleichen, größte Abweichungen untersuchen, Output-spezifische Toleranzen anwenden und den Einfluss der Eingänge betrachten. |
+| **Anwendungsansicht** | Eine frei gestaltbare Anwendungsdarstellung mit interaktiven Eingängen, Ausgängen, binärer Eingabematrix, Bildern, Beschriftungen, Formen und vereinfachter Live-Netzwerkanzeige aufbauen. |
+| **Projektassistent** | Einen bearbeitbaren Prompt für eine externe KI vorbereiten, um eine Projektidee auszuarbeiten, eine Netzstruktur vorzuschlagen und sauber formatierte Trainingsdaten zu erzeugen. |
 | **Dokumentation** | Formatierte Projekthinweise speichern und Projekt- sowie Trainingsberichte exportieren. |
 
 ### Verstehen statt nur berechnen
 
 Eine Besonderheit von NeuronNetz ist die sichtbare Verbindung zwischen Netzwerkdarstellung und Berechnung. In den Neuronen können unter anderem Eingangswert, gewichtete Summe und Ausgangswert angezeigt werden. Farben und Linienstärken machen Richtung und Bedeutung der Gewichte erkennbar.
 
-Der geführte Mathematikmodus zerlegt einen vollständigen Lernschritt in nachvollziehbare Abschnitte: Startwerte, Eingangs- und Sollwerte, gewichtete Summe, Aktivierung, Fehler und Delta sowie die daraus entstehenden neuen Parameter. Ein ausgewähltes Input-, Hidden- oder Output-Neuron kann dabei gezielt betrachtet werden. Das Experiment arbeitet mit einer getrennten Kopie des Netzwerks und verändert das gespeicherte Projekt nicht.
+Der geführte Mathematikmodus zerlegt einen vollständigen Lernschritt in nachvollziehbare Abschnitte: Startwerte, Eingangs- und Sollwerte, gewichtete Summe, Aktivierung, Fehler und Delta, Momentumanteil sowie die daraus entstehenden neuen Parameter. Ein ausgewähltes Input-, Hidden- oder Output-Neuron kann dabei gezielt betrachtet werden. Das Experiment arbeitet mit einer getrennten Kopie des Netzwerks und verändert das gespeicherte Projekt nicht.
+
+Trainingsläufe lassen sich mit denselben Startbedingungen wiederholen. Dabei
+übernimmt NeuronNetz die anfänglichen Gewichte und Bias-Werte zusammen mit der
+Reihenfolge der Trainingsdaten. So kann die Wirkung geänderter Lernparameter
+direkt verglichen werden.
+
+### Anwendungsansicht
+
+Die Anwendungsansicht stellt ein trainiertes Netzwerk im Zusammenhang mit
+einer praktischen Aufgabe dar. Eingänge können unmittelbar verändert werden;
+Ausgabebalken, Schalter, Anzeigen und eine vereinfachte Live-Netzwerkdarstellung
+zeigen die Reaktion sofort. Kacheln lassen sich auf einer projektbezogenen
+Zeichenfläche verschieben, skalieren, einfärben und anordnen. Hintergrundbilder,
+Kommentare, Linien, Kurven, Pfeile, Rechtecke und Kreise erläutern den
+Anwendungsfall. Die vollständige Gestaltung wird mit dem Projekt gespeichert.
 
 ### Projekte und Dokumentation
 
-Netzwerk, Darstellung, Trainingshistorie und Projekteinstellungen werden gemeinsam in einer Projektdatei gespeichert. Trainings- und Testdaten können in einer strukturierten Projektablage verwaltet werden. Zusätzlich lassen sich eine formatierte Projektbeschreibung und ein optionales Projektbild hinterlegen. Damit können Zweck, Aufbau und Besonderheiten eines Projekts direkt beim Netzwerk dokumentiert werden.
+Netzwerk, Darstellung, Trainingshistorie und Projekteinstellungen werden gemeinsam in einer Projektdatei gespeichert. Trainings- und Testdaten, Exporte sowie die Anwendungsansicht werden in einer strukturierten Projektablage verwaltet. Zusätzlich lässt sich eine formatierte Projektbeschreibung hinterlegen. Damit können Zweck, Aufbau und Besonderheiten eines Projekts direkt beim Netzwerk dokumentiert werden.
+
+Deutsche und englische Beispielprojekte liegen getrennt in `Projects_de` und
+`Projects_en`. Der verwendete Projektordner kann in den Programmeinstellungen
+unabhängig von der Sprache der Oberfläche gewählt werden.
 
 ### Zielgruppe und Einsatzbereich
 

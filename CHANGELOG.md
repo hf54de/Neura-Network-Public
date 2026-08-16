@@ -1,4 +1,4 @@
-# Änderungsverlauf
+# Changelog
 
 ## 0.9.0-beta.15 – 15.08.2026
 
@@ -39,31 +39,35 @@
 ## 0.9.0-beta.6 – 31.07.2026
 
 - KI Assistant integration
-- Trainingsziel und Trainingssteuerung als bündige Gruppen mit eindeutigen
-  Optionsfeldern, klareren Beschriftungen und ergänzenden Hilfetexten gestaltet
-- Auswertungsfunktionen in einer einzeiligen Leiste zusammengefasst und den
-  bisherigen Ladebefehl in „Trainingshistorie“ umbenannt
-- Einführungstext des Projektassistenten um Zweck und erwartete Ergebnisse
-  erweitert
-- Unerwünschte separate Fehlertextfenster beim Wechsel aus der Kompakt- oder
-  Minimalansicht zurück in die Vollansicht verhindert
-- Ruhiges, abschaltbares Startbild mit NeuronNetz-Grafik, Leitsatz,
-  Versionsangabe und echten Ladehinweisen ergänzt; über der gespeicherten
-  Hauptfensterposition zentriert und nach dem Laden noch 2,5 Sekunden sichtbar
-- Zuletzt gespeicherte Netzwerkansicht eines automatisch geöffneten
-  Startprojekts bleibt unverändert erhalten
-- Vorübergehende Meldungen und die dauerhafte Projektübersicht überlagern
-  sich in der Statusleiste nicht mehr
-- „Datei → Neu“ um eine gemeinsame Auswahl für ein leeres Projekt,
-  automatische Netzerzeugung, Erzeugung aus Trainingsdaten und den
-  Projektassistenten erweitert
+- Designed the training target and training controls as aligned groups with
+  unambiguous option buttons, clearer labels, and additional help texts
+- Combined the evaluation functions in a single-row toolbar and renamed the
+  previous loading command to "Training History"
+- Expanded the introductory text of the Project Assistant to explain its
+  purpose and expected results
+- Prevented unwanted separate error-message windows when returning from the
+  compact or minimized view to the full view
+- Added a calm, optional splash screen with a NeuronNetz graphic, tagline,
+  version information, and actual loading messages; centered it over the saved
+  main-window position and kept it visible for 2.5 seconds after loading
+- Preserved the last saved network view when a startup project is opened
+  automatically
+- Prevented temporary messages and the permanent project summary from
+  overlapping in the status bar
+- Extended "File → New" with a common selection for an empty project,
+  automatic network generation, creation from training data, and the Project
+  Assistant
 
 ## 0.9.0-beta.5 – 29.07.2026
 
 - Improve training guidance, history curves, and project usability
-- Projektbericht mit formatierten Beschreibungen, übersichtlichem Kopf, gemeinsamer Trainingstabelle und -kurve sowie vollständigen Output-Auswertungen überarbeitet
-- Projektunabhängigen Assistenten zum Erzeugen bearbeitbarer KI-Prompts für eigene Projekte, Netzwerkvorschläge und Trainingsdaten ergänzt
-- Projektprompt fordert unskalierte Rohdaten an; Trainingsfenster um Experimentzugriff ergänzt und ersten Speicherort neuer Projekte korrigiert
+- Revised the project report with formatted descriptions, a clearer header, a
+  combined training table and curve, and complete output evaluations
+- Added a project-independent assistant for generating editable AI prompts for
+  custom projects, network proposals, and training data
+- Updated the project prompt to request unscaled raw data; added access to the
+  experiment from the training window and corrected the initial save location
+  for new projects
 
 ## 0.9.0-beta.4 – 28.07.2026
 
@@ -72,13 +76,15 @@
 ## 0.9.0-beta.3 – 27.07.2026
 
 - Analysis window revised
-- Trainingsfenster mit gemeinsamer Zielauswahl für neue und fortgesetzte Läufe überarbeitet
-- Gestoppte Trainingsläufe können mit demselben Trainingsziel fortgesetzt werden
-- Trainingshistorie um den maximalen Einzelfehler und eine passende Startbreite erweitert
-- Automatische Netzwerkanordnung übernimmt zunächst die vorhandenen Abstände
-- Einflussanalyse und technische Trainingsdaten übersichtlicher angeordnet
-- Projektübersicht wird beim Programmstart nicht mehr automatisch geöffnet
-- Überflüssigen Schalter „Projektablauf anzeigen“ aus dem Menü entfernt
+- Revised the training window with a common target selection for new and
+  continued runs
+- Allowed stopped training runs to continue with the same training target
+- Extended the training history with the maximum individual error and an
+  appropriate initial width
+- Made automatic network arrangement initially retain the existing spacing
+- Improved the layout of the influence analysis and technical training data
+- Prevented the project overview from opening automatically at program startup
+- Removed the unnecessary "Show Project Workflow" switch from the menu
 
 ## 0.9.0-beta.2 – 26.07.2026
 
@@ -86,4 +92,4 @@
 
 ## 0.9.0-beta.1 – 26.07.2026
 
-- Erster zentral versionierter öffentlicher Beta-Stand von NeuronNetz.
+- First centrally versioned public beta release of NeuronNetz.

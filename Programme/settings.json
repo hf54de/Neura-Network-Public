@@ -1,0 +1,22 @@
+{
+    "window": {
+        "geometry": "AdnQywADAAAAAAJ4AAAAxwAAClkAAASQAAACeAAAAOYAAApZAAAEkAAAAAAAAAAAFAAAAAJ4AAAA5gAAClkAAASQ",
+        "state": "AAAA/wAAAAD9AAAAAQAAAAEAAAExAAADRvwCAAAAAfsAAAAaAHAAcgBvAHAAZQByAHQAeQBfAGQAbwBjAGsAAAAAUAAAA0YAAAKUAP///wAAB5AAAANGAAAABAAAAAQAAAAIAAAACPwAAAACAAAAAAAAAAIAAAAYAHQAbwBvAGwAYgBhAHIAXwBmAGkAbABlAwAAAAD/////AAAAAAAAAAAAAAAeAHQAbwBvAGwAYgBhAHIAXwBuAGUAdAB3AG8AcgBrAwAAANoAAAJsAAAAAAAAAAAAAAACAAAABAAAABgAdABvAG8AbABiAGEAcgBfAGUAZABpAHQBAAAAAP////8AAAAAAAAAAAAAABgAdABvAG8AbABiAGEAcgBfAHYAaQBlAHcBAAACHf////8AAAAAAAAAAAAAABgAdABvAG8AbABiAGEAcgBfAGQAYQB0AGEBAAADqAAAA5cAAAAAAAAAAAAAABgAdABvAG8AbABiAGEAcgBfAGgAZQBsAHABAAAHPwAAAVIAAAAAAAAAAA==",
+        "maximized": false
+    },
+    "paths": {
+        "last_project_directory": "C:\\Neuronales Netz\\Projekte\\Bremsweg",
+        "recent_project_files": [
+            "C:\\Neuronales Netz\\Projekte\\Bremsweg\\Bremsweg.nnproj",
+            "C:\\Neuronales Netz\\Projekte\\XOR 02\\XOR 02.nnproj"
+        ]
+    },
+    "ui": {
+        "toolbar_icon_size": 18,
+        "toolbar_show_text": true,
+        "toolbars_visible": true,
+        "property_dock_visible": false,
+        "editor_scene_margin": 100,
+        "editor_zoom_step_percent": 15
+    }
+}
