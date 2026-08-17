@@ -5,13 +5,15 @@
 **Current version / Aktuelle Version:** `0.9.0-beta.15`  
 [Download the latest Windows release / Aktuelle Windows-Version herunterladen](https://github.com/hf54de/Neura-Network-Public/releases/latest)
 
-> **Project status:** Public beta. NeuronNetz is a personal, non-commercial
-> learning and experimentation project. Feedback and reproducible bug reports
+> **Project status:** Public beta. NeuronNetz is a personal
+> learning and experimentation project and is not developed as a commercial product.
+> Feedback and reproducible bug reports
 > are welcome; continuous maintenance or individual support cannot be
 > guaranteed.
 
-> **Projektstatus:** Öffentliche Beta-Version. NeuronNetz ist ein persönliches,
-> nicht kommerzielles Lern- und Experimentierprojekt. Rückmeldungen und
+> **Projektstatus:** Öffentliche Beta-Version. NeuronNetz ist ein persönliches
+> Lern- und Experimentierprojekt und wird nicht als kommerzielles Produkt
+> entwickelt. Rückmeldungen und
 > nachvollziehbare Fehlermeldungen sind willkommen; eine dauerhafte Pflege oder
 > individuelle Unterstützung kann nicht zugesagt werden.
 
