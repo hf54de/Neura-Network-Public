@@ -136,7 +136,21 @@ class BinaryArrayPaintController(QObject):
         self.buttons = set()
         self.last_button = None
         self.press_started_on_button = False
-        QApplication.instance().installEventFilter(self)
+        self.application = QApplication.instance()
+        self.filter_installed = False
+        if self.application is not None:
+            self.application.installEventFilter(self)
+            self.filter_installed = True
+
+    def deactivate(self):
+        """Meldet den globalen Mausfilter beim Schließen wieder ab."""
+
+        if self.filter_installed and self.application is not None:
+            self.application.removeEventFilter(self)
+        self.filter_installed = False
+        self.buttons.clear()
+        self.last_button = None
+        self.press_started_on_button = False
 
     def set_buttons(self, buttons):
         self.buttons = set(buttons)
@@ -957,6 +971,9 @@ class ForwardCalibrationDialog(QDialog):
                 Settings.save_ui_settings(self.ui_settings)
             except OSError:
                 pass
+        controller = getattr(self, "array_paint_controller", None)
+        if controller is not None:
+            controller.deactivate()
         super().done(result)
 
     def rebuild_array_group(self):

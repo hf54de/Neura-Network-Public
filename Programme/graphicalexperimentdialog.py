@@ -481,14 +481,20 @@ class SimplifiedNetworkCard(ExperimentCard):
     """Zeigt das aktuelle Netz kompakt und ohne Bearbeitungsfunktionen an."""
 
     def __init__(
-        self, network, translate, color_settings=None, output_mappings=None,
-        parent=None,
+        self, network, translate, color_settings=None, input_mappings=None,
+        output_mappings=None, parent=None,
     ):
         super().__init__(parent)
         self.network = network
         self.translate = translate
         self.color_settings = dict(color_settings or {})
+        self.show_input_values = False
         self.show_output_values = True
+        self.input_mappings = {
+            mapping["neuron"].id: mapping
+            for mapping in (input_mappings or [])
+            if mapping.get("neuron") is not None
+        }
         self.output_mappings = {
             mapping["neuron"].id: mapping
             for mapping in (output_mappings or [])
@@ -511,6 +517,7 @@ class SimplifiedNetworkCard(ExperimentCard):
         except (AttributeError, ValueError):
             self.cached_layers = []
         self.cached_connections = list(self.network.get_connections())
+        self.cached_inputs = list(self.network.get_input_neurons())
         self.cached_outputs = list(self.network.get_output_neurons())
         # Schnell aufeinanderfolgende Reglerereignisse dürfen nicht für jeden
         # Zwischenwert ein vollständiges Neuzeichnen der Netzwerkkarte starten.
@@ -540,6 +547,10 @@ class SimplifiedNetworkCard(ExperimentCard):
         self.show_output_values = bool(enabled)
         self.update()
 
+    def set_show_input_values(self, enabled):
+        self.show_input_values = bool(enabled)
+        self.update()
+
     @staticmethod
     def neuron_id_text(neuron):
         """Gibt die technische Neuron-ID in der sichtbaren Form N15 zurück."""
@@ -556,6 +567,33 @@ class SimplifiedNetworkCard(ExperimentCard):
             ratio = max(0.0, min(1.0, internal_value))
             decision = 1 if ratio >= 0.5 else 0
             return ratio, f"{decision}  {round(ratio * 100.0):d}%"
+        calibration = TrainingDataIO.normalize_calibration(mapping.get("calibration"))
+        raw_value = TrainingDataIO.unscale_value(
+            internal_value, calibration, getattr(self.translate, "text", None)
+        )
+        if calibration["mode"] in ("minmax_0_1", "minmax_minus1_1"):
+            minimum = float(calibration["source_min"])
+            maximum = float(calibration["source_max"])
+            ratio = (
+                0.0 if maximum <= minimum
+                else (raw_value - minimum) / (maximum - minimum)
+            )
+        else:
+            ratio = self.activity_ratio(internal_value)
+        unit = str(mapping.get("unit") or "")
+        text = format_number(raw_value, 5)
+        if unit:
+            text += f" {unit}"
+        return max(0.0, min(1.0, ratio)), text
+
+    def input_display_data(self, neuron):
+        """Liefert Balkenposition und lesbaren Wert eines Input-Neurons."""
+
+        mapping = self.input_mappings.get(neuron.id, {})
+        internal_value = float(neuron.output_value)
+        if mapping.get("data_type") == "binary":
+            ratio = max(0.0, min(1.0, internal_value))
+            return ratio, f"{round(ratio * 100.0):d}%"
         calibration = TrainingDataIO.normalize_calibration(mapping.get("calibration"))
         raw_value = TrainingDataIO.unscale_value(
             internal_value, calibration, getattr(self.translate, "text", None)
@@ -601,7 +639,18 @@ class SimplifiedNetworkCard(ExperimentCard):
         horizontal_margin = max(24.0, min(42.0, card_rect.width() * 0.065))
         top_margin = max(22.0, min(36.0, card_rect.height() * 0.06))
         bottom_margin = max(42.0, min(54.0, card_rect.height() * 0.10))
+        inputs = self.cached_inputs
         outputs = self.cached_outputs
+        input_panel_width = 0.0
+        if (
+            self.show_input_values
+            and inputs
+            and card_rect.width() >= 275.0
+            and card_rect.height() / max(1, len(inputs)) >= 11.0
+        ):
+            input_panel_width = max(
+                78.0, min(140.0, card_rect.width() * 0.23)
+            )
         output_panel_width = 0.0
         if (
             self.show_output_values
@@ -613,7 +662,7 @@ class SimplifiedNetworkCard(ExperimentCard):
                 78.0, min(140.0, card_rect.width() * 0.23)
             )
         inner = card_rect.adjusted(
-            horizontal_margin,
+            horizontal_margin + input_panel_width,
             top_margin,
             -(horizontal_margin + output_panel_width),
             -bottom_margin,
@@ -744,13 +793,11 @@ class SimplifiedNetworkCard(ExperimentCard):
                 self.node_hit_areas.append((center, radius + 4.0, neuron))
 
         if output_panel_width > 0.0:
-            panel_shift = 10.0
+            side_padding = max(5.0, min(10.0, card_rect.width() * 0.015))
             panel_left = (
-                inner.right() + max(7.0, radius * 1.15) + panel_shift
+                inner.right() + max(7.0, radius * 1.15)
             )
-            panel_right = (
-                card_rect.right() - horizontal_margin + panel_shift
-            )
+            panel_right = card_rect.right() - side_padding
             panel_width = max(40.0, panel_right - panel_left)
             row_height = max(
                 12.0, min(30.0, inner.height() / max(1, len(outputs)))
@@ -759,25 +806,11 @@ class SimplifiedNetworkCard(ExperimentCard):
             output_font.setPixelSize(max(7, min(10, round(row_height * 0.32))))
             painter.setFont(output_font)
             metrics = painter.fontMetrics()
-            value_width = min(
-                panel_width * 0.38,
-                max(
-                    metrics.horizontalAdvance(self.output_display_data(neuron)[1])
-                    for neuron in outputs
-                ) + 3.0,
-            )
-            longest_id_width = max(
-                metrics.horizontalAdvance(self.neuron_id_text(neuron))
-                for neuron in outputs
-            ) + 4.0
-            label_width = max(
-                10.0,
-                min(
-                    longest_id_width,
-                    panel_width * 0.28,
-                    panel_width - value_width - 25.0,
-                ),
-            )
+            # Beide Seiten verwenden feste, spiegelbildliche Spaltenanteile.
+            # Dadurch bleiben Balkenlänge und Abstände unabhängig von der
+            # jeweiligen Textlänge optisch identisch.
+            value_width = panel_width * 0.43
+            label_width = panel_width * 0.20
             bar_left = panel_left + label_width + 2.0
             bar_right = panel_right - value_width - 3.0
             bar_width = max(14.0, bar_right - bar_left)
@@ -820,6 +853,65 @@ class SimplifiedNetworkCard(ExperimentCard):
                     ),
                     Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
                     value_text,
+                )
+
+        if input_panel_width > 0.0:
+            side_padding = max(5.0, min(10.0, card_rect.width() * 0.015))
+            panel_right = (
+                inner.left() - max(7.0, radius * 1.15)
+            )
+            panel_left = card_rect.left() + side_padding
+            panel_width = max(40.0, panel_right - panel_left)
+            row_height = max(
+                12.0, min(30.0, inner.height() / max(1, len(inputs)))
+            )
+            input_font = painter.font()
+            input_font.setPixelSize(max(7, min(10, round(row_height * 0.32))))
+            painter.setFont(input_font)
+            metrics = painter.fontMetrics()
+            value_width = panel_width * 0.43
+            label_width = panel_width * 0.20
+            # Spiegelbildlich zur Ausgabeseite: außen der Wert, danach der
+            # Balken und unmittelbar vor dem Neuron dessen technische ID.
+            value_left = panel_left
+            bar_left = value_left + value_width + 3.0
+            label_left = panel_right - label_width
+            bar_right = label_left - 2.0
+            bar_width = max(14.0, bar_right - bar_left)
+            for neuron in inputs:
+                center = positions.get(neuron.id)
+                if center is None:
+                    continue
+                ratio, value_text = self.input_display_data(neuron)
+                y = center.y()
+                label = metrics.elidedText(
+                    self.neuron_id_text(neuron),
+                    Qt.TextElideMode.ElideLeft,
+                    round(label_width),
+                )
+                active_color = QColor("#2788c9")
+                painter.setPen(QPen(active_color, 1.0))
+                painter.drawText(
+                    QRectF(value_left, y - row_height / 2.0, value_width, row_height),
+                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
+                    value_text,
+                )
+                track_y = y - 2.0
+                painter.setPen(QPen(QColor("#7d858c"), 1.0))
+                painter.setBrush(QColor("#e4e7e9"))
+                painter.drawRoundedRect(
+                    QRectF(bar_left, track_y, bar_width, 4.0), 1.5, 1.5
+                )
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(active_color)
+                painter.drawRoundedRect(
+                    QRectF(bar_left, track_y, bar_width * ratio, 4.0), 1.5, 1.5
+                )
+                painter.setPen(QPen(self.text_color, 1.0))
+                painter.drawText(
+                    QRectF(label_left, y - row_height / 2.0, label_width, row_height),
+                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
+                    label,
                 )
 
         self.reset_focus_rect = QRectF()
@@ -1154,7 +1246,21 @@ class BinaryArrayPaintController(QObject):
         self.buttons = set()
         self.last_button = None
         self.press_started_on_button = False
-        QApplication.instance().installEventFilter(self)
+        self.application = QApplication.instance()
+        self.filter_installed = False
+        if self.application is not None:
+            self.application.installEventFilter(self)
+            self.filter_installed = True
+
+    def deactivate(self):
+        """Meldet den globalen Mausfilter beim Schließen wieder ab."""
+
+        if self.filter_installed and self.application is not None:
+            self.application.removeEventFilter(self)
+        self.filter_installed = False
+        self.buttons.clear()
+        self.last_button = None
+        self.press_started_on_button = False
 
     def set_buttons(self, buttons):
         self.buttons = set(buttons)
@@ -3533,6 +3639,7 @@ class GraphicalExperimentDialog(QDialog):
             self.network,
             self.tr,
             color_settings=self.color_settings,
+            input_mappings=self.input_columns,
             output_mappings=self.output_columns,
         )
         proxy = MovableCardProxy("network_view")
@@ -4066,7 +4173,7 @@ class GraphicalExperimentDialog(QDialog):
             self.tr("Standardfarbe (Weiß)", "Default color (white)")
         )
         edit_action = delete_action = remove_action = bar_action = pointer_action = None
-        output_values_action = None
+        input_values_action = output_values_action = None
         rename_array_action = None
         if proxy.card_role == "comment":
             menu.addSeparator()
@@ -4082,6 +4189,13 @@ class GraphicalExperimentDialog(QDialog):
                 self.tr("Aus Gestaltung entfernen", "Remove from design")
             )
             if proxy.card_role == "network_view":
+                input_values_action = menu.addAction(
+                    self.tr("Eingabewerte anzeigen", "Show input values")
+                )
+                input_values_action.setCheckable(True)
+                input_values_action.setChecked(
+                    proxy.widget().show_input_values
+                )
                 output_values_action = menu.addAction(
                     self.tr("Ausgabewerte anzeigen", "Show output values")
                 )
@@ -4121,6 +4235,15 @@ class GraphicalExperimentDialog(QDialog):
                 self.finish_history_action()
         elif remove_action is not None and selected == remove_action:
             self.remove_elements_from_design(self.selected_card_proxies())
+        elif (
+            input_values_action is not None
+            and selected == input_values_action
+        ):
+            self.begin_history_action()
+            proxy.widget().set_show_input_values(
+                input_values_action.isChecked()
+            )
+            self.finish_history_action()
         elif (
             output_values_action is not None
             and selected == output_values_action
@@ -5498,6 +5621,9 @@ class GraphicalExperimentDialog(QDialog):
                 )
                 network_state = document.get("network_view_element")
                 if isinstance(network_state, dict):
+                    self.network_view_card.widget().set_show_input_values(
+                        bool(network_state.get("show_input_values", False))
+                    )
                     self.network_view_card.widget().set_show_output_values(
                         bool(network_state.get("show_output_values", True))
                     )
@@ -5622,6 +5748,7 @@ class GraphicalExperimentDialog(QDialog):
                 "height": proxy.widget().height(),
                 "color": proxy.widget().card_color.name(),
                 "visible": proxy.isVisible(),
+                "show_input_values": proxy.widget().show_input_values,
                 "show_output_values": proxy.widget().show_output_values,
             }
         return {
@@ -5754,6 +5881,9 @@ class GraphicalExperimentDialog(QDialog):
             network_geometry = document.get("network_view_element")
             if isinstance(network_geometry, dict):
                 self.apply_card_geometry(self.network_view_card, network_geometry)
+                self.network_view_card.widget().set_show_input_values(
+                    bool(network_geometry.get("show_input_values", False))
+                )
                 self.network_view_card.widget().set_show_output_values(
                     bool(network_geometry.get("show_output_values", True))
                 )
@@ -5851,6 +5981,18 @@ class GraphicalExperimentDialog(QDialog):
 
     def stop_forward_executor(self):
         """Beendet den Rechendienst beim Schließen des Fensters ohne Wartezeit."""
+
+        input_array_proxy = getattr(self, "input_array_card", None)
+        input_array_card = (
+            input_array_proxy.widget()
+            if input_array_proxy is not None
+            else None
+        )
+        paint_controller = getattr(
+            input_array_card, "paint_controller", None
+        )
+        if paint_controller is not None:
+            paint_controller.deactivate()
 
         executor = getattr(self, "forward_executor", None)
         if executor is None:
