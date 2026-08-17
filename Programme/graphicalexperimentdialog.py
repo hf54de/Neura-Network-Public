@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: graphicalexperimentdialog.py
 # Zweck: Stellt ein frei gestaltbares grafisches Bedienpult für Netzwerkexperimente bereit.
-# Letzte Änderung: 16.08.2026
+# Letzte Änderung: 17.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -744,8 +744,15 @@ class SimplifiedNetworkCard(ExperimentCard):
 
         if weight_labels:
             label_font = painter.font()
-            label_font.setPixelSize(max(7, min(10, round(radius * 0.82))))
+            natural_label_size = max(7.0, min(10.0, radius * 0.82))
+            if view_zoom < 0.75:
+                natural_label_size = max(
+                    natural_label_size,
+                    min(48.0, 8.0 / view_zoom),
+                )
+            label_font.setPixelSize(round(natural_label_size))
             painter.setFont(label_font)
+            label_height = max(14.0, painter.fontMetrics().height() + 4.0)
             focused_center = positions.get(focus_id)
             for start, end, connection, color in weight_labels:
                 painter.setPen(QPen(color, 1.0))
@@ -760,9 +767,9 @@ class SimplifiedNetworkCard(ExperimentCard):
                     text_width = painter.fontMetrics().horizontalAdvance(text)
                     label_rect = QRectF(
                         label_center.x() - text_width / 2.0 - 3.0,
-                        label_center.y() - 7.0,
+                        label_center.y() - label_height / 2.0,
                         text_width + 6.0,
-                        14.0,
+                        label_height,
                     )
                     background = QColor(self.card_color)
                     background.setAlpha(225)
@@ -771,7 +778,10 @@ class SimplifiedNetworkCard(ExperimentCard):
                 else:
                     middle = (start + end) / 2.0
                     label_rect = QRectF(
-                        middle.x() - 31.0, middle.y() - 7.0, 62.0, 14.0
+                        middle.x() - 31.0,
+                        middle.y() - label_height / 2.0,
+                        62.0,
+                        label_height,
                     )
                     alignment = Qt.AlignmentFlag.AlignCenter
                 painter.drawText(label_rect, alignment, text)
@@ -803,7 +813,13 @@ class SimplifiedNetworkCard(ExperimentCard):
                 12.0, min(30.0, inner.height() / max(1, len(outputs)))
             )
             output_font = painter.font()
-            output_font.setPixelSize(max(7, min(10, round(row_height * 0.32))))
+            natural_font_size = max(7.0, min(10.0, row_height * 0.32))
+            if view_zoom < 0.75:
+                natural_font_size = max(
+                    natural_font_size,
+                    min(48.0, 9.0 / view_zoom),
+                )
+            output_font.setPixelSize(round(natural_font_size))
             painter.setFont(output_font)
             metrics = painter.fontMetrics()
             # Beide Seiten verwenden feste, spiegelbildliche Spaltenanteile.
@@ -814,6 +830,10 @@ class SimplifiedNetworkCard(ExperimentCard):
             bar_left = panel_left + label_width + 2.0
             bar_right = panel_right - value_width - 3.0
             bar_width = max(14.0, bar_right - bar_left)
+            bar_height = min(
+                row_height * 0.35,
+                max(4.0, 3.0 / view_zoom),
+            )
             for neuron in outputs:
                 center = positions.get(neuron.id)
                 if center is None:
@@ -830,11 +850,11 @@ class SimplifiedNetworkCard(ExperimentCard):
                     Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
                     label,
                 )
-                track_y = y - 2.0
+                track_y = y - bar_height / 2.0
                 painter.setPen(QPen(QColor("#7d858c"), 1.0))
                 painter.setBrush(QColor("#e4e7e9"))
                 painter.drawRoundedRect(
-                    QRectF(bar_left, track_y, bar_width, 4.0), 1.5, 1.5
+                    QRectF(bar_left, track_y, bar_width, bar_height), 1.5, 1.5
                 )
                 active_color = (
                     QColor("#ff9a2e") if neuron is strongest
@@ -843,7 +863,11 @@ class SimplifiedNetworkCard(ExperimentCard):
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(active_color)
                 painter.drawRoundedRect(
-                    QRectF(bar_left, track_y, bar_width * ratio, 4.0), 1.5, 1.5
+                    QRectF(
+                        bar_left, track_y, bar_width * ratio, bar_height
+                    ),
+                    1.5,
+                    1.5,
                 )
                 painter.setPen(QPen(active_color, 1.0))
                 painter.drawText(
@@ -866,7 +890,13 @@ class SimplifiedNetworkCard(ExperimentCard):
                 12.0, min(30.0, inner.height() / max(1, len(inputs)))
             )
             input_font = painter.font()
-            input_font.setPixelSize(max(7, min(10, round(row_height * 0.32))))
+            natural_font_size = max(7.0, min(10.0, row_height * 0.32))
+            if view_zoom < 0.75:
+                natural_font_size = max(
+                    natural_font_size,
+                    min(48.0, 9.0 / view_zoom),
+                )
+            input_font.setPixelSize(round(natural_font_size))
             painter.setFont(input_font)
             metrics = painter.fontMetrics()
             value_width = panel_width * 0.43
@@ -878,6 +908,10 @@ class SimplifiedNetworkCard(ExperimentCard):
             label_left = panel_right - label_width
             bar_right = label_left - 2.0
             bar_width = max(14.0, bar_right - bar_left)
+            bar_height = min(
+                row_height * 0.35,
+                max(4.0, 3.0 / view_zoom),
+            )
             for neuron in inputs:
                 center = positions.get(neuron.id)
                 if center is None:
@@ -896,16 +930,20 @@ class SimplifiedNetworkCard(ExperimentCard):
                     Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
                     value_text,
                 )
-                track_y = y - 2.0
+                track_y = y - bar_height / 2.0
                 painter.setPen(QPen(QColor("#7d858c"), 1.0))
                 painter.setBrush(QColor("#e4e7e9"))
                 painter.drawRoundedRect(
-                    QRectF(bar_left, track_y, bar_width, 4.0), 1.5, 1.5
+                    QRectF(bar_left, track_y, bar_width, bar_height), 1.5, 1.5
                 )
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(active_color)
                 painter.drawRoundedRect(
-                    QRectF(bar_left, track_y, bar_width * ratio, 4.0), 1.5, 1.5
+                    QRectF(
+                        bar_left, track_y, bar_width * ratio, bar_height
+                    ),
+                    1.5,
+                    1.5,
                 )
                 painter.setPen(QPen(self.text_color, 1.0))
                 painter.drawText(
@@ -2652,7 +2690,10 @@ class MovableCardProxy(QGraphicsProxyWidget):
         self.attached_endpoint_start_positions = {}
         moved_card_bounds = [
             bounds for item, bounds in self.drag_start_bounds.items()
-            if isinstance(item, MovableCardProxy)
+            if (
+                isinstance(item, MovableCardProxy)
+                and item.card_role != "network_view"
+            )
         ]
         if moved_card_bounds and self.scene() is not None:
             tolerance = DesignShapeItem.HANDLE_SIZE + 4.0
