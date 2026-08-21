@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: resultanalysisdialog.py
 # Zweck: Analysiert und vergleicht Ergebnisse aus Trainings- und Testdaten.
-# Letzte Änderung: 08.08.2026
+# Letzte Änderung: 20.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -841,10 +841,7 @@ class ResultAnalysisDialog(QDialog):
                     target = self.t("binary.on" if item["target"] > 0.5 else "binary.off")
                     actual_state = self.t("binary.on" if item["actual"] > 0.5 else "binary.off")
                     actual = f"{actual_state} ({self.display_number(item['actual'])})"
-                    deviation = self.t(
-                        "analysis.binary.incorrect" if item["binary_error"]
-                        else "analysis.binary.correct"
-                    )
+                    deviation = self.display_number(item["raw_absolute"])
                 else:
                     unit = str(item.get("unit") or "")
                     suffix = f" {unit}" if unit else ""

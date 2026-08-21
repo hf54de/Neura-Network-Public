@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: traininghistorydialog.py
 # Zweck: Verwaltet, vergleicht und lädt gespeicherte Trainingsläufe.
-# Letzte Änderung: 08.08.2026
+# Letzte Änderung: 20.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -660,7 +660,9 @@ class TrainingHistoryDialog(QDialog):
         weights = str(entry.get("weight_initialization", "") or "").lower()
         bias = str(entry.get("bias_initialization", "") or "").lower()
         weight_text = (
-            "Xavier/Glorot" if weights == "xavier"
+            self.t("training.initialization.auto_short") if weights == "auto"
+            else "Xavier/Glorot" if weights == "xavier"
+            else "He" if weights == "he"
             else "0" if weights == "zero"
             else self.t("history.initialization.unknown")
         )

@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: projectio.py
 # Zweck: Liest, schreibt und normalisiert NeuronNetz-Projektdateien.
-# Letzte Änderung: 08.08.2026
+# Letzte Änderung: 20.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -256,7 +256,7 @@ class ProjectIO:
 
         return {
             "initialize_network": False,
-            "weight_initialization": "xavier",
+            "weight_initialization": "auto",
             "bias_initialization": "zero",
             "learning_rate": 0.01,
             "momentum": 0.0,
@@ -1480,7 +1480,9 @@ class ProjectIO:
             )
 
         if training_settings["weight_initialization"] not in {
+            "auto",
             "xavier",
+            "he",
             "zero"
         }:
             raise ValueError(
@@ -1721,7 +1723,9 @@ class ProjectIO:
                     "Misch-Startkennung."
                 )
 
-            if entry["weight_initialization"] not in {"xavier", "zero"}:
+            if entry["weight_initialization"] not in {
+                "auto", "xavier", "he", "zero"
+            }:
                 raise ValueError(
                     "Die Trainingshistorie enthält eine ungültige "
                     "Gewichtsinitialisierung."

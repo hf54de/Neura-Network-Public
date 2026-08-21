@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: mainwindow.py
 # Zweck: Verbindet Hauptfenster, Menüs, Werkzeugleisten und zentrale Programmabläufe.
-# Letzte Änderung: 15.08.2026
+# Letzte Änderung: 20.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -2177,7 +2177,11 @@ class MainWindow(QMainWindow):
             (
                 self.action_graphical_experiment,
                 "graphical_experiment",
-                text("forward.button.graphical_experiment").replace(" ", "\n", 1),
+                (
+                    "Anwendungs-\nansicht"
+                    if self.language.current_language == "de"
+                    else "Application\nView"
+                ),
                 text("forward.button.graphical_experiment")
             ),
             (
@@ -5074,6 +5078,14 @@ class MainWindow(QMainWindow):
         if not isinstance(neuron, Neuron):
             return
 
+        selected_neurons = [
+            item for item in self.scene.selectedItems()
+            if isinstance(item, Neuron)
+        ]
+        if neuron not in selected_neurons:
+            selected_neurons = [neuron]
+        multiple = len(selected_neurons) > 1
+
         dialog = QDialog(self)
         dialog.setWindowTitle(
             self.language.text("dialog.neuron_edit.title")
@@ -5108,14 +5120,15 @@ class MainWindow(QMainWindow):
         type_combo.setCurrentIndex(
             type_combo.findData(neuron.neuron_type)
         )
-        form.addRow(
-            self.language.text("properties.name"),
-            name_edit
-        )
-        form.addRow(
-            self.language.text("properties.type"),
-            type_combo
-        )
+        if not multiple:
+            form.addRow(
+                self.language.text("properties.name"),
+                name_edit
+            )
+            form.addRow(
+                self.language.text("properties.type"),
+                type_combo
+            )
         form.addRow(
             self.language.text("properties.activation"),
             activation_combo
@@ -5123,7 +5136,12 @@ class MainWindow(QMainWindow):
 
         def update_activation_availability():
             activation_combo.setEnabled(
-                type_combo.currentData() != NeuronType.INPUT
+                any(
+                    selected.neuron_type != NeuronType.INPUT
+                    for selected in selected_neurons
+                )
+                if multiple
+                else type_combo.currentData() != NeuronType.INPUT
             )
 
         type_combo.currentIndexChanged.connect(
@@ -5151,11 +5169,29 @@ class MainWindow(QMainWindow):
         buttons.button(
             QDialogButtonBox.StandardButton.Apply
         ).clicked.connect(dialog.accept)
-        name_edit.returnPressed.connect(dialog.accept)
+        if not multiple:
+            name_edit.returnPressed.connect(dialog.accept)
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
 
         while dialog.exec() == QDialog.DialogCode.Accepted:
+            if multiple:
+                new_activation = activation_combo.currentText()
+                changed = False
+                for selected in selected_neurons:
+                    if (
+                        selected.neuron_type != NeuronType.INPUT
+                        and selected.activation_function != new_activation
+                    ):
+                        selected.activation_function = new_activation
+                        selected.update()
+                        changed = True
+                if changed:
+                    self.set_project_modified(True)
+                    self.refresh_current_math_display()
+                self.object_selected(neuron)
+                break
+
             new_name = name_edit.text().strip()
             duplicate = next(
                 (
@@ -7860,7 +7896,7 @@ class MainWindow(QMainWindow):
             history_entry.get("fast_mode", False)
         )
         restored_settings["weight_initialization"] = str(
-            history_entry.get("weight_initialization", "xavier")
+            history_entry.get("weight_initialization", "auto")
         )
         restored_settings["bias_initialization"] = str(
             history_entry.get("bias_initialization", "zero")
@@ -7983,7 +8019,7 @@ class MainWindow(QMainWindow):
                     result.get("fast_mode", False)
                 ),
                 "weight_initialization": str(
-                    result.get("weight_initialization", "xavier")
+                    result.get("weight_initialization", "auto")
                 ),
                 "bias_initialization": str(
                     result.get("bias_initialization", "zero")
@@ -8048,7 +8084,7 @@ class MainWindow(QMainWindow):
                 existing_entry.get("initialized", False)
             )
             updated_values["weight_initialization"] = str(
-                existing_entry.get("weight_initialization", "xavier")
+                existing_entry.get("weight_initialization", "auto")
             )
             updated_values["bias_initialization"] = str(
                 existing_entry.get("bias_initialization", "zero")

@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: trainingdialog.py
 # Zweck: Steuert Trainingsläufe, Parameter, Status und Bedienung des Trainingsfensters.
-# Letzte Änderung: 09.08.2026
+# Letzte Änderung: 20.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -136,6 +136,11 @@ class TrainingDialog(QDialog):
         self.training_settings = self.normalize_training_settings(
             training_settings
         )
+        # Ein neu geöffneter Trainingsdialog beginnt stets mit der
+        # empfohlenen aktivierungsabhängigen Gewichtsinitialisierung.
+        # Damit überschreiben ältere, im Projekt gespeicherte Xavier-
+        # Vorgaben nicht den aktuellen Standard für einen neuen Lauf.
+        self.training_settings["weight_initialization"] = "auto"
         self.is_training = False
         self.stop_requested = False
         self.network_test_dialog = None
@@ -553,8 +558,16 @@ class TrainingDialog(QDialog):
             QSizePolicy.Policy.Fixed
         )
         self.weight_initialization_combo.addItem(
-            text("training.initialization.xavier_recommended"),
+            text("training.initialization.auto_recommended"),
+            "auto"
+        )
+        self.weight_initialization_combo.addItem(
+            text("training.initialization.xavier_all"),
             "xavier"
+        )
+        self.weight_initialization_combo.addItem(
+            text("training.initialization.he_all"),
+            "he"
         )
         self.weight_initialization_combo.addItem(
             text("training.initialization.weights_zero"),
@@ -2175,7 +2188,7 @@ class TrainingDialog(QDialog):
 
         return {
             "initialize_network": False,
-            "weight_initialization": "xavier",
+            "weight_initialization": "auto",
             "bias_initialization": "zero",
             "learning_rate": 0.01,
             "momentum": 0.0,
@@ -2539,7 +2552,7 @@ class TrainingDialog(QDialog):
 
         self.initialize_network.setChecked(True)
         self.weight_initialization_combo.setCurrentIndex(
-            self.weight_initialization_combo.findData("xavier")
+            self.weight_initialization_combo.findData("auto")
         )
         self.bias_initialization_combo.setCurrentIndex(
             self.bias_initialization_combo.findData("zero")
@@ -4200,9 +4213,8 @@ class TrainingDialog(QDialog):
         Die Topologie bleibt unverändert.
         """
 
-        use_random_weights = (
-            self.weight_initialization_combo.currentData()
-            == "xavier"
+        weight_method = str(
+            self.weight_initialization_combo.currentData() or "auto"
         )
 
         use_random_bias = (
@@ -4211,7 +4223,7 @@ class TrainingDialog(QDialog):
         )
 
         for connection in self.network.get_connections():
-            if use_random_weights:
+            if weight_method != "zero":
                 source_neuron = connection.source_neuron
                 target_neuron = connection.target_neuron
 
@@ -4229,18 +4241,21 @@ class TrainingDialog(QDialog):
                     )
                 )
 
-                limit = math.sqrt(
-                    6.0
-                    / (
-                        fan_in
-                        + fan_out
+                use_he = (
+                    weight_method == "he"
+                    or (
+                        weight_method == "auto"
+                        and str(target_neuron.activation_function).casefold()
+                        == "relu"
                     )
                 )
-
-                connection.weight = random.uniform(
-                    -limit,
-                    limit
-                )
+                if use_he:
+                    connection.weight = random.gauss(
+                        0.0, math.sqrt(2.0 / fan_in)
+                    )
+                else:
+                    limit = math.sqrt(6.0 / (fan_in + fan_out))
+                    connection.weight = random.uniform(-limit, limit)
 
             else:
                 connection.weight = 0.0
@@ -4297,9 +4312,7 @@ class TrainingDialog(QDialog):
                 {
                     "initialization_completed": True,
                     "weight_initialization": (
-                        "xavier"
-                        if use_random_weights
-                        else "zero"
+                        weight_method
                     ),
                     "bias_initialization": (
                         "xavier"
@@ -4528,11 +4541,19 @@ class TrainingDialog(QDialog):
         elif not continue_existing and self.initialize_network.isChecked():
             self.initialize_network_parameters()
 
-            weight_text = (
-                self.language.text("training.status.xavier_weights")
-                if self.weight_initialization_combo.currentData()
-                == "xavier"
-                else self.language.text("training.status.zero_weights")
+            weight_method = str(
+                self.weight_initialization_combo.currentData() or "auto"
+            )
+            weight_status_keys = {
+                "auto": "training.status.auto_weights",
+                "xavier": "training.status.xavier_weights",
+                "he": "training.status.he_weights",
+                "zero": "training.status.zero_weights",
+            }
+            weight_text = self.language.text(
+                weight_status_keys.get(
+                    weight_method, "training.status.auto_weights"
+                )
             )
 
             bias_text = (

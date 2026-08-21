@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: editorscene.py
 # Zweck: Verwaltet Netzwerkobjekte, Auswahl und Bearbeitung auf der Zeichenfläche.
-# Letzte Änderung: 05.08.2026
+# Letzte Änderung: 20.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -1057,8 +1057,11 @@ class EditorScene(QGraphicsScene):
             return
 
         if action == edit_action:
-            self.clearSelection()
-            item.setSelected(True)
+            # Eine bestehende Mehrfachauswahl bleibt beim Rechtsklick auf
+            # eines ihrer Elemente erhalten.
+            if item not in self.selectedItems():
+                self.clearSelection()
+                item.setSelected(True)
             if isinstance(item, Neuron):
                 self.edit_neuron_requested.emit(item)
             elif isinstance(item, CommentItem):

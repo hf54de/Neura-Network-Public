@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: graphicalexperimentdialog.py
 # Zweck: Stellt ein frei gestaltbares grafisches Bedienpult für Netzwerkexperimente bereit.
-# Letzte Änderung: 17.08.2026
+# Letzte Änderung: 21.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -71,10 +71,50 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from colorpalette import choose_color, restore_custom_colors, save_custom_colors
 
 from numberformat import format_number
 from trainingdataio import TrainingDataIO
 from activationfunctions import ActivationFunctions
+
+
+def show_yellow_information_dialog(parent, title, text, close_text):
+    """Zeigt einen einheitlichen, gut lesbaren Informationsdialog an."""
+
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(str(title))
+    dialog.setModal(True)
+    dialog.setMinimumWidth(500)
+
+    layout = QVBoxLayout(dialog)
+    layout.setContentsMargins(12, 12, 12, 12)
+    layout.setSpacing(10)
+
+    information = QLabel(str(text), dialog)
+    information.setWordWrap(True)
+    information.setTextInteractionFlags(
+        Qt.TextInteractionFlag.TextSelectableByMouse
+    )
+    information.setStyleSheet(
+        "QLabel {"
+        " background-color: #fff8d8;"
+        " color: #202020;"
+        " border: 1px solid #d8b34f;"
+        " border-radius: 5px;"
+        " padding: 12px;"
+        "}"
+    )
+    layout.addWidget(information)
+
+    button_row = QHBoxLayout()
+    button_row.addStretch(1)
+    close_button = QPushButton(str(close_text), dialog)
+    close_button.clicked.connect(dialog.accept)
+    button_row.addWidget(close_button)
+    layout.addLayout(button_row)
+
+    dialog.adjustSize()
+    dialog.exec()
 
 
 class ForwardCalculationBridge(QObject):
@@ -504,6 +544,9 @@ class SimplifiedNetworkCard(ExperimentCard):
         self.visible_tooltip_neuron_id = None
         self.pinned_neuron_id = None
         self.reset_focus_rect = QRectF()
+        self.formula_rect = QRectF()
+        self.formula_info_rect = QRectF()
+        self.formula_tooltip = ""
         self.node_hit_areas = []
         self.connection_hit_areas = []
         # Die Netzstruktur ändert sich während eines Experiments nicht. Sie
@@ -616,6 +659,78 @@ class SimplifiedNetworkCard(ExperimentCard):
     def update_network_state(self):
         if not self.repaint_timer.isActive():
             self.repaint_timer.start()
+
+    def calculation_text(self, neuron_id):
+        """Liefert Kurzform und Details der aktuellen Neuronenberechnung."""
+
+        neuron = next(
+            (
+                item
+                for layer in self.cached_layers
+                for item in layer
+                if item.id == neuron_id
+            ),
+            None,
+        )
+        if neuron is None:
+            return "", ""
+        output_value = float(getattr(neuron, "output_value", 0.0))
+        neuron_label = self.neuron_id_text(neuron)
+        if neuron in self.cached_inputs:
+            input_value = float(getattr(neuron, "input_value", output_value))
+            short_text = self.translate(
+                f"{neuron_label}: X = {format_number(input_value, 6)} → "
+                f"Y = {format_number(output_value, 6)}",
+                f"{neuron_label}: X = {format_number(input_value, 6)} → "
+                f"Y = {format_number(output_value, 6)}",
+            )
+            tooltip = self.translate(
+                f"{neuron_label} ist ein Eingabeneuron.\n"
+                f"Der Eingangswert X = {format_number(input_value, 8)} wird als "
+                f"Ausgabewert Y = {format_number(output_value, 8)} weitergegeben.",
+                f"{neuron_label} is an input neuron.\n"
+                f"Input value X = {format_number(input_value, 8)} is passed on as "
+                f"output value Y = {format_number(output_value, 8)}.",
+            )
+            return short_text, tooltip
+
+        bias = float(getattr(neuron, "bias", 0.0))
+        terms = []
+        weighted_sum = bias
+        for connection in getattr(neuron, "incoming_connections", []):
+            source = connection.source_neuron
+            source_value = float(getattr(source, "output_value", 0.0))
+            weight = float(getattr(connection, "weight", 0.0))
+            contribution = source_value * weight
+            weighted_sum += contribution
+            terms.append(
+                f"{self.neuron_id_text(source)}.Y "
+                f"({format_number(source_value, 6)}) × "
+                f"W{connection.id} ({format_number(weight, 6)})"
+            )
+        activation = str(getattr(neuron, "activation_function", "Linear"))
+        short_text = (
+            f"{neuron_label}: Σ = {format_number(weighted_sum, 6)}  →  "
+            f"{activation}(Σ) = {format_number(output_value, 6)}"
+        )
+        expression = " + ".join(terms)
+        if expression:
+            expression += " + "
+        expression += self.translate(
+            f"Bias ({format_number(bias, 6)})",
+            f"bias ({format_number(bias, 6)})",
+        )
+        tooltip = self.translate(
+            f"Berechnung für {neuron_label}\n"
+            f"Σ = {expression}\n"
+            f"Σ = {format_number(weighted_sum, 8)}\n"
+            f"Y = {activation}(Σ) = {format_number(output_value, 8)}",
+            f"Calculation for {neuron_label}\n"
+            f"Σ = {expression}\n"
+            f"Σ = {format_number(weighted_sum, 8)}\n"
+            f"Y = {activation}(Σ) = {format_number(output_value, 8)}",
+        )
+        return short_text, tooltip
 
     def paintEvent(self, event):
         super().paintEvent(event)
@@ -744,47 +859,102 @@ class SimplifiedNetworkCard(ExperimentCard):
 
         if weight_labels:
             label_font = painter.font()
-            natural_label_size = max(7.0, min(10.0, radius * 0.82))
+            natural_label_size = max(6.0, min(8.0, radius * 0.62))
             if view_zoom < 0.75:
                 natural_label_size = max(
                     natural_label_size,
-                    min(48.0, 8.0 / view_zoom),
+                    min(36.0, 7.0 / view_zoom),
                 )
             label_font.setPixelSize(round(natural_label_size))
             painter.setFont(label_font)
-            label_height = max(14.0, painter.fontMetrics().height() + 4.0)
+            label_height = max(11.0, painter.fontMetrics().height() + 2.0)
             focused_center = positions.get(focus_id)
-            for start, end, connection, color in weight_labels:
-                painter.setPen(QPen(color, 1.0))
-                text = format_number(connection.weight, 3)
-                if focused_center is not None:
-                    other = (
-                        end
-                        if connection.source_neuron.id == focus_id
-                        else start
+
+            def other_endpoint(label_data):
+                start, end, connection, _color = label_data
+                return (
+                    end
+                    if connection.source_neuron.id == focus_id
+                    else start
+                )
+
+            # Die Werte werden je Seite in einer eigenen, gleichmaessig
+            # verteilten Spalte angeordnet. Damit bleiben sie auch bei
+            # mehreren Hidden-Schichten getrennt.
+            side_groups = {"left": [], "right": []}
+            for label_data in weight_labels:
+                side = (
+                    "left"
+                    if other_endpoint(label_data).x() < focused_center.x()
+                    else "right"
+                )
+                side_groups[side].append(label_data)
+
+            for labels in side_groups.values():
+                labels.sort(key=lambda item: other_endpoint(item).y())
+                if not labels:
+                    continue
+                top = card_rect.top() + label_height / 2.0 + 5.0
+                bottom = card_rect.bottom() - label_height / 2.0 - 5.0
+                minimum_step = label_height + 1.0
+                desired_y = [other_endpoint(item).y() for item in labels]
+                if len(labels) > 1 and (
+                    any(
+                        desired_y[index] - desired_y[index - 1] < minimum_step
+                        for index in range(1, len(desired_y))
                     )
-                    label_center = other + (focused_center - other) * 0.28
+                    or desired_y[0] < top
+                    or desired_y[-1] > bottom
+                ):
+                    step = min(
+                        minimum_step,
+                        max(1.0, (bottom - top) / (len(labels) - 1)),
+                    )
+                    group_height = step * (len(labels) - 1)
+                    group_top = max(
+                        top,
+                        min(
+                            sum(desired_y) / len(desired_y) - group_height / 2.0,
+                            bottom - group_height,
+                        ),
+                    )
+                    desired_y = [
+                        group_top + index * step
+                        for index in range(len(labels))
+                    ]
+
+                for label_data, label_y in zip(labels, desired_y):
+                    _start, _end, connection, color = label_data
+                    other = other_endpoint(label_data)
+                    text = format_number(connection.weight, 3)
                     text_width = painter.fontMetrics().horizontalAdvance(text)
+                    # Naeher an der aeusseren Schicht ist zwischen den
+                    # benachbarten Linien mehr freier Raum.
+                    column_x = other.x() + (
+                        focused_center.x() - other.x()
+                    ) * 0.38
                     label_rect = QRectF(
-                        label_center.x() - text_width / 2.0 - 3.0,
-                        label_center.y() - label_height / 2.0,
-                        text_width + 6.0,
+                        column_x - text_width / 2.0 - 2.0,
+                        label_y - label_height / 2.0,
+                        text_width + 4.0,
                         label_height,
                     )
+                    label_rect.moveLeft(max(
+                        card_rect.left() + 3.0,
+                        min(
+                            label_rect.left(),
+                            card_rect.right() - label_rect.width() - 3.0,
+                        ),
+                    ))
                     background = QColor(self.card_color)
                     background.setAlpha(225)
                     painter.fillRect(label_rect, background)
-                    alignment = Qt.AlignmentFlag.AlignCenter
-                else:
-                    middle = (start + end) / 2.0
-                    label_rect = QRectF(
-                        middle.x() - 31.0,
-                        middle.y() - label_height / 2.0,
-                        62.0,
-                        label_height,
+                    painter.setPen(QPen(color, 1.0))
+                    painter.drawText(
+                        label_rect,
+                        Qt.AlignmentFlag.AlignCenter,
+                        text,
                     )
-                    alignment = Qt.AlignmentFlag.AlignCenter
-                painter.drawText(label_rect, alignment, text)
 
         strongest = max(outputs, key=lambda neuron: neuron.output_value, default=None)
         for layer in layers:
@@ -953,6 +1123,9 @@ class SimplifiedNetworkCard(ExperimentCard):
                 )
 
         self.reset_focus_rect = QRectF()
+        self.formula_rect = QRectF()
+        self.formula_info_rect = QRectF()
+        self.formula_tooltip = ""
         if self.pinned_neuron_id is not None:
             button_text = self.translate("Alle", "All")
             button_font = painter.font()
@@ -977,6 +1150,54 @@ class SimplifiedNetworkCard(ExperimentCard):
                 Qt.AlignmentFlag.AlignCenter,
                 button_text,
             )
+            formula_text, self.formula_tooltip = self.calculation_text(
+                self.pinned_neuron_id
+            )
+            info_size = self.reset_focus_rect.height()
+            self.formula_info_rect = QRectF(
+                self.reset_focus_rect.left() - info_size - 7.0,
+                self.reset_focus_rect.top(),
+                info_size,
+                info_size,
+            )
+            painter.setPen(QPen(QColor("#707880"), 1.0))
+            painter.setBrush(QColor(self.card_color).lighter(118))
+            painter.drawRoundedRect(self.formula_info_rect, 4.0, 4.0)
+            info_font = painter.font()
+            info_font.setBold(True)
+            info_font.setPixelSize(9)
+            painter.setFont(info_font)
+            painter.setPen(QPen(self.text_color, 1.0))
+            painter.drawText(
+                self.formula_info_rect,
+                Qt.AlignmentFlag.AlignCenter,
+                "i",
+            )
+            painter.setFont(button_font)
+            formula_left = QRectF(self.rect()).left() + 9.0
+            formula_right = self.formula_info_rect.left() - 7.0
+            if formula_text and formula_right - formula_left >= 80.0:
+                self.formula_rect = QRectF(
+                    formula_left,
+                    self.reset_focus_rect.top(),
+                    formula_right - formula_left,
+                    self.reset_focus_rect.height(),
+                )
+                painter.setPen(QPen(QColor("#707880"), 1.0))
+                painter.setBrush(QColor(self.card_color).lighter(112))
+                painter.drawRoundedRect(self.formula_rect, 4.0, 4.0)
+                painter.setPen(QPen(self.text_color, 1.0))
+                elided_text = painter.fontMetrics().elidedText(
+                    formula_text,
+                    Qt.TextElideMode.ElideRight,
+                    max(1, round(self.formula_rect.width() - 12.0)),
+                )
+                painter.drawText(
+                    self.formula_rect.adjusted(6.0, 0.0, -6.0, 0.0),
+                    Qt.AlignmentFlag.AlignVCenter
+                    | Qt.AlignmentFlag.AlignLeft,
+                    elided_text,
+                )
 
     @staticmethod
     def point_segment_distance(point, start, end):
@@ -1002,6 +1223,11 @@ class SimplifiedNetworkCard(ExperimentCard):
             and self.reset_focus_rect.contains(point)
             else ""
         )
+        if self.formula_info_rect.contains(point):
+            tooltip = self.translate(
+                "Vollständigen Rechenweg anzeigen",
+                "Show complete calculation",
+            )
         hovered_neuron_id = None
         hovered_center = None
         hovered_radius = 0.0
@@ -1012,10 +1238,16 @@ class SimplifiedNetworkCard(ExperimentCard):
                 hovered_center = center
                 hovered_radius = radius
                 neuron_id = self.neuron_id_text(neuron)
+                neuron_kind = str(getattr(neuron, "neuron_type", "")).lower()
+                display_name = (
+                    self.translate("Hidden", "Hidden")
+                    if "hidden" in neuron_kind
+                    else neuron.name
+                )
                 neuron_tooltip = self.translate(
-                    f"{neuron_id} – {neuron.name}\n"
+                    f"{neuron_id} – {display_name}\n"
                     f"Ausgabewert: {format_number(neuron.output_value, 8)}",
-                    f"{neuron_id} – {neuron.name}\n"
+                    f"{neuron_id} – {display_name}\n"
                     f"Output value: {format_number(neuron.output_value, 8)}",
                 )
                 tooltip = neuron_tooltip
@@ -1096,6 +1328,9 @@ class SimplifiedNetworkCard(ExperimentCard):
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             point = event.position()
+            if self.show_formula_information_at(point):
+                event.accept()
+                return
             if self.clear_focus_at(point):
                 event.accept()
                 return
@@ -1115,6 +1350,40 @@ class SimplifiedNetworkCard(ExperimentCard):
                 self.update()
                 return True
         return False
+
+    def show_formula_information_at(self, point):
+        """Zeigt den vollständigen Rechenweg des fixierten Neurons an."""
+
+        if (
+            self.pinned_neuron_id is None
+            or not self.formula_tooltip
+            or not self.formula_info_rect.contains(QPointF(point))
+        ):
+            return False
+
+        # Die Netzwerkkarte liegt als Widget in einem QGraphicsProxyWidget.
+        # self.window() liefert dort nicht zuverlässig den eigentlichen
+        # Anwendungsdialog als Elternfenster. Ein Dialog mit diesem falschen
+        # Parent kann von Qt in die Szene eingebettet werden und dadurch die
+        # Anwendungsansicht überdecken bzw. deren Layout verändern.
+        dialog_parent = None
+        proxy = self.graphicsProxyWidget()
+        if proxy is not None and proxy.scene() is not None:
+            views = proxy.scene().views()
+            if views:
+                dialog_parent = views[0].window()
+        if dialog_parent is None:
+            dialog_parent = self.parentWidget() or self.window()
+
+        QToolTip.hideText()
+        self.setToolTip("")
+        show_yellow_information_dialog(
+            dialog_parent,
+            self.translate("Rechenweg", "Calculation"),
+            self.formula_tooltip,
+            self.translate("Schließen", "Close"),
+        )
+        return True
 
     def clear_focus_at(self, point):
         """Hebt eine fixierte Neuronenauswahl über die kleine Alle-Taste auf."""
@@ -1208,7 +1477,7 @@ class CommentEditDialog(QDialog):
         layout.addWidget(buttons)
 
     def choose_font_color(self):
-        color = QColorDialog.getColor(self.font_color, self)
+        color = choose_color(self.font_color, self)
         if color.isValid():
             self.font_color = color
             self.update_color_button()
@@ -1736,6 +2005,26 @@ class ExperimentCanvasView(QGraphicsView):
         ):
             event.accept()
             return
+        if event.button() == Qt.MouseButton.LeftButton:
+            # Die vereinfachte Netzwerkansicht liegt als Widget in einem
+            # QGraphicsProxyWidget. Ein erster Klick wurde bislang von der
+            # Szene als Auswahl der gesamten Kachel verarbeitet; erst der
+            # zweite Klick erreichte das Neuron. Den Neuronentreffer deshalb
+            # bereits hier, vor der normalen Szenenbehandlung, auswerten.
+            scene_point = self.mapToScene(event.pos())
+            item = self.itemAt(event.pos())
+            while item is not None and not isinstance(item, MovableCardProxy):
+                item = item.parentItem()
+            if isinstance(item, MovableCardProxy) and item.card_role == "network_view":
+                card = item.widget()
+                if isinstance(card, SimplifiedNetworkCard):
+                    local_point = item.mapFromScene(scene_point)
+                    if (
+                        card.clear_focus_at(QPointF(local_point))
+                        or card.pin_neuron_at(QPointF(local_point))
+                    ):
+                        event.accept()
+                        return
         if event.button() == Qt.MouseButton.LeftButton:
             self.rubber_band_started_on_empty_space = self.itemAt(event.pos()) is None
             if self.rubber_band_started_on_empty_space:
@@ -2628,6 +2917,19 @@ class MovableCardProxy(QGraphicsProxyWidget):
 
     def mousePressEvent(self, event):
         if (
+            self.card_role == "network_view"
+            and event.button() == Qt.MouseButton.LeftButton
+        ):
+            card = self.widget()
+            if isinstance(card, SimplifiedNetworkCard):
+                # QGraphicsProxyWidget kann den ersten Klick selbst erhalten,
+                # bevor er an das eingebettete Widget weitergereicht wird.
+                # Daher die Neuronenauswahl bereits hier auswerten.
+                local_point = QPointF(event.pos())
+                if card.clear_focus_at(local_point) or card.pin_neuron_at(local_point):
+                    event.accept()
+                    return
+        if (
             self.editable
             and event.button() == Qt.MouseButton.RightButton
         ):
@@ -2891,7 +3193,19 @@ class MovableCardProxy(QGraphicsProxyWidget):
         ):
             card = self.widget()
             if isinstance(card, SimplifiedNetworkCard):
-                local_point = card.mapFromGlobal(event.globalPosition().toPoint())
+                # Das Widget steckt in einem zoombaren QGraphicsProxyWidget.
+                # Der Klick wird deshalb ueber Viewport und Szene in die
+                # lokalen Kartenkoordinaten umgerechnet.
+                if view is not None:
+                    viewport_point = view.viewport().mapFromGlobal(
+                        event.globalPosition().toPoint()
+                    )
+                    scene_point = view.mapToScene(viewport_point)
+                    local_point = self.mapFromScene(scene_point)
+                else:
+                    local_point = QPointF(card.mapFromGlobal(
+                        event.globalPosition().toPoint()
+                    ))
                 if card.clear_focus_at(QPointF(local_point)):
                     return True
                 if card.pin_neuron_at(QPointF(local_point)):
@@ -3538,7 +3852,7 @@ class GraphicalExperimentDialog(QDialog):
         return german if language.startswith("de") else english
 
     def show_view_information(self):
-        QMessageBox.information(
+        show_yellow_information_dialog(
             self,
             self.tr(
                 "Wozu dient die Anwendungsansicht?",
@@ -3561,6 +3875,7 @@ class GraphicalExperimentDialog(QDialog):
                 "Background images and labels connect the network to a practical "
                 "application.",
             ),
+            self.tr("Schließen", "Close"),
         )
 
     def parent_with_method(self, method_name):
@@ -3896,7 +4211,7 @@ class GraphicalExperimentDialog(QDialog):
             if isinstance(shape, DesignShapeItem)
         ] or [item]
         if selected == line_color_action:
-            color = QColorDialog.getColor(item.line_color, self, self.tr("Linienfarbe", "Line color"))
+            color = choose_color(item.line_color, self, self.tr("Linienfarbe", "Line color"))
             if color.isValid():
                 self.begin_history_action()
                 for shape in targets:
@@ -3943,7 +4258,7 @@ class GraphicalExperimentDialog(QDialog):
             self.finish_history_action()
         elif fill_color_action is not None and selected == fill_color_action:
             initial = item.fill_color or QColor("#ffffff")
-            color = QColorDialog.getColor(initial, self, self.tr("Füllfarbe", "Fill color"))
+            color = choose_color(initial, self, self.tr("Füllfarbe", "Fill color"))
             if color.isValid():
                 self.begin_history_action()
                 for shape in targets:
@@ -4385,27 +4700,11 @@ class GraphicalExperimentDialog(QDialog):
 
     @staticmethod
     def restore_custom_card_colors():
-        settings = QSettings("NeuronNetz", "NeuronNetz")
-        stored = settings.value("graphical_experiment/custom_card_colors", [])
-        if isinstance(stored, str):
-            stored = [stored]
-        for index, value in enumerate(list(stored or [])):
-            if index >= QColorDialog.customCount():
-                break
-            color = QColor(str(value))
-            if color.isValid():
-                QColorDialog.setCustomColor(index, color)
+        restore_custom_colors()
 
     @staticmethod
     def save_custom_card_colors():
-        colors = []
-        for index in range(QColorDialog.customCount()):
-            color = QColor(QColorDialog.customColor(index))
-            colors.append(color.name() if color.isValid() else "")
-        QSettings("NeuronNetz", "NeuronNetz").setValue(
-            "graphical_experiment/custom_card_colors",
-            colors,
-        )
+        save_custom_colors()
 
     def equalize_selected_size(self, dimension):
         selected = self.selected_card_proxies()
@@ -5464,7 +5763,7 @@ class GraphicalExperimentDialog(QDialog):
         self.finish_history_action()
 
     def choose_background_color(self):
-        color = QColorDialog.getColor(
+        color = choose_color(
             QColor(self.background_color),
             self,
             self.tr("Hintergrundfarbe", "Background color"),

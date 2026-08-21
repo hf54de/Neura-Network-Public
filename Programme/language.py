@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: language.py
 # Zweck: Verwaltet Übersetzungen und sprachabhängige Programmtexte.
-# Letzte Änderung: 10.08.2026
+# Letzte Änderung: 20.08.2026
 # Copyright © 2026 Helwig Fülling
 # -------------------------------------------------------------------------------------------------
 import json
@@ -690,6 +690,10 @@ class LanguageManager:
         "training.initialization.weights": "Weights:",
         "training.initialization.bias": "Bias:",
         "training.initialization.xavier_recommended": "Xavier/Glorot (recommended)",
+        "training.initialization.auto_recommended": "Automatic by activation function (recommended)",
+        "training.initialization.xavier_all": "Xavier/Glorot for all",
+        "training.initialization.he_all": "He for all",
+        "training.initialization.auto_short": "Automatic by activation",
         "training.initialization.weights_zero": "Set all weights to 0 (testing only)",
         "training.initialization.bias_zero": "Set bias to 0 (recommended)",
         "training.initialization.xavier": "Xavier/Glorot",
@@ -706,7 +710,7 @@ class LanguageManager:
         "training.info.initialization.title": "Starting a new training run",
         "training.info.parameters.title": "Training parameters",
         "training.info.parameters.text": "The learning rate determines the size of the direct parameter change.\n\nMomentum adds part of the preceding change to the new change. A value of 0 disables momentum and preserves the previous training behaviour. High values can accelerate learning but may also cause overshooting or oscillation.\n\nThe error limit is the target mean epoch error. Maximum epochs limits the total duration of the run.",
-        "training.info.initialization.text": "Reinitializing discards the currently learned weights and bias values before a new run.\n\nXavier/Glorot assigns small, varied starting weights according to the number of connections. This usually keeps signals stable and lets neurons learn differently.\n\nA bias of 0 is a neutral starting point. Random bias values are normally unnecessary because the different weights already break symmetry.\n\nThese settings apply only to a newly initialized run. They are ignored when a run is resumed.",
+        "training.info.initialization.text": "Reinitializing discards the currently learned weights and bias values before a new run.\n\nAutomatic by activation function uses He initialization for connections entering ReLU neurons and Xavier/Glorot for all other target neurons. This is the recommended choice for mixed networks.\n\nXavier/Glorot for all is suited especially to sigmoid and tanh neurons. He for all is intended primarily for networks made predominantly of ReLU neurons.\n\nBias initialization is selected separately. Bias = 0 is a neutral starting point.\n\nThese settings apply only to a newly initialized run. They are ignored when a run is resumed.",
         "training.info.execution.title": "Execution and display",
         "training.info.execution.text": "Fast mode performs the same mathematical training but refreshes the visible display less often.\n\nLive network monitoring shows changing neuron values and weights and may slow training.\n\nThe error-curve option controls only the live chart. Compact genuine measurements for training history continue to be recorded when the chart is hidden.",
         "training.info.error_chart.title": "Understanding the error curve",
@@ -926,6 +930,8 @@ class LanguageManager:
         "training.status.progress": "Epoch {epoch} / {total_epochs}, record {record} / {total_records}",
         "training.status.not_started": "Training not started",
         "training.status.xavier_weights": "random Xavier weights",
+        "training.status.auto_weights": "weights selected automatically by activation",
+        "training.status.he_weights": "random He weights",
         "training.status.zero_weights": "weights = 0",
         "training.status.random_bias": "random bias values",
         "training.status.zero_bias": "bias = 0",

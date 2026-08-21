@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: mathematicsdialog.py
 # Zweck: Erklärt Lernschritte und Berechnungen im geführten Mathematikmodus.
-# Letzte Änderung: 08.08.2026
+# Letzte Änderung: 20.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -462,7 +462,13 @@ class MathematicsDialog(QDialog):
         self.weight_initialization_combo = QComboBox()
         self.weight_initialization_combo.setMaximumWidth(250)
         self.weight_initialization_combo.addItem(
-            self.t("training.initialization.xavier_recommended"), "xavier"
+            self.t("training.initialization.auto_recommended"), "auto"
+        )
+        self.weight_initialization_combo.addItem(
+            self.t("training.initialization.xavier_all"), "xavier"
+        )
+        self.weight_initialization_combo.addItem(
+            self.t("training.initialization.he_all"), "he"
         )
         self.weight_initialization_combo.addItem(
             self.t("training.initialization.weights_zero"), "zero"
@@ -719,13 +725,18 @@ class MathematicsDialog(QDialog):
             )
             return
         if self.initialize_radio.isChecked():
+            weight_method = str(
+                self.weight_initialization_combo.currentData() or "auto"
+            )
+            weight_texts = {
+                "auto": self.t("training.initialization.auto_short"),
+                "xavier": "Xavier/Glorot",
+                "he": "He",
+                "zero": self.t("math.source.zero_weights"),
+            }
             start = self.t(
                 "math.source.initialization_summary",
-                weights=(
-                    "Xavier/Glorot"
-                    if self.weight_initialization_combo.currentData() == "xavier"
-                    else self.t("math.source.zero_weights")
-                ),
+                weights=weight_texts.get(weight_method, weight_texts["auto"]),
                 bias=(
                     "Xavier/Glorot"
                     if self.bias_initialization_combo.currentData() == "xavier"
@@ -837,14 +848,25 @@ class MathematicsDialog(QDialog):
             )
 
     def initialize_parameters(self):
-        random_weights = self.weight_initialization_combo.currentData() == "xavier"
+        weight_method = str(self.weight_initialization_combo.currentData() or "auto")
         random_bias = self.bias_initialization_combo.currentData() == "xavier"
         for connection in self.network.get_connections():
-            if random_weights:
+            if weight_method != "zero":
                 fan_in = max(1, len(connection.target_neuron.incoming_connections))
                 fan_out = max(1, len(connection.source_neuron.outgoing_connections))
-                limit = math.sqrt(6.0 / (fan_in + fan_out))
-                connection.weight = random.uniform(-limit, limit)
+                use_he = (
+                    weight_method == "he"
+                    or (
+                        weight_method == "auto"
+                        and str(connection.target_neuron.activation_function).casefold()
+                        == "relu"
+                    )
+                )
+                if use_he:
+                    connection.weight = random.gauss(0.0, math.sqrt(2.0 / fan_in))
+                else:
+                    limit = math.sqrt(6.0 / (fan_in + fan_out))
+                    connection.weight = random.uniform(-limit, limit)
             else:
                 connection.weight = 0.0
         for neuron in self.network.get_neurons():

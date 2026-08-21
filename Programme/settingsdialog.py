@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: settingsdialog.py
 # Zweck: Stellt die Seiten und Bedienelemente der Programmeinstellungen bereit.
-# Letzte Änderung: 05.08.2026
+# Letzte Änderung: 20.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget
 )
+from colorpalette import choose_color
 
 
 class ColorButton(QPushButton):
@@ -65,7 +66,7 @@ class ColorButton(QPushButton):
             )
 
     def choose_color(self):
-        color = QColorDialog.getColor(
+        color = choose_color(
             QColor(self.color_text),
             self,
             self.language_manager.text(
