@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: graphicalexperimentdialog.py
 # Zweck: Stellt ein frei gestaltbares grafisches Bedienpult für Netzwerkexperimente bereit.
-# Letzte Änderung: 21.08.2026
+# Letzte Änderung: 31.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -27,6 +27,8 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QCursor,
+    QFontDatabase,
     QKeySequence,
     QPainter,
     QPainterPath,
@@ -65,6 +67,8 @@ from PySide6.QtWidgets import (
     QSlider,
     QSpinBox,
     QStackedWidget,
+    QTableWidget,
+    QTableWidgetItem,
     QToolButton,
     QToolTip,
     QTextEdit,
@@ -547,6 +551,7 @@ class SimplifiedNetworkCard(ExperimentCard):
         self.formula_rect = QRectF()
         self.formula_info_rect = QRectF()
         self.formula_tooltip = ""
+        self.formula_details = {}
         self.node_hit_areas = []
         self.connection_hit_areas = []
         # Die Netzstruktur ändert sich während eines Experiments nicht. Sie
@@ -663,6 +668,8 @@ class SimplifiedNetworkCard(ExperimentCard):
     def calculation_text(self, neuron_id):
         """Liefert Kurzform und Details der aktuellen Neuronenberechnung."""
 
+        self.formula_details = {}
+
         neuron = next(
             (
                 item
@@ -692,10 +699,17 @@ class SimplifiedNetworkCard(ExperimentCard):
                 f"Input value X = {format_number(input_value, 8)} is passed on as "
                 f"output value Y = {format_number(output_value, 8)}.",
             )
+            self.formula_details = {
+                "kind": "input",
+                "neuron": neuron_label,
+                "input": input_value,
+                "output": output_value,
+            }
             return short_text, tooltip
 
         bias = float(getattr(neuron, "bias", 0.0))
         terms = []
+        contribution_rows = []
         weighted_sum = bias
         for connection in getattr(neuron, "incoming_connections", []):
             source = connection.source_neuron
@@ -708,7 +722,33 @@ class SimplifiedNetworkCard(ExperimentCard):
                 f"({format_number(source_value, 6)}) × "
                 f"W{connection.id} ({format_number(weight, 6)})"
             )
+            contribution_rows.append(
+                (
+                    self.neuron_id_text(source),
+                    source_value,
+                    f"W{connection.id}",
+                    weight,
+                    contribution,
+                )
+            )
         activation = str(getattr(neuron, "activation_function", "Linear"))
+        raw_output = None
+        raw_output_unit = ""
+        if neuron in self.cached_outputs:
+            mapping = self.output_mappings.get(neuron.id, {})
+            calibration = TrainingDataIO.normalize_calibration(
+                mapping.get("calibration")
+            )
+            if (
+                mapping.get("data_type") != "binary"
+                and calibration["mode"] != "none"
+            ):
+                raw_output = TrainingDataIO.unscale_value(
+                    output_value,
+                    calibration,
+                    getattr(self.translate, "text", None),
+                )
+                raw_output_unit = str(mapping.get("unit") or "")
         short_text = (
             f"{neuron_label}: Σ = {format_number(weighted_sum, 6)}  →  "
             f"{activation}(Σ) = {format_number(output_value, 6)}"
@@ -730,6 +770,18 @@ class SimplifiedNetworkCard(ExperimentCard):
             f"Σ = {format_number(weighted_sum, 8)}\n"
             f"Y = {activation}(Σ) = {format_number(output_value, 8)}",
         )
+        self.formula_details = {
+            "kind": "calculation",
+            "neuron": neuron_label,
+            "rows": contribution_rows,
+            "contribution_sum": sum(row[4] for row in contribution_rows),
+            "bias": bias,
+            "sum": weighted_sum,
+            "activation": activation,
+            "output": output_value,
+            "raw_output": raw_output,
+            "raw_output_unit": raw_output_unit,
+        }
         return short_text, tooltip
 
     def paintEvent(self, event):
@@ -1377,13 +1429,139 @@ class SimplifiedNetworkCard(ExperimentCard):
 
         QToolTip.hideText()
         self.setToolTip("")
-        show_yellow_information_dialog(
-            dialog_parent,
-            self.translate("Rechenweg", "Calculation"),
-            self.formula_tooltip,
-            self.translate("Schließen", "Close"),
-        )
+        self.show_structured_calculation(dialog_parent)
         return True
+
+    def show_structured_calculation(self, dialog_parent):
+        """Zeigt den Rechenweg gegliedert; nur die Beitragsliste scrollt."""
+
+        details = dict(self.formula_details or {})
+        dialog = QDialog(dialog_parent)
+        dialog.setWindowTitle(self.translate("Rechenweg", "Calculation"))
+        dialog.setModal(True)
+        dialog.setMinimumWidth(680)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        heading = QLabel(
+            self.translate(
+                f"Berechnung für {details.get('neuron', '')}",
+                f"Calculation for {details.get('neuron', '')}",
+            )
+        )
+        heading_font = heading.font()
+        heading_font.setBold(True)
+        heading.setFont(heading_font)
+        layout.addWidget(heading)
+
+        if details.get("kind") == "input":
+            explanation = QLabel(
+                self.translate(
+                    "Eingabeneuron: Der Eingangswert X wird unverändert als "
+                    "Ausgabewert Y weitergegeben.\n\n"
+                    f"X = {format_number(details.get('input', 0.0), 8)}\n"
+                    f"Y = {format_number(details.get('output', 0.0), 8)}",
+                    "Input neuron: Input value X is passed on unchanged as "
+                    "output value Y.\n\n"
+                    f"X = {format_number(details.get('input', 0.0), 8)}\n"
+                    f"Y = {format_number(details.get('output', 0.0), 8)}",
+                )
+            )
+            explanation.setStyleSheet(
+                "QLabel { background-color: #fff8d8; color: #202020; "
+                "border: 1px solid #d8b34f; border-radius: 5px; "
+                "padding: 12px; }"
+            )
+            explanation.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
+            layout.addWidget(explanation)
+        else:
+            table = QTableWidget(len(details.get("rows", [])), 5, dialog)
+            table.setHorizontalHeaderLabels(
+                self.translate(
+                    ["Quelle", "Ausgang Y", "Gewicht", "Wert W", "Beitrag Y × W"],
+                    ["Source", "Output Y", "Weight", "Value W", "Contribution Y × W"],
+                )
+            )
+            table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+            table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+            table.verticalHeader().setVisible(False)
+            table.setAlternatingRowColors(True)
+            table.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+            for row, values in enumerate(details.get("rows", [])):
+                display_values = (
+                    values[0],
+                    format_number(values[1], 8),
+                    values[2],
+                    format_number(values[3], 8),
+                    format_number(values[4], 8),
+                )
+                for column, value in enumerate(display_values):
+                    item = QTableWidgetItem(str(value))
+                    if column in (1, 3, 4):
+                        item.setTextAlignment(
+                            Qt.AlignmentFlag.AlignRight
+                            | Qt.AlignmentFlag.AlignVCenter
+                        )
+                    table.setItem(row, column, item)
+            table.resizeColumnsToContents()
+            row_height = table.verticalHeader().defaultSectionSize()
+            visible_rows = min(9, max(1, table.rowCount()))
+            table.setMinimumHeight(105)
+            table.setMaximumHeight(
+                table.horizontalHeader().height() + visible_rows * row_height + 8
+            )
+            layout.addWidget(table)
+
+            german_summary = (
+                f"Summe der Beiträge: "
+                f"{format_number(details.get('contribution_sum', 0.0), 8)}\n"
+                f"Bias: {format_number(details.get('bias', 0.0), 8)}\n"
+                f"Summe einschließlich Bias: Σ = "
+                f"{format_number(details.get('sum', 0.0), 8)}\n\n"
+                f"Aktivierung: {details.get('activation', 'Linear')}(Σ)\n"
+                f"Ausgang: Y = {format_number(details.get('output', 0.0), 8)}"
+            )
+            english_summary = (
+                f"Sum of contributions: "
+                f"{format_number(details.get('contribution_sum', 0.0), 8)}\n"
+                f"Bias: {format_number(details.get('bias', 0.0), 8)}\n"
+                f"Sum including bias: Σ = "
+                f"{format_number(details.get('sum', 0.0), 8)}\n\n"
+                f"Activation: {details.get('activation', 'Linear')}(Σ)\n"
+                f"Output: Y = {format_number(details.get('output', 0.0), 8)}"
+            )
+            if details.get("raw_output") is not None:
+                raw_output_text = format_number(details["raw_output"], 5)
+                raw_output_unit = str(details.get("raw_output_unit") or "")
+                if raw_output_unit:
+                    raw_output_text += f" {raw_output_unit}"
+                german_summary += (
+                    f"\nRückskalierter Ausgangswert: {raw_output_text}"
+                )
+                english_summary += (
+                    f"\nUnscaled output value: {raw_output_text}"
+                )
+            summary = QLabel(self.translate(german_summary, english_summary))
+            summary.setStyleSheet(
+                "QLabel { background-color: #fff8d8; color: #202020; "
+                "border: 1px solid #d8b34f; border-radius: 5px; "
+                "padding: 12px; }"
+            )
+            summary.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
+            layout.addWidget(summary)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.button(QDialogButtonBox.StandardButton.Close).setText(
+            self.translate("Schließen", "Close")
+        )
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        dialog.exec()
 
     def clear_focus_at(self, point):
         """Hebt eine fixierte Neuronenauswahl über die kleine Alle-Taste auf."""
@@ -1804,10 +1982,9 @@ class ExperimentCanvasView(QGraphicsView):
             if not isinstance(item, DesignShapeItem) or not item.is_connector():
                 continue
             item.selected_endpoints.clear()
-            if not item.isSelected():
-                for endpoint in ("start", "end"):
-                    if selection_rect.contains(item.endpoint_scene_position(endpoint)):
-                        item.selected_endpoints.add(endpoint)
+            for endpoint in ("start", "end"):
+                if selection_rect.contains(item.endpoint_scene_position(endpoint)):
+                    item.selected_endpoints.add(endpoint)
             item.update()
 
     def expand_scene_to_viewport(self):
@@ -1882,8 +2059,9 @@ class ExperimentCanvasView(QGraphicsView):
         elif isinstance(item, ResizableBackgroundItem):
             dialog.show_background_context_menu(item, event.globalPos())
         else:
-            dialog.show_canvas_context_menu(
-                event.globalPos(), self.mapToScene(event.pos())
+            dialog.show_empty_context_menu(
+                event.globalPos(),
+                self.mapToScene(event.pos()),
             )
         event.accept()
 
@@ -1973,6 +2151,14 @@ class ExperimentCanvasView(QGraphicsView):
         self.sync_grid_rect()
 
     def keyPressEvent(self, event):
+        dialog = self.window()
+        if (
+            event.key() == Qt.Key.Key_Escape
+            and getattr(dialog, "placement_items", [])
+        ):
+            dialog.cancel_element_placement()
+            event.accept()
+            return
         if event.key() == Qt.Key.Key_Alt and self.is_zoomed_in():
             self.viewport().setCursor(Qt.CursorShape.OpenHandCursor)
         super().keyPressEvent(event)
@@ -1983,8 +2169,19 @@ class ExperimentCanvasView(QGraphicsView):
         super().keyReleaseEvent(event)
 
     def mousePressEvent(self, event):
+        dialog = self.window()
+        if getattr(dialog, "placement_items", []):
+            if event.button() == Qt.MouseButton.LeftButton:
+                dialog.finish_element_placement(
+                    self.mapToScene(event.pos()), event.modifiers()
+                )
+                event.accept()
+                return
+            if event.button() == Qt.MouseButton.RightButton:
+                dialog.cancel_element_placement()
+                event.accept()
+                return
         if event.button() == Qt.MouseButton.RightButton:
-            dialog = self.window()
             item = self.itemAt(event.pos())
             while item is not None and not isinstance(item, MovableCardProxy):
                 item = item.parentItem()
@@ -2033,6 +2230,11 @@ class ExperimentCanvasView(QGraphicsView):
 
     def mouseMoveEvent(self, event):
         if self.continue_alt_pan(event.globalPosition().toPoint()):
+            event.accept()
+            return
+        dialog = self.window()
+        if getattr(dialog, "placement_items", []):
+            dialog.update_element_placement(self.mapToScene(event.pos()))
             event.accept()
             return
         super().mouseMoveEvent(event)
@@ -2990,31 +3192,11 @@ class MovableCardProxy(QGraphicsProxyWidget):
             item: QRectF(item.sceneBoundingRect()) for item in self.drag_start_positions
         }
         self.attached_endpoint_start_positions = {}
-        moved_card_bounds = [
-            bounds for item, bounds in self.drag_start_bounds.items()
-            if (
-                isinstance(item, MovableCardProxy)
-                and item.card_role != "network_view"
-            )
-        ]
-        if moved_card_bounds and self.scene() is not None:
-            tolerance = DesignShapeItem.HANDLE_SIZE + 4.0
-
-            def endpoint_touches_card(point, rect):
-                expanded = rect.adjusted(-tolerance, -tolerance, tolerance, tolerance)
-                if not expanded.contains(point):
-                    return False
-                if rect.contains(point):
-                    return min(
-                        abs(point.x() - rect.left()),
-                        abs(point.x() - rect.right()),
-                        abs(point.y() - rect.top()),
-                        abs(point.y() - rect.bottom()),
-                    ) <= tolerance
-                dx = max(rect.left() - point.x(), 0.0, point.x() - rect.right())
-                dy = max(rect.top() - point.y(), 0.0, point.y() - rect.bottom())
-                return math.hypot(dx, dy) <= tolerance
-
+        if self.scene() is not None:
+            # Linienenden folgen einer bewegten Auswahl ausschließlich dann,
+            # wenn der Auswahlrahmen den jeweiligen Endpunkt selbst erfasst
+            # hat. Eine räumliche Nähe oder vermeintliche Andockstelle reicht
+            # bewusst nicht aus. Das gilt einheitlich für alle Kartenarten.
             for shape in self.scene().items():
                 if (
                     not isinstance(shape, DesignShapeItem)
@@ -3022,13 +3204,10 @@ class MovableCardProxy(QGraphicsProxyWidget):
                     or shape in self.drag_start_positions
                 ):
                     continue
-                for endpoint in ("start", "end"):
-                    point = shape.endpoint_scene_position(endpoint)
-                    if any(
-                        endpoint_touches_card(point, bounds)
-                        for bounds in moved_card_bounds
-                    ):
-                        self.attached_endpoint_start_positions[(shape, endpoint)] = QPointF(point)
+                for endpoint in shape.selected_endpoints:
+                    self.attached_endpoint_start_positions[(shape, endpoint)] = (
+                        QPointF(shape.endpoint_scene_position(endpoint))
+                    )
         for item in self.drag_start_positions:
             if isinstance(item, DesignShapeItem):
                 item.begin_whole_move()
@@ -3337,6 +3516,11 @@ class GraphicalExperimentDialog(QDialog):
 
     CANVAS_WIDTH = 1200.0
     CANVAS_HEIGHT = 700.0
+    COMPACT_IO_CARD_WIDTH = 170.0
+    COMPACT_IO_CARD_HEIGHT = 50.0
+    COMPACT_IO_COLUMN_GAP = 12.0
+    COMPACT_IO_ROW_GAP = 10.0
+    COMPACT_IO_SECTION_GAP = 30.0
     SHAPE_CLIPBOARD_MIME = "application/x-neuronnetz-design-shapes+json"
 
     def __init__(
@@ -3385,6 +3569,10 @@ class GraphicalExperimentDialog(QDialog):
         self.nudge_history_active = False
         self.nudge_handles_hidden = False
         self.last_selected_card = None
+        self.placement_items = []
+        self.placement_start_positions = {}
+        self.placement_origin = QPointF()
+        self.placement_repeat_factory = None
         self.active_input_sliders = 0
         self.drag_calculation_pending = False
         self.forward_executor = ThreadPoolExecutor(
@@ -3580,20 +3768,9 @@ class GraphicalExperimentDialog(QDialog):
         )
         self.copy_shapes_action.setShortcut(QKeySequence.StandardKey.Copy)
         self.copy_shapes_action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
-        self.paste_clipboard_action = self.edit_menu.addAction(
-            self.tr("Einfügen", "Paste")
-        )
-        self.paste_clipboard_action.setShortcut(QKeySequence.StandardKey.Paste)
-        self.paste_clipboard_action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
-        self.edit_menu.addSeparator()
-        self.comment_action = self.edit_menu.addAction(
-            self.tr("Kommentar hinzufügen", "Add comment")
-        )
         self.undo_action.triggered.connect(self.undo_design_change)
         self.redo_action.triggered.connect(self.redo_design_change)
         self.copy_shapes_action.triggered.connect(self.copy_selected_shapes)
-        self.paste_clipboard_action.triggered.connect(self.paste_clipboard_content)
-        self.comment_action.triggered.connect(self.add_comment_at_visible_center)
         self.design_menu = QMenu(self)
         self.add_elements_menu = self.design_menu.addMenu(
             self.tr("Element hinzufügen", "Add element")
@@ -3638,6 +3815,11 @@ class GraphicalExperimentDialog(QDialog):
         self.add_ellipse_action = self.shape_elements_menu.addAction(
             self.tr("Kreis / Ellipse", "Circle / ellipse")
         )
+        self.paste_clipboard_action = self.add_elements_menu.addAction(
+            self.tr("Einfügen", "Paste")
+        )
+        self.paste_clipboard_action.setShortcut(QKeySequence.StandardKey.Paste)
+        self.paste_clipboard_action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
         self.design_menu.addSeparator()
         self.background_color_action = self.design_menu.addAction(
             self.tr("Hintergrundfarbe…", "Background color…")
@@ -3661,27 +3843,36 @@ class GraphicalExperimentDialog(QDialog):
         self.default_layout_action = self.design_menu.addAction(
             self.tr("Standardlayout", "Default layout")
         )
-        self.load_image_action.triggered.connect(self.load_background_image)
+        self.load_image_action.triggered.connect(
+            self.load_background_image_for_placement
+        )
         self.background_color_action.triggered.connect(self.choose_background_color)
-        self.add_comment_design_action.triggered.connect(self.add_comment_at_visible_center)
+        self.add_comment_design_action.triggered.connect(
+            self.request_comment_placement
+        )
         self.add_line_action.triggered.connect(
-            lambda: self.add_shape_at_visible_center("line")
+            lambda: self.request_shape_placement("line")
         )
         self.add_curve_action.triggered.connect(
-            lambda: self.add_shape_at_visible_center("curve")
+            lambda: self.request_shape_placement("curve")
         )
         self.add_rectangle_action.triggered.connect(
-            lambda: self.add_shape_at_visible_center("rectangle")
+            lambda: self.request_shape_placement("rectangle")
         )
         self.add_ellipse_action.triggered.connect(
-            lambda: self.add_shape_at_visible_center("ellipse")
+            lambda: self.request_shape_placement("ellipse")
+        )
+        self.paste_clipboard_action.triggered.connect(
+            lambda: self.paste_clipboard_content()
         )
         self.add_all_io_action.triggered.connect(
-            self.add_all_input_output_elements
+            self.request_all_input_output_placement
         )
-        self.array_element_action.triggered.connect(self.add_input_array_at_visible_center)
+        self.array_element_action.triggered.connect(
+            lambda: self.request_existing_element_placement(self.input_array_card)
+        )
         self.network_view_action.triggered.connect(
-            self.add_network_view_at_visible_center
+            lambda: self.request_existing_element_placement(self.network_view_card)
         )
         self.binary_values_action.toggled.connect(self.set_binary_intermediate_values)
         self.grid_visible_action.toggled.connect(self.set_grid_enabled)
@@ -3720,16 +3911,18 @@ class GraphicalExperimentDialog(QDialog):
         self.top_edit_menu.addAction(self.redo_action)
         self.top_edit_menu.addSeparator()
         self.top_edit_menu.addAction(self.copy_shapes_action)
-        self.top_edit_menu.addAction(self.paste_clipboard_action)
-        self.top_edit_menu.addSeparator()
-        self.top_edit_menu.addAction(self.comment_action)
         self.top_edit_menu.aboutToShow.connect(self.update_selection_actions)
+
+        self.add_elements_menu.setTitle(self.tr("Elemente", "Elements"))
+        self.top_add_menu = self.menu_bar.addMenu(self.add_elements_menu)
+        self.add_elements_menu.setToolTipsVisible(True)
+        self.input_elements_menu.setToolTipsVisible(True)
+        self.output_elements_menu.setToolTipsVisible(True)
+        self.shape_elements_menu.setToolTipsVisible(True)
 
         self.top_design_menu = self.menu_bar.addMenu(
             self.tr("Gestaltung", "Design")
         )
-        self.top_design_menu.addMenu(self.add_elements_menu)
-        self.top_design_menu.addSeparator()
         self.top_design_menu.addAction(self.background_color_action)
         self.top_design_menu.addMenu(self.card_color_menu)
         self.top_design_menu.addAction(self.binary_values_action)
@@ -3744,7 +3937,7 @@ class GraphicalExperimentDialog(QDialog):
         self.top_arrange_menu.addMenu(self.align_menu)
         self.top_arrange_menu.addMenu(self.size_menu)
         self.top_arrange_menu.addAction(self.arrange_grid_action)
-        self.menu_bar.setMinimumWidth(300)
+        self.menu_bar.setMinimumWidth(360)
         self.menu_bar.setSizePolicy(
             QSizePolicy.Policy.Fixed,
             QSizePolicy.Policy.Preferred,
@@ -3773,10 +3966,7 @@ class GraphicalExperimentDialog(QDialog):
 
         bottom = QHBoxLayout()
         self.status_label = QLabel(
-            self.tr(
-                "Im Bearbeitungsmodus lassen sich Grafik und Bedienfenster verschieben. Markierte Grafik mit Entf entfernen.",
-                "In edit mode, the image and control cards can be moved. Press Delete to remove the selected image.",
-            ),
+            self.project_status_text(),
             self,
         )
         bottom.addWidget(self.status_label, 1)
@@ -3859,21 +4049,34 @@ class GraphicalExperimentDialog(QDialog):
                 "What is the application view for?",
             ),
             self.tr(
-                "Die Anwendungsansicht stellt die Ein- und Ausgaben eines "
-                "trainierten Netzwerks in einem frei gestaltbaren Bedienbild "
-                "dar. Dadurch müssen die Ergebnisse nicht nur anhand von Zahlen "
-                "beurteilt werden. Eingabewerte lassen sich direkt verändern, "
-                "während Anzeigen, Schalter und Zeiger die Reaktion des Netzwerks "
-                "unmittelbar sichtbar machen. Hintergrundgrafiken und "
-                "Beschriftungen stellen den Bezug zu einer praktischen Anwendung "
-                "her.",
-                "The application view presents the inputs and outputs of a "
-                "trained network in a freely designed control panel. This means "
-                "that results do not have to be assessed from numbers alone. "
-                "Input values can be changed directly, while indicators, switches, "
-                "and gauges make the network's response immediately visible. "
-                "Background images and labels connect the network to a practical "
-                "application.",
+                "Im Modus Erproben verändern Sie Eingabewerte und beobachten "
+                "unmittelbar die Ausgaben des trainierten Netzwerks. Gewichte "
+                "und Bias-Werte bleiben dabei unverändert.\n\n"
+                "Im Modus Bearbeiten gestalten Sie das Bedienbild. Elemente "
+                "lassen sich auswählen, mit Strg mehrfach markieren, verschieben "
+                "und in der Größe ändern. Bearbeiten bietet Rückgängig, "
+                "Wiederholen, Kopieren, Einfügen und Kommentare. Unter Gestaltung "
+                "fügen Sie Ein- und Ausgaben, ein binäres Eingabe-Array, die "
+                "vereinfachte Netzwerkansicht, Grafiken und Formen hinzu und "
+                "ändern Hintergrund, Kachelfarben und Raster. Unter Anordnen "
+                "richten Sie mehrere markierte Elemente aus, verteilen sie "
+                "gleichmäßig oder vereinheitlichen ihre Größe.\n\n"
+                "Speichern übernimmt die Gestaltung in das Projekt. Die "
+                "Beschreibung erläutert die Anwendung; Testauswertung öffnet "
+                "die Auswertung der zugeordneten Daten.",
+                "In Explore mode, change input values and immediately observe "
+                "the trained network's outputs. Weights and bias values remain "
+                "unchanged.\n\n"
+                "In Edit mode, design the control panel. Elements can be selected, "
+                "multi-selected with Ctrl, moved, and resized. Edit provides Undo, "
+                "Redo, Copy, Paste, and comments. Design adds inputs and outputs, "
+                "a binary input array, the simplified network view, images, and "
+                "shapes, and changes the background, card colors, and grid. "
+                "Arrange aligns several selected elements, distributes them "
+                "evenly, or makes their sizes equal.\n\n"
+                "Save stores the design with the project. Description explains "
+                "the application; Test Evaluation opens the evaluation of the "
+                "assigned data.",
             ),
             self.tr("Schließen", "Close"),
         )
@@ -4014,14 +4217,16 @@ class GraphicalExperimentDialog(QDialog):
             name = str(mapping.get("name") or mapping["neuron"].name)
             action = self.input_elements_menu.addAction(name)
             action.triggered.connect(
-                lambda _checked=False, target=proxy: self.add_existing_element(target)
+                lambda _checked=False, target=proxy:
+                self.request_existing_element_placement(target)
             )
             self.input_element_actions[proxy] = action
         for proxy, _controls, mapping in self.output_cards:
             name = str(mapping.get("name") or mapping["neuron"].name)
             action = self.output_elements_menu.addAction(name)
             action.triggered.connect(
-                lambda _checked=False, target=proxy: self.add_existing_element(target)
+                lambda _checked=False, target=proxy:
+                self.request_existing_element_placement(target)
             )
             self.output_element_actions[proxy] = action
         self.binary_values_action.setEnabled(
@@ -4034,7 +4239,14 @@ class GraphicalExperimentDialog(QDialog):
             **getattr(self, "input_element_actions", {}),
             **getattr(self, "output_element_actions", {}),
         }.items():
-            action.setEnabled(self.edit_mode and not proxy.isVisible())
+            available = self.edit_mode and not proxy.isVisible()
+            action.setEnabled(available)
+            action.setToolTip(
+                "" if available else self.tr(
+                    "Dieses Element ist bereits sichtbar oder der Bearbeitungsmodus ist nicht aktiv.",
+                    "This element is already visible or Edit mode is not active.",
+                )
+            )
         self.array_element_action.setEnabled(
             self.edit_mode
             and self.input_array_card is not None
@@ -4052,6 +4264,238 @@ class GraphicalExperimentDialog(QDialog):
                 for proxy, _controls, _mapping
                 in self.input_cards + self.output_cards
             )
+        )
+        special_actions = (
+            (self.array_element_action, self.input_array_card is not None),
+            (self.network_view_action, self.network_view_card is not None),
+        )
+        for action, exists in special_actions:
+            if not action.isEnabled():
+                action.setToolTip(self.tr(
+                    "Das Element ist nicht verfügbar, bereits sichtbar oder der Bearbeitungsmodus ist nicht aktiv.",
+                    "The element is unavailable, already visible, or Edit mode is not active.",
+                ))
+            else:
+                action.setToolTip("")
+        if not self.add_all_io_action.isEnabled():
+            self.add_all_io_action.setToolTip(self.tr(
+                "Alle verfügbaren Ein- und Ausgänge sind bereits sichtbar oder der Bearbeitungsmodus ist nicht aktiv.",
+                "All available inputs and outputs are already visible or Edit mode is not active.",
+            ))
+        else:
+            self.add_all_io_action.setToolTip("")
+
+    def edit_status_text(self):
+        return self.project_status_text()
+
+    def project_status_text(self):
+        project_path = ""
+        if self.file_path:
+            project_path = str(Path(self.file_path).expanduser().resolve())
+        return self.tr("Projekt: ", "Project: ") + (project_path or "–")
+
+    def placement_status_text(self, repeat_available=False):
+        text = self.tr(
+            "Position wählen · Linksklick: platzieren · Esc/Rechtsklick: abbrechen",
+            "Choose position · Left click: place · Esc/right click: cancel",
+        )
+        if repeat_available:
+            text += self.tr(
+                " · Strg: mehrfach platzieren",
+                " · Ctrl: place repeatedly",
+            )
+        return text
+
+    def current_cursor_scene_position(self):
+        viewport_position = self.view.viewport().mapFromGlobal(QCursor.pos())
+        return self.view.mapToScene(viewport_position)
+
+    def snapped_placement_position(self, position):
+        point = QPointF(position)
+        if self.grid_enabled and self.grid_spacing > 0:
+            spacing = float(self.grid_spacing)
+            point.setX(round(point.x() / spacing) * spacing)
+            point.setY(round(point.y() / spacing) * spacing)
+        return point
+
+    def start_element_placement(
+        self,
+        items,
+        repeat_factory=None,
+        scene_position=None,
+    ):
+        """Zeigt neue Elemente transparent am Mauszeiger, ohne sie fest abzulegen."""
+
+        items = [item for item in items if item is not None and item.scene() is self.scene]
+        if not self.edit_mode or not items:
+            if self.active_history_state is not None:
+                self.active_history_state = None
+            return False
+        self.scene.clearSelection()
+        self.placement_items = items
+        self.placement_start_positions = {
+            item: QPointF(item.pos()) for item in items
+        }
+        bounds = QRectF()
+        for item in items:
+            item.setSelected(False)
+            item.setOpacity(0.55)
+            item_bounds = item.sceneBoundingRect()
+            bounds = item_bounds if bounds.isNull() else bounds.united(item_bounds)
+        self.placement_origin = bounds.center()
+        self.placement_repeat_factory = repeat_factory
+        self.view.setDragMode(QGraphicsView.DragMode.NoDrag)
+        self.view.viewport().setCursor(Qt.CursorShape.CrossCursor)
+        self.status_label.setText(
+            self.placement_status_text(repeat_factory is not None)
+        )
+        self.update_element_placement(
+            self.current_cursor_scene_position()
+            if scene_position is None
+            else scene_position
+        )
+        return True
+
+    def update_element_placement(self, scene_position):
+        if not self.placement_items:
+            return
+        delta = QPointF(scene_position) - self.placement_origin
+        for item, start in self.placement_start_positions.items():
+            if item.scene() is self.scene:
+                item.setPos(self.snapped_placement_position(start + delta))
+
+    def clear_element_placement_state(self):
+        self.placement_items = []
+        self.placement_start_positions = {}
+        self.placement_origin = QPointF()
+        self.placement_repeat_factory = None
+        self.view.setDragMode(
+            QGraphicsView.DragMode.RubberBandDrag
+            if self.edit_mode
+            else QGraphicsView.DragMode.NoDrag
+        )
+        self.view.viewport().setCursor(Qt.CursorShape.ArrowCursor)
+
+    def finish_element_placement(self, scene_position, modifiers):
+        if not self.placement_items:
+            return
+        self.update_element_placement(scene_position)
+        placed_items = list(self.placement_items)
+        repeat_factory = self.placement_repeat_factory
+        repeat_requested = bool(
+            repeat_factory is not None
+            and modifiers & Qt.KeyboardModifier.ControlModifier
+        )
+        for item in placed_items:
+            item.setOpacity(1.0)
+        self.clear_element_placement_state()
+        self.scene.clearSelection()
+        for item in placed_items:
+            if item.scene() is self.scene:
+                item.setSelected(True)
+        self.finish_history_action()
+        self.update_element_actions()
+        self.status_label.setText(self.edit_status_text())
+        if repeat_requested:
+            QTimer.singleShot(0, repeat_factory)
+
+    def cancel_element_placement(self):
+        if not self.placement_items:
+            return
+        previous_state = self.active_history_state
+        self.active_history_state = None
+        self.clear_element_placement_state()
+        if previous_state is not None:
+            self.apply_history_state(previous_state)
+        self.update_element_actions()
+        self.status_label.setText(self.edit_status_text())
+
+    def request_existing_element_placement(self, proxy):
+        if not self.edit_mode or proxy is None or proxy.isVisible():
+            return
+        self.begin_history_action()
+        proxy.setVisible(True)
+        saved_position = getattr(proxy, "saved_design_position", None)
+        if saved_position is not None:
+            proxy.setPos(saved_position)
+        self.start_element_placement([proxy])
+
+    def request_all_input_output_placement(self):
+        missing_inputs = [
+            proxy for proxy, _controls, _mapping in self.input_cards
+            if not proxy.isVisible()
+        ]
+        missing_outputs = [
+            proxy for proxy, _controls, _mapping in self.output_cards
+            if not proxy.isVisible()
+        ]
+        missing = missing_inputs + missing_outputs
+        if not self.edit_mode or not missing:
+            return
+        self.begin_history_action()
+        for proxy in missing:
+            proxy.setVisible(True)
+        self.arrange_compact_input_output_block(
+            missing_inputs,
+            missing_outputs,
+        )
+        self.start_element_placement(missing)
+
+    def arrange_compact_input_output_block(self, inputs, outputs):
+        """Ordnet gemeinsam eingefügte Ein- und Ausgänge kompakt und überlappungsfrei."""
+
+        card_width = self.COMPACT_IO_CARD_WIDTH
+        card_height = self.COMPACT_IO_CARD_HEIGHT
+        column_pitch = card_width + self.COMPACT_IO_COLUMN_GAP
+        row_pitch = card_height + self.COMPACT_IO_ROW_GAP
+
+        def arrange_section(items, start_x):
+            for index, proxy in enumerate(items):
+                proxy.set_card_size(card_width, card_height)
+                proxy.setPos(
+                    start_x,
+                    index * row_pitch,
+                )
+
+        arrange_section(inputs, 0.0)
+        output_start_x = (
+            column_pitch + self.COMPACT_IO_SECTION_GAP
+            if inputs and outputs
+            else 0.0
+        )
+        arrange_section(outputs, output_start_x)
+
+    def request_shape_placement(self, shape_type):
+        if not self.edit_mode:
+            return
+        self.begin_history_action()
+        item = self.add_shape(
+            shape_type, QPointF(), record_history=False
+        )
+        if item is None:
+            self.active_history_state = None
+            return
+        self.start_element_placement(
+            [item],
+            lambda target=str(shape_type): self.request_shape_placement(target),
+        )
+
+    def request_comment_placement(self, data=None):
+        if not self.edit_mode:
+            return
+        comment_data = dict(data) if isinstance(data, dict) else None
+        if comment_data is None:
+            dialog = CommentEditDialog(self.default_comment_data(), self.tr, self)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            comment_data = dialog.comment_data()
+            if not comment_data["text"].strip():
+                return
+        self.begin_history_action()
+        proxy = self.create_comment_card(comment_data)
+        self.start_element_placement(
+            [proxy],
+            lambda values=dict(comment_data): self.request_comment_placement(values),
         )
 
     def add_existing_element(self, proxy, position=None):
@@ -4181,7 +4625,10 @@ class GraphicalExperimentDialog(QDialog):
         if not item.isSelected():
             self.scene.clearSelection()
             item.setSelected(True)
+        self.update_selection_actions()
         menu = QMenu(self)
+        menu.addAction(self.copy_shapes_action)
+        menu.addSeparator()
         line_color_action = menu.addAction(self.tr("Linienfarbe…", "Line color…"))
         line_width_action = menu.addAction(self.tr("Linienstärke…", "Line width…"))
         arrow_action = reverse_arrow_action = None
@@ -4358,6 +4805,18 @@ class GraphicalExperimentDialog(QDialog):
         self.comment_cards.append(proxy)
         return proxy
 
+    def comment_data_for_proxy(self, proxy):
+        card = proxy.widget()
+        data = dict(card.comment_data)
+        data.update({
+            "x": proxy.pos().x(),
+            "y": proxy.pos().y(),
+            "width": card.width(),
+            "height": card.height(),
+            "color": card.card_color.name(),
+        })
+        return data
+
     def clear_comments(self):
         for proxy in list(self.comment_cards):
             if proxy.scene() is self.scene:
@@ -4405,6 +4864,21 @@ class GraphicalExperimentDialog(QDialog):
             self.scene.removeItem(proxy)
             self.comment_cards.remove(proxy)
         self.finish_history_action()
+
+    def show_empty_context_menu(self, global_position, scene_position):
+        """Bietet auf freier Fläche ausschließlich zulässiges Einfügen an."""
+
+        if not self.edit_mode:
+            return
+        self.update_selection_actions()
+        if not self.paste_clipboard_action.isEnabled():
+            return
+        menu = QMenu(self)
+        paste_action = menu.addAction(self.paste_clipboard_action.text())
+        paste_action.setShortcut(QKeySequence.StandardKey.Paste)
+        selected = menu.exec(global_position)
+        if selected == paste_action:
+            self.paste_clipboard_content(scene_position)
 
     def show_canvas_context_menu(self, global_position, scene_position):
         if not self.edit_mode:
@@ -4523,6 +4997,7 @@ class GraphicalExperimentDialog(QDialog):
             proxy.setSelected(True)
         self.last_selected_card = proxy
         color_targets = list(self.selected_card_proxies())
+        self.update_selection_actions()
         menu = QMenu(self)
         choose_color = menu.addAction(self.tr("Kachelfarbe…", "Card color…"))
         default_color = menu.addAction(
@@ -4533,6 +5008,7 @@ class GraphicalExperimentDialog(QDialog):
         rename_array_action = None
         if proxy.card_role == "comment":
             menu.addSeparator()
+            menu.addAction(self.copy_shapes_action)
             edit_action = menu.addAction(self.tr("Kommentar bearbeiten…", "Edit comment…"))
             delete_action = menu.addAction(self.tr("Kommentar löschen", "Delete comment"))
         elif proxy.card_role in ("input", "output", "input_array", "network_view"):
@@ -4638,16 +5114,33 @@ class GraphicalExperimentDialog(QDialog):
             item for item in self.scene.selectedItems()
             if isinstance(item, DesignShapeItem)
         ]
+        selected_comments = [
+            item for item in self.scene.selectedItems()
+            if isinstance(item, MovableCardProxy) and item.card_role == "comment"
+        ]
         mime_data = QApplication.clipboard().mimeData()
-        can_paste = (
-            mime_data.hasFormat(self.SHAPE_CLIPBOARD_MIME)
-            or mime_data.hasImage()
+        has_copied_elements = mime_data.hasFormat(self.SHAPE_CLIPBOARD_MIME)
+        has_image = (
+            mime_data.hasImage()
             or self.image_path_from_mime_data(mime_data) is not None
         )
+        can_paste = has_copied_elements or has_image
         self.copy_shapes_action.setEnabled(
-            self.edit_mode and bool(selected_shapes)
+            self.edit_mode and bool(selected_shapes or selected_comments)
         )
         self.paste_clipboard_action.setEnabled(self.edit_mode and can_paste)
+        if has_copied_elements:
+            self.paste_clipboard_action.setText(self.tr(
+                "Kopierte Elemente einfügen",
+                "Paste copied elements",
+            ))
+        elif has_image:
+            self.paste_clipboard_action.setText(self.tr(
+                "Hintergrundbild aus Zwischenablage einfügen",
+                "Paste background image from clipboard",
+            ))
+        else:
+            self.paste_clipboard_action.setText(self.tr("Einfügen", "Paste"))
         if self.last_selected_card not in selected:
             self.last_selected_card = selected[-1] if selected else None
         roles = {item.card_role for item in selected}
@@ -5459,16 +5952,13 @@ class GraphicalExperimentDialog(QDialog):
                         )
             if self.network_view_card is not None:
                 self.network_view_card.widget().update_network_state()
-            self.status_label.setText(
-                self.tr(
-                    "Vorwärtsberechnung abgeschlossen. Gewichte und Bias-Werte wurden nicht verändert.",
-                    "Forward pass completed. Weights and bias values were not changed.",
-                )
-            )
+            self.status_label.setText(self.project_status_text())
         except (KeyError, TypeError, ValueError) as error:
             QMessageBox.warning(self, self.windowTitle(), str(error))
 
     def change_mode(self, *_):
+        if self.placement_items:
+            self.cancel_element_placement()
         self.finish_nudge_history()
         self.edit_mode = self.mode_combo.currentData() == "edit"
         for proxy, controls, _mapping in self.input_cards:
@@ -5502,24 +5992,24 @@ class GraphicalExperimentDialog(QDialog):
             self.default_layout_button,
         ):
             button.setEnabled(self.edit_mode)
-        self.comment_action.setEnabled(self.edit_mode)
         self.add_comment_design_action.setEnabled(self.edit_mode)
         self.load_image_action.setEnabled(self.edit_mode)
         self.background_color_action.setEnabled(self.edit_mode)
         self.grid_visible_action.setEnabled(self.edit_mode)
         self.grid_spacing_action.setEnabled(self.edit_mode)
         self.default_layout_action.setEnabled(self.edit_mode)
-        self.add_elements_menu.menuAction().setEnabled(self.edit_mode)
+        for menu in (
+            self.top_edit_menu,
+            self.add_elements_menu,
+            self.top_design_menu,
+            self.top_arrange_menu,
+        ):
+            menu.menuAction().setEnabled(self.edit_mode)
         self.shape_elements_menu.menuAction().setEnabled(self.edit_mode)
         self.update_grid_visibility()
         self.update_element_actions()
         if self.edit_mode:
-            self.status_label.setText(
-                self.tr(
-                    "Grafik und Bedienfenster können verschoben werden. Die markierte Grafik wird am Griff unten rechts skaliert und mit Entf entfernt.",
-                    "The image and control cards can be moved. Resize the selected image with its lower-right handle or remove it with Delete.",
-                )
-            )
+            self.status_label.setText(self.edit_status_text())
         else:
             self.calculate()
         self.update_selection_actions()
@@ -5540,6 +6030,44 @@ class GraphicalExperimentDialog(QDialog):
                 "graphical_experiment/last_image_directory",
                 str(Path(file_name).resolve().parent),
             )
+
+    def load_background_image_for_placement(self):
+        """Lädt eine Grafik und übergibt sie zunächst an den Platzierungsmodus."""
+
+        if not self.edit_mode:
+            return
+        start_directory = self.initial_image_directory()
+        file_name, _ = QFileDialog.getOpenFileName(
+            self,
+            self.tr("Grafik laden", "Load image"),
+            start_directory,
+            self.tr(
+                "Bilder (*.png *.jpg *.jpeg *.bmp)",
+                "Images (*.png *.jpg *.jpeg *.bmp)",
+            ),
+        )
+        if not file_name or not self.confirm_image_replacement():
+            return
+        image_path = Path(file_name)
+        pixmap = QPixmap(str(image_path))
+        if pixmap.isNull():
+            QMessageBox.warning(
+                self,
+                self.windowTitle(),
+                self.tr(
+                    "Die Grafik konnte nicht geladen werden.",
+                    "The image could not be loaded.",
+                ),
+            )
+            return
+        self.begin_history_action()
+        self.background_relative_path = str(image_path.resolve())
+        self.set_background_pixmap(pixmap)
+        QSettings("NeuronNetz", "NeuronNetz").setValue(
+            "graphical_experiment/last_image_directory",
+            str(image_path.resolve().parent),
+        )
+        self.start_element_placement([self.background_item])
 
     def initial_image_directory(self):
         settings = QSettings("NeuronNetz", "NeuronNetz")
@@ -5605,7 +6133,7 @@ class GraphicalExperimentDialog(QDialog):
         return True
 
     def copy_selected_shapes(self):
-        """Kopiert ausschließlich markierte grafische Formen."""
+        """Kopiert markierte Formen und Kommentare als Gestaltungselemente."""
 
         if not self.edit_mode:
             return
@@ -5613,11 +6141,18 @@ class GraphicalExperimentDialog(QDialog):
             item for item in self.scene.selectedItems()
             if isinstance(item, DesignShapeItem)
         ]
-        if not shapes:
+        comments = [
+            item for item in self.scene.selectedItems()
+            if isinstance(item, MovableCardProxy) and item.card_role == "comment"
+        ]
+        if not shapes and not comments:
             return
         payload = {
             "version": 1,
             "shapes": [item.to_data() for item in shapes],
+            "comments": [
+                self.comment_data_for_proxy(proxy) for proxy in comments
+            ],
         }
         mime_data = QMimeData()
         mime_data.setData(
@@ -5626,8 +6161,8 @@ class GraphicalExperimentDialog(QDialog):
         )
         QApplication.clipboard().setMimeData(mime_data)
 
-    def paste_clipboard_content(self):
-        """Fügt Formdaten ein; andernfalls greift die vorhandene Bildfunktion."""
+    def paste_clipboard_content(self, scene_position=None):
+        """Fügt kopierte Elemente oder ein Bild über den Platzierungsmodus ein."""
 
         if not self.edit_mode:
             return
@@ -5638,29 +6173,50 @@ class GraphicalExperimentDialog(QDialog):
                     bytes(mime_data.data(self.SHAPE_CLIPBOARD_MIME)).decode("utf-8")
                 )
                 shapes = payload.get("shapes", [])
+                comments = payload.get("comments", [])
             except (UnicodeDecodeError, ValueError, AttributeError):
                 shapes = []
+                comments = []
             valid_shapes = [data for data in shapes if isinstance(data, dict)]
-            if valid_shapes:
+            valid_comments = [
+                data for data in comments if isinstance(data, dict)
+            ]
+            if valid_shapes or valid_comments:
                 self.begin_history_action()
                 self.scene.clearSelection()
+                pasted_items = []
                 for data in valid_shapes:
                     copied = dict(data)
-                    copied["x"] = float(copied.get("x", 0.0)) + 20.0
-                    copied["y"] = float(copied.get("y", 0.0)) + 20.0
                     item = self.add_shape(
                         copied.get("type", "rectangle"),
-                        QPointF(copied["x"], copied["y"]),
+                        QPointF(
+                            float(copied.get("x", 0.0)),
+                            float(copied.get("y", 0.0)),
+                        ),
                         copied,
                         record_history=False,
                     )
                     if item is not None:
-                        item.setSelected(True)
-                self.finish_history_action()
+                        pasted_items.append(item)
+                for data in valid_comments:
+                    copied = dict(data)
+                    proxy = self.create_comment_card(copied)
+                    proxy.setPos(
+                        float(copied.get("x", 0.0)),
+                        float(copied.get("y", 0.0)),
+                    )
+                    pasted_items.append(proxy)
+                if pasted_items:
+                    self.start_element_placement(
+                        pasted_items,
+                        scene_position=scene_position,
+                    )
+                else:
+                    self.active_history_state = None
                 return
-        self.paste_background_image()
+        self.paste_background_image(scene_position)
 
-    def paste_background_image(self):
+    def paste_background_image(self, scene_position=None):
         """Übernimmt Bilddaten oder eine kopierte Bilddatei aus der Zwischenablage."""
 
         if not self.edit_mode:
@@ -5669,17 +6225,27 @@ class GraphicalExperimentDialog(QDialog):
         mime_data = clipboard.mimeData()
         image_path = self.image_path_from_mime_data(mime_data)
         if image_path is not None:
-            self.select_background_image(image_path)
-            return
-        image = clipboard.image()
-        if image.isNull():
+            pixmap = QPixmap(str(image_path))
+        else:
+            image = clipboard.image()
+            if image.isNull():
+                return
+            pixmap = QPixmap.fromImage(image)
+        if pixmap.isNull():
             return
         if not self.confirm_image_replacement():
             return
         self.begin_history_action()
-        self.background_relative_path = "<clipboard>"
-        self.set_background_pixmap(QPixmap.fromImage(image))
-        self.finish_history_action()
+        self.background_relative_path = (
+            str(Path(image_path).resolve())
+            if image_path is not None
+            else "<clipboard>"
+        )
+        self.set_background_pixmap(pixmap)
+        self.start_element_placement(
+            [self.background_item],
+            scene_position=scene_position,
+        )
 
     def set_background_pixmap(self, pixmap):
         if self.background_item is not None:
@@ -6300,6 +6866,8 @@ class GraphicalExperimentDialog(QDialog):
             pass
 
     def closeEvent(self, event):
+        if self.placement_items:
+            self.cancel_element_placement()
         if self.confirm_close():
             self.save_window_geometry()
             self.stop_forward_executor()
@@ -6308,12 +6876,16 @@ class GraphicalExperimentDialog(QDialog):
             event.ignore()
 
     def accept(self):
+        if self.placement_items:
+            self.cancel_element_placement()
         if self.confirm_close():
             self.save_window_geometry()
             self.stop_forward_executor()
             super().accept()
 
     def reject(self):
+        if self.placement_items:
+            self.cancel_element_placement()
         if self.confirm_close():
             self.save_window_geometry()
             self.stop_forward_executor()

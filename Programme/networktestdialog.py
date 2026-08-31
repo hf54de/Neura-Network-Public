@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: networktestdialog.py
 # Zweck: Testet ein trainiertes Netzwerk mit Trainings- oder Testdaten.
-# Letzte Änderung: 03.08.2026
+# Letzte Änderung: 23.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -14,7 +14,9 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QHeaderView,
+    QHBoxLayout,
     QLabel,
+    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout
@@ -24,6 +26,7 @@ from neurontype import NeuronType
 from numberformat import format_number
 from trainingdataio import TrainingDataIO
 from language import LanguageManager
+from graphicalexperimentdialog import show_yellow_information_dialog
 
 
 class NetworkTestDialog(QDialog):
@@ -108,6 +111,17 @@ class NetworkTestDialog(QDialog):
         self.main_layout.addWidget(
             self.info_label
         )
+
+        information_layout = QHBoxLayout()
+        information_layout.addStretch(1)
+        self.info_button = QPushButton("i", self)
+        self.info_button.setFixedSize(26, 24)
+        self.info_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.info_button.setAutoDefault(False)
+        self.info_button.setDefault(False)
+        self.info_button.clicked.connect(self.show_information)
+        information_layout.addWidget(self.info_button)
+        self.main_layout.addLayout(information_layout)
 
         self.table = QTableWidget()
         self.table.setEditTriggers(
@@ -235,6 +249,16 @@ class NetworkTestDialog(QDialog):
         )
 
         self.calculate_results()
+
+    def show_information(self):
+        """Erläutert Tabellenwerte, Fehler und binäre Entscheidungen."""
+
+        show_yellow_information_dialog(
+            self,
+            self.t("test.information.title"),
+            self.t("test.information.text"),
+            self.t("common.close"),
+        )
 
     def apply_error_filter(self, checked=None):
         """Blendet bei Bedarf alle binär korrekt klassifizierten Zeilen aus."""

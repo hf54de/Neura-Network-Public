@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: traininghistorydialog.py
 # Zweck: Verwaltet, vergleicht und lädt gespeicherte Trainingsläufe.
-# Letzte Änderung: 20.08.2026
+# Letzte Änderung: 24.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -586,6 +587,13 @@ class TrainingHistoryDialog(QDialog):
         self.full_range_button = QPushButton(self.t("history.full_range"))
         chart_controls.addWidget(self.full_range_button)
         chart_controls.addStretch(1)
+        self.info_button = QPushButton("i")
+        self.info_button.setFixedSize(26, 24)
+        self.info_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.info_button.setAutoDefault(False)
+        self.info_button.setDefault(False)
+        self.info_button.clicked.connect(self.show_history_information)
+        chart_controls.addWidget(self.info_button)
         main_layout.addLayout(chart_controls)
 
         self.chart = TrainingHistoryChart(language_manager=self.language)
@@ -620,6 +628,33 @@ class TrainingHistoryDialog(QDialog):
 
         self.populate_table()
         QTimer.singleShot(0, self.resize_to_table_width)
+
+    def show_history_information(self):
+        """Erläutert Auswahl, Diagrammbedienung und Verwaltungsfunktionen."""
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(self.t("history.information_title"))
+        dialog.setMinimumWidth(560)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+        explanation = QLabel(self.t("history.information_text"))
+        explanation.setWordWrap(True)
+        explanation.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        explanation.setStyleSheet(
+            "QLabel { background-color: #fff8d8; color: #202020; "
+            "border: 1px solid #d8b34f; border-radius: 5px; padding: 12px; }"
+        )
+        layout.addWidget(explanation)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.button(QDialogButtonBox.StandardButton.Close).setText(
+            self.t("common.close")
+        )
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        dialog.exec()
 
     def renumber_runs(self):
         """Nummeriert die verbliebenen Läufe chronologisch und lückenlos."""

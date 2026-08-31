@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: settings.py
 # Zweck: Speichert und lädt projektunabhängige Programmeinstellungen.
-# Letzte Änderung: 11.08.2026
+# Letzte Änderung: 31.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -269,10 +269,18 @@ class Settings:
         if not isinstance(paths_data, dict):
             return ""
 
-        key = cls.language_path_key("last_project_file", language_code)
-        file_path = paths_data.get(key)
-        if file_path is None and language_code:
-            file_path = paths_data.get("last_project_file")
+        file_path = paths_data.get("last_project_file")
+        if file_path is None:
+            legacy_keys = []
+            normalized_language = str(language_code or "").strip().lower()
+            if normalized_language in {"de", "en"}:
+                legacy_keys.append(f"last_project_file_{normalized_language}")
+            legacy_keys.extend(("last_project_file_de", "last_project_file_en"))
+            for key in dict.fromkeys(legacy_keys):
+                candidate = paths_data.get(key)
+                if isinstance(candidate, str) and candidate.strip():
+                    file_path = candidate
+                    break
 
         if not isinstance(file_path, str):
             return ""
@@ -295,8 +303,9 @@ class Settings:
         if not isinstance(paths_data, dict):
             paths_data = {}
 
-        key = cls.language_path_key("last_project_file", language_code)
-        paths_data[key] = normalized_path
+        paths_data["last_project_file"] = normalized_path
+        paths_data.pop("last_project_file_de", None)
+        paths_data.pop("last_project_file_en", None)
         settings_data["paths"] = paths_data
         cls.save(settings_data)
         return True
@@ -311,8 +320,9 @@ class Settings:
         if not isinstance(paths_data, dict):
             return False
 
-        key = cls.language_path_key("last_project_file", language_code)
-        paths_data.pop(key, None)
+        paths_data.pop("last_project_file", None)
+        paths_data.pop("last_project_file_de", None)
+        paths_data.pop("last_project_file_en", None)
         settings_data["paths"] = paths_data
         cls.save(settings_data)
         return True
@@ -375,7 +385,7 @@ class Settings:
 
     @classmethod
     def get_recent_project_files(cls, language_code=None):
-        """Liefert höchstens fünf zuletzt verwendete Projektdateien."""
+        """Liefert den sprachunabhängigen Verlauf mit höchstens fünf Projekten."""
 
         settings_data = cls.load()
         paths_data = settings_data.get("paths")
@@ -383,49 +393,29 @@ class Settings:
         if not isinstance(paths_data, dict):
             return []
 
-        key = cls.language_path_key("recent_project_files", language_code)
-        stored_files = paths_data.get(key)
-        if stored_files is None and language_code:
-            stored_files = paths_data.get("recent_project_files")
-
-        if not isinstance(stored_files, list):
-            return []
-
         recent_files = []
         known_paths = set()
-        normalized_language = str(language_code or "").strip().lower()
-
-        for file_path in stored_files:
-            if not isinstance(file_path, str) or not file_path.strip():
+        stored_lists = (
+            paths_data.get("recent_project_files"),
+            paths_data.get("recent_project_files_de"),
+            paths_data.get("recent_project_files_en"),
+        )
+        for stored_files in stored_lists:
+            if not isinstance(stored_files, list):
                 continue
-
-            normalized_path = str(
-                Path(file_path).expanduser().resolve()
-            )
-            path_parts = {
-                part.casefold()
-                for part in Path(normalized_path).parts
-            }
-            if (
-                normalized_language == "de"
-                and "projects_en" in path_parts
-            ):
-                continue
-            if (
-                normalized_language == "en"
-                and "projects_de" in path_parts
-            ):
-                continue
-            comparison_path = normalized_path.casefold()
-
-            if comparison_path in known_paths:
-                continue
-
-            known_paths.add(comparison_path)
-            recent_files.append(normalized_path)
-
-            if len(recent_files) >= cls.MAX_RECENT_PROJECTS:
-                break
+            for file_path in stored_files:
+                if not isinstance(file_path, str) or not file_path.strip():
+                    continue
+                normalized_path = str(
+                    Path(file_path).expanduser().resolve()
+                )
+                comparison_path = normalized_path.casefold()
+                if comparison_path in known_paths:
+                    continue
+                known_paths.add(comparison_path)
+                recent_files.append(normalized_path)
+                if len(recent_files) >= cls.MAX_RECENT_PROJECTS:
+                    return recent_files
 
         return recent_files
 
@@ -454,8 +444,9 @@ class Settings:
         if not isinstance(paths_data, dict):
             paths_data = {}
 
-        key = cls.language_path_key("recent_project_files", language_code)
-        paths_data[key] = recent_files
+        paths_data["recent_project_files"] = recent_files
+        paths_data.pop("recent_project_files_de", None)
+        paths_data.pop("recent_project_files_en", None)
         settings_data["paths"] = paths_data
         cls.save(settings_data)
         return True
@@ -482,8 +473,16 @@ class Settings:
         if not isinstance(paths_data, dict):
             paths_data = {}
 
-        key = cls.language_path_key("recent_project_files", language_code)
-        paths_data[key] = recent_files
+        paths_data["recent_project_files"] = recent_files
+        for key in ("recent_project_files_de", "recent_project_files_en"):
+            legacy_files = paths_data.get(key)
+            if isinstance(legacy_files, list):
+                paths_data[key] = [
+                    stored_path for stored_path in legacy_files
+                    if isinstance(stored_path, str)
+                    and str(Path(stored_path).expanduser().resolve()).casefold()
+                    != comparison_path
+                ]
         settings_data["paths"] = paths_data
         cls.save(settings_data)
         return True

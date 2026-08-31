@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: resultanalysisdialog.py
 # Zweck: Analysiert und vergleicht Ergebnisse aus Trainings- und Testdaten.
-# Letzte Änderung: 20.08.2026
+# Letzte Änderung: 23.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -40,6 +40,7 @@ from language import LanguageManager
 from numberformat import format_number
 from trainingdataio import TrainingDataIO
 from analysisplot import FeatureImportancePlot, SollIstPlot
+from graphicalexperimentdialog import show_yellow_information_dialog
 
 
 class ResultAnalysisDialog(QDialog):
@@ -94,6 +95,17 @@ class ResultAnalysisDialog(QDialog):
             "border-radius: 4px; padding: 7px; }"
         )
         layout.addWidget(self.source_note)
+
+        information_layout = QHBoxLayout()
+        information_layout.addStretch(1)
+        self.info_button = QPushButton("i", self)
+        self.info_button.setFixedSize(26, 24)
+        self.info_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.info_button.setAutoDefault(False)
+        self.info_button.setDefault(False)
+        self.info_button.clicked.connect(self.show_information)
+        information_layout.addWidget(self.info_button)
+        layout.addLayout(information_layout)
 
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs, 1)
@@ -281,6 +293,28 @@ class ResultAnalysisDialog(QDialog):
                     break
         self.tabs.setCurrentIndex(max(0, min(4, int(initial_tab))))
         self.refresh_analysis()
+
+    def show_information(self):
+        """Zeigt die Erklärung zum aktuell sichtbaren Analyseregister."""
+
+        information_keys = {
+            self.records_tab: "records",
+            self.overview_tab: "overview",
+            self.plot_tab: "plot",
+            self.tolerance_tab: "tolerance",
+            self.sensitivity_tab: "sensitivity",
+        }
+        section = information_keys.get(
+            self.tabs.currentWidget(),
+            "records",
+        )
+
+        show_yellow_information_dialog(
+            self,
+            self.t(f"analysis.information.{section}.title"),
+            self.t(f"analysis.information.{section}.text"),
+            self.t("common.close"),
+        )
 
     @staticmethod
     def configure_table(table):

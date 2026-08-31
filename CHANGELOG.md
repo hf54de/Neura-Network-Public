@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.10.0-beta.01 – 31.08.2026
+
+- Added a comprehensive project health check covering the network, training data, calibration, training status, and analysis availability.
+- Unified information dialogs across the application with consistent yellow information panels.
+- Added context-sensitive information buttons to major working windows and analysis tabs.
+- Improved the Application View with clearer information about Explore and Edit modes.
+- Added a structured and scrollable calculation path for selected neurons.
+- Added the unscaled output value to the calculation path of scaled analog output neurons.
+- Added a permanent Elements menu to the Application View.
+- Added interactive element placement with a movable preview, grid snapping, and cancellation using Esc or right-click.
+- Improved clipboard handling for graphic shapes, comments, and background images.
+- Added Copy commands to the context menus of copyable elements and Paste to the context menu of an empty canvas area.
+- Moved the canvas background color command to the Design menu.
+- Disabled and greyed out all editing menus in Explore mode.
+- Improved multi-selection performance by no longer selecting adjacent network connections automatically.
+- Improved line endpoint handling when moving multiple selected elements.
+- Updated the German and English help documentation and marked outdated screenshots for replacement.
+
 ## 0.9.0-beta.15 – 15.08.2026
 
 - Application View and Training Improvements

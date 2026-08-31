@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: trainingdatadialog.py
 # Zweck: Erfasst, importiert, prüft und skaliert Trainings- und Testdaten.
-# Letzte Änderung: 06.08.2026
+# Letzte Änderung: 24.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -51,6 +51,32 @@ from numberformat import format_number
 from language import LanguageManager
 from trainingdataio import TrainingDataIO
 from binaryarraydialog import BinaryInputArrayDialog
+
+
+def show_styled_information(parent, title, message, close_text):
+    """Zeigt eine einheitliche Erklärung ohne Standard-Informationssymbol."""
+
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(title)
+    dialog.setMinimumWidth(500)
+    layout = QVBoxLayout(dialog)
+    layout.setContentsMargins(12, 12, 12, 12)
+    layout.setSpacing(10)
+    explanation = QLabel(message)
+    explanation.setWordWrap(True)
+    explanation.setTextInteractionFlags(
+        Qt.TextInteractionFlag.TextSelectableByMouse
+    )
+    explanation.setStyleSheet(
+        "QLabel { background-color: #fff8d8; color: #202020; "
+        "border: 1px solid #d8b34f; border-radius: 5px; padding: 12px; }"
+    )
+    layout.addWidget(explanation)
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+    buttons.button(QDialogButtonBox.StandardButton.Close).setText(close_text)
+    buttons.rejected.connect(dialog.reject)
+    layout.addWidget(buttons)
+    dialog.exec()
 
 
 class NumericItemDelegate(QStyledItemDelegate):
@@ -179,9 +205,20 @@ class ColumnPropertiesDialog(QDialog):
         self.neuron_display = QLineEdit(neuron_text)
         self.neuron_display.setReadOnly(True)
 
+        name_row = QHBoxLayout()
+        name_row.setContentsMargins(0, 0, 0, 0)
+        name_row.setSpacing(6)
+        name_row.addWidget(self.name_edit, 1)
+        self.info_button = QPushButton("i")
+        self.info_button.setFixedSize(26, 24)
+        self.info_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.info_button.setAutoDefault(False)
+        self.info_button.setDefault(False)
+        self.info_button.clicked.connect(self.show_information)
+        name_row.addWidget(self.info_button)
         self.form_layout.addRow(
             text("data.column_properties.name"),
-            self.name_edit
+            name_row
         )
         self.form_layout.addRow(
             text("data.column_properties.unit"),
@@ -383,6 +420,16 @@ class ColumnPropertiesDialog(QDialog):
             )
 
         self.update_data_type_controls()
+
+    def show_information(self):
+        """Erläutert Spaltenzuordnung und Skalierung aus Trainingsdaten."""
+
+        show_styled_information(
+            self,
+            self.language.text("data.column_properties.information_title"),
+            self.language.text("data.column_properties.information_text"),
+            self.language.text("common.close"),
+        )
 
     @staticmethod
     def create_number_spinbox(value, minimum=-1.0e12):
@@ -2843,14 +2890,15 @@ class TrainingDataDialog(QDialog):
         self.record_edit_history()
 
     def show_input_array_information(self):
-        QMessageBox.information(
+        show_styled_information(
             self,
             self.language.text(
                 "data.editor.input_array_information_title"
             ),
             self.language.text(
                 "data.editor.input_array_information"
-            )
+            ),
+            self.language.text("common.close"),
         )
 
     def set_modified(self, modified):
@@ -3269,10 +3317,11 @@ class TrainingDataDialog(QDialog):
     def show_header_colors_information(self):
         """Erläutert Datentypen und Warnfarben der Spaltenköpfe."""
 
-        QMessageBox.information(
+        show_styled_information(
             self,
             self.language.text("data.editor.header_colors_info_title"),
             self.language.text("data.editor.header_colors_info_text"),
+            self.language.text("common.close"),
         )
 
     def parse_import_number(self, text):

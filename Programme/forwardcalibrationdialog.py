@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: forwardcalibrationdialog.py
 # Zweck: Ermöglicht interaktive Experimente und Vorwärtsberechnungen mit Rohwerten.
-# Letzte Änderung: 14.08.2026
+# Letzte Änderung: 24.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -30,7 +30,10 @@ from PySide6.QtWidgets import (
 )
 
 from trainingdataio import TrainingDataIO
-from graphicalexperimentdialog import GraphicalExperimentDialog
+from graphicalexperimentdialog import (
+    GraphicalExperimentDialog,
+    show_yellow_information_dialog,
+)
 from numberformat import format_number
 from language import LanguageManager
 from settings import Settings
@@ -625,7 +628,17 @@ class ForwardCalibrationDialog(QDialog):
             QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Fixed
         )
-        self.main_layout.addWidget(self.status_label)
+        status_layout = QHBoxLayout()
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.addWidget(self.status_label, 1)
+        self.window_info_button = QPushButton("i", self)
+        self.window_info_button.setFixedSize(26, 24)
+        self.window_info_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.window_info_button.setAutoDefault(False)
+        self.window_info_button.setDefault(False)
+        self.window_info_button.clicked.connect(self.show_window_information)
+        status_layout.addWidget(self.window_info_button)
+        self.main_layout.addLayout(status_layout)
 
         self.experimental_info = QLabel(
             self.language.text("forward.experimental.info")
@@ -697,6 +710,16 @@ class ForwardCalibrationDialog(QDialog):
         self.calculate()
         self.schedule_fit_window()
 
+    def show_window_information(self):
+        """Erläutert Bedienung und Anzeigen des Erprobungsfensters."""
+
+        show_yellow_information_dialog(
+            self,
+            self.language.text("forward.information.title"),
+            self.language.text("forward.information.text"),
+            self.language.text("common.close"),
+        )
+
     def create_quality_header(self):
         """Ergänzt die bestehende Anzeigespalte um die LED-Erklärung."""
 
@@ -715,7 +738,7 @@ class ForwardCalibrationDialog(QDialog):
 
     def show_quality_information(self):
         german = str(getattr(self.language, "current_language", "de")).lower().startswith("de")
-        QMessageBox.information(
+        show_yellow_information_dialog(
             self,
             "LED bei binären Ausgängen" if german else "LED for binary outputs",
             (
@@ -731,6 +754,7 @@ class ForwardCalibrationDialog(QDialog):
                 "The threshold is an internal value of 0.5.\n\n"
                 "The LED does not indicate whether the result is correct or incorrect."
             ),
+            self.language.text("common.close"),
         )
 
     def build_quality_reference(self):

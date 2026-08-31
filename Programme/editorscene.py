@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: editorscene.py
 # Zweck: Verwaltet Netzwerkobjekte, Auswahl und Bearbeitung auf der Zeichenfläche.
-# Letzte Änderung: 20.08.2026
+# Letzte Änderung: 24.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -103,6 +103,7 @@ class EditorScene(QGraphicsScene):
         self.selection_start_position = None
         self.selection_rectangle = None
         self.selection_initial_items = set()
+        self.selection_candidate_items = []
 
         # Positionen ausgewählter Neuronen vor einer
         # möglichen Verschiebung.
@@ -594,6 +595,16 @@ class EditorScene(QGraphicsScene):
             self.clearSelection()
             self.selection_initial_items = set()
 
+        # Die Kandidaten werden nur einmal zu Beginn ermittelt. Verbindungen
+        # gehören nicht zur Rahmenauswahl und müssen dadurch während des
+        # Ziehens auch nicht wiederholt geprüft oder umgezeichnet werden.
+        self.selection_candidate_items = list(
+            self.network.get_neurons()
+        ) + [
+            item for item in self.items()
+            if isinstance(item, CommentItem)
+        ]
+
         self.selection_rectangle = QGraphicsRectItem()
         self.selection_rectangle.setPen(
             QPen(
@@ -639,14 +650,9 @@ class EditorScene(QGraphicsScene):
         )
 
         matching_items = set()
-
-        for item in self.items():
-            if not isinstance(
-                item,
-                (Neuron, Connection, CommentItem)
-            ):
+        for item in self.selection_candidate_items:
+            if item.scene() is not self:
                 continue
-
             if item.sceneBoundingRect().intersects(
                 selection_rect
             ):
@@ -657,14 +663,12 @@ class EditorScene(QGraphicsScene):
             | matching_items
         )
 
-        for item in self.items():
-            if isinstance(
-                item,
-                (Neuron, Connection, CommentItem)
-            ):
-                item.setSelected(
-                    item in selected_items
-                )
+        for item in self.selection_candidate_items:
+            if item.scene() is not self:
+                continue
+            should_be_selected = item in selected_items
+            if item.isSelected() != should_be_selected:
+                item.setSelected(should_be_selected)
 
     def cancel_selection_rectangle(self):
         """
@@ -683,6 +687,7 @@ class EditorScene(QGraphicsScene):
         self.selection_rectangle = None
         self.selection_start_position = None
         self.selection_initial_items = set()
+        self.selection_candidate_items = []
 
     def store_movement_start_positions(self):
         """

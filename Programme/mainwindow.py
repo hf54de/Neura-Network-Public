@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: mainwindow.py
 # Zweck: Verbindet Hauptfenster, Menüs, Werkzeugleisten und zentrale Programmabläufe.
-# Letzte Änderung: 20.08.2026
+# Letzte Änderung: 31.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -85,7 +85,7 @@ from projectassistantdialog import ProjectAssistantDialog
 from projectio import ProjectIO
 from projectdescriptiondialog import ProjectDescriptionDialog
 from projectimagedialog import ProjectImageDialog
-from projectoverviewdialog import ProjectOverviewDialog
+from projectoverviewdialog import ProjectCheckDialog, ProjectOverviewDialog
 from resultanalysisdialog import ResultAnalysisDialog
 from projectsavedialog import ProjectSaveDialog
 from settings import Settings
@@ -1876,34 +1876,6 @@ class MainWindow(QMainWindow):
             self.update_property_section_arrows
         )
 
-        self.project_workflow_widget = QWidget()
-        workflow_layout = QVBoxLayout(self.project_workflow_widget)
-        workflow_layout.setContentsMargins(10, 10, 10, 10)
-        workflow_layout.setSpacing(8)
-        workflow_intro = QLabel(text("project_workflow.introduction"))
-        workflow_intro.setWordWrap(True)
-        workflow_layout.addWidget(workflow_intro)
-        self.project_workflow_buttons = []
-        workflow_steps = (
-            ("network", "project_workflow.network", self.open_workflow_network),
-            ("training_data", "project_workflow.training_data", self.open_training_data_dialog),
-            ("calibration", "project_workflow.calibration", self.open_training_data_dialog),
-            ("training", "project_workflow.training", self.open_training_dialog),
-            ("analysis", "project_workflow.analysis", self.open_result_analysis),
-        )
-        for step, label_key, callback in workflow_steps:
-            button = QPushButton()
-            button.setProperty("workflow_step", step)
-            button.setProperty("workflow_label_key", label_key)
-            button.setMinimumHeight(32)
-            button.clicked.connect(callback)
-            workflow_layout.addWidget(button)
-            self.project_workflow_buttons.append(button)
-        workflow_layout.addStretch(1)
-        self.property_dock_tabs.addItem(
-            self.project_workflow_widget,
-            text("properties.tab.project_workflow")
-        )
         self.update_property_section_arrows()
 
         self.property_dock.setWidget(self.property_dock_tabs)
@@ -2885,28 +2857,9 @@ class MainWindow(QMainWindow):
         ).exec()
 
     def set_project_workflow_visible(self, visible):
-        """Blendet den optionalen Bereich Projektablauf ein oder aus."""
-        if not hasattr(self, "property_dock_tabs"):
-            return
+        """Kompatibilitätsstelle für ältere Programmeinstellungen."""
 
-        workflow_index = self.property_dock_tabs.indexOf(
-            self.project_workflow_widget
-        )
-        if visible and workflow_index < 0:
-            self.property_dock_tabs.addItem(
-                self.project_workflow_widget,
-                self.language.text("properties.tab.project_workflow")
-            )
-        elif not visible and workflow_index >= 0:
-            if self.property_dock_tabs.currentIndex() == workflow_index:
-                self.property_dock_tabs.setCurrentIndex(0)
-            self.property_dock_tabs.removeItem(workflow_index)
-
-        self.update_property_section_arrows()
-
-        self.ui_settings["project_workflow_visible"] = bool(visible)
-        if not self._applying_ui_settings and not self._is_closing:
-            Settings.save_ui_settings(self.ui_settings)
+        self.ui_settings["project_workflow_visible"] = False
 
     def update_property_section_arrows(self, *_args):
         """Kennzeichnet offene und geschlossene Eigenschaftsbereiche."""
@@ -2917,7 +2870,6 @@ class MainWindow(QMainWindow):
         sections = (
             (self.property_stack, "properties.tab.details"),
             (self.property_math_stack, "properties.tab.mathematics"),
-            (self.project_workflow_widget, "properties.tab.project_workflow"),
         )
         current_index = self.property_dock_tabs.currentIndex()
         for widget, text_key in sections:
@@ -2961,29 +2913,9 @@ class MainWindow(QMainWindow):
         return True
 
     def update_project_workflow(self):
-        """Aktualisiert die automatisch ermittelten Haken des Projektablaufs."""
-        if not hasattr(self, "project_workflow_buttons"):
-            return
-        try:
-            network_done = bool(self.scene.network.get_neurons()) and bool(
-                self.scene.network.validate_network(translator=self.language.text)["valid"]
-            )
-        except (TypeError, ValueError, KeyError):
-            network_done = False
-        states = {
-            "network": network_done,
-            "training_data": self.training_data_manager.has_document,
-            "calibration": self.training_data_are_calibrated(),
-            "training": self.active_training_history_entry() is not None,
-            "analysis": bool(
-                hasattr(self, "action_result_analysis")
-                and self.action_result_analysis.isEnabled()
-            ),
-        }
-        for button in self.project_workflow_buttons:
-            step = button.property("workflow_step")
-            label = self.language.text(button.property("workflow_label_key"))
-            button.setText(f"{'✓' if states.get(step) else '○'}  {label}")
+        """Kompatibilitätsstelle; die Statusanzeige befindet sich unter Prüfen."""
+
+        return
 
     def project_image_path(self):
         """Liefert das vorhandene Projektbild des aktuellen Projekts."""
@@ -6361,50 +6293,310 @@ class MainWindow(QMainWindow):
 
     def validate_network(self):
         """
-        Prüft die Struktur des aktuellen Netzwerkes
-        und zeigt das Ergebnis an.
+        Öffnet die gemeinsame Prüfung von Netzwerk und Projektzustand.
         """
 
-        result = (
-            self.scene.network.validate_network(
-                translator=self.language.text
+        ProjectCheckDialog(
+            self.project_check_results,
+            parent=self,
+            language_manager=self.language,
+        ).exec()
+
+    def project_check_results(self):
+        """Ermittelt den Projektzustand ausschließlich lesend."""
+
+        text = self.language.text
+        sections = []
+
+        def section(title_key, status, lines):
+            sections.append({
+                "title": text(title_key),
+                "status": status,
+                "lines": lines,
+            })
+
+        # 1. Netzwerkstruktur: bestehende Netzwerkvalidierung unverändert nutzen.
+        try:
+            network_result = self.scene.network.validate_network(
+                translator=text
             )
+        except (KeyError, TypeError, ValueError) as error:
+            network_result = {
+                "valid": False,
+                "input_count": 0,
+                "hidden_count": 0,
+                "output_count": 0,
+                "connection_count": 0,
+                "errors": [str(error)],
+            }
+        network_lines = [
+            text(
+                "project_check.network.counts",
+                inputs=network_result.get("input_count", 0),
+                hidden=network_result.get("hidden_count", 0),
+                outputs=network_result.get("output_count", 0),
+                connections=network_result.get("connection_count", 0),
+            )
+        ]
+        if network_result.get("valid"):
+            network_lines.append(text("project_check.network.valid"))
+            network_status = "ok"
+        else:
+            network_lines.append(text("project_check.network.invalid"))
+            network_lines.extend(
+                f"• {error}" for error in network_result.get("errors", [])
+            )
+            network_status = "error"
+        section("project_check.section.network", network_status, network_lines)
+
+        # 2. Trainingsdaten und vollständige Zuordnung zum aktuellen Netzwerk.
+        training_document = self.training_data_manager.document
+        training_ready = False
+        if not isinstance(training_document, dict):
+            training_status = "warning"
+            training_lines = [text("project_check.training_data.none")]
+        else:
+            columns = list(training_document.get("columns", []))
+            records = list(training_document.get("records", []))
+            input_count = sum(
+                1 for column in columns
+                if isinstance(column, dict) and column.get("role") == "input"
+            )
+            output_count = sum(
+                1 for column in columns
+                if isinstance(column, dict) and column.get("role") == "output"
+            )
+            file_path = self.training_data_manager.file_path
+            training_lines = [
+                text(
+                    "project_check.training_data.file",
+                    file=(
+                        str(file_path)
+                        if file_path
+                        else text("project_check.file.unsaved")
+                    ),
+                ),
+                text(
+                    "project_check.training_data.counts",
+                    records=len(records),
+                    inputs=input_count,
+                    outputs=output_count,
+                ),
+            ]
+            training_status = "ok"
+            if file_path and not Path(file_path).is_file():
+                training_status = "warning"
+                training_lines.append(text("project_check.file.missing"))
+            try:
+                TrainingDataIO.validate(training_document, translator=text)
+                NetworkTestDialog.prepare_document(
+                    self.scene.network,
+                    training_document,
+                    data_label=text("test.data.training"),
+                    translator=text,
+                )
+                training_ready = True
+                training_lines.append(
+                    text("project_check.training_data.mapping_valid")
+                )
+            except (KeyError, TypeError, ValueError) as error:
+                training_status = "error"
+                training_lines.append(
+                    text(
+                        "project_check.training_data.mapping_invalid",
+                        error=str(error),
+                    )
+                )
+        section(
+            "project_check.section.training_data",
+            training_status,
+            training_lines,
         )
 
-        summary = self.language.text(
-            "network.validation.summary",
-            inputs=result["input_count"],
-            hidden=result["hidden_count"],
-            outputs=result["output_count"],
-            connections=result["connection_count"]
+        # 3. Datenarten und Skalierungen; Rohwerte selbst bleiben unangetastet.
+        if not isinstance(training_document, dict):
+            calibration_status = "warning"
+            calibration_lines = [text("project_check.calibration.none")]
+        else:
+            columns = list(training_document.get("columns", []))
+            records = list(training_document.get("records", []))
+            binary_count = sum(
+                1 for column in columns
+                if isinstance(column, dict)
+                and column.get("data_type", "analog") == "binary"
+            )
+            analog_columns = [
+                (index, column)
+                for index, column in enumerate(columns)
+                if isinstance(column, dict)
+                and column.get("data_type", "analog") != "binary"
+            ]
+            mode_counts = {}
+            problematic_unscaled = []
+            small_unscaled = []
+            for column_index, column in analog_columns:
+                calibration = TrainingDataIO.normalize_calibration(
+                    column.get("calibration")
+                )
+                mode = calibration["mode"]
+                mode_counts[mode] = mode_counts.get(mode, 0) + 1
+                if mode != "none":
+                    continue
+                values = [
+                    float(record[column_index])
+                    for record in records
+                    if isinstance(record, list) and column_index < len(record)
+                ]
+                name = str(column.get("name") or column_index + 1)
+                if values and (min(values) < -1.0 or max(values) > 1.0):
+                    problematic_unscaled.append(name)
+                else:
+                    small_unscaled.append(name)
+            calibration_lines = [
+                text(
+                    "project_check.calibration.types",
+                    binary=binary_count,
+                    analog=len(analog_columns),
+                ),
+                text(
+                    "project_check.calibration.modes",
+                    none=mode_counts.get("none", 0),
+                    minmax01=mode_counts.get("minmax_0_1", 0),
+                    minmax11=mode_counts.get("minmax_minus1_1", 0),
+                    standard=mode_counts.get("standard", 0),
+                ),
+            ]
+            calibration_status = "ok"
+            if problematic_unscaled:
+                calibration_status = "warning"
+                calibration_lines.append(
+                    text(
+                        "project_check.calibration.problematic",
+                        columns=", ".join(problematic_unscaled),
+                    )
+                )
+            if small_unscaled:
+                calibration_lines.append(
+                    text(
+                        "project_check.calibration.small_unscaled",
+                        columns=", ".join(small_unscaled),
+                    )
+                )
+            if not problematic_unscaled:
+                calibration_lines.append(
+                    text("project_check.calibration.valid")
+                )
+        section(
+            "project_check.section.calibration",
+            calibration_status,
+            calibration_lines,
         )
 
-        if result["valid"]:
-            QMessageBox.information(
-                self,
-                self.language.text("network.validation.title"),
-                self.language.text(
-                    "network.validation.success",
-                    summary=summary
+        # 4. Nur Vorhandensein und Lesbarkeit bewerten, niemals Ergebnisqualität.
+        history_entries = list(self.training_history or [])
+        active_entry = self.active_training_history_entry()
+        history_valid = all(
+            isinstance(entry, dict) and isinstance(entry.get("run_id"), int)
+            for entry in history_entries
+        )
+        training_run_lines = [
+            text(
+                "project_check.training.history_count",
+                count=len(history_entries),
+            )
+        ]
+        if not history_valid:
+            training_run_status = "error"
+            training_run_lines.append(text("project_check.training.history_invalid"))
+        elif active_entry is None:
+            training_run_status = "warning"
+            training_run_lines.append(text("project_check.training.none"))
+        else:
+            training_run_status = "ok"
+            training_run_lines.append(
+                text(
+                    "project_check.training.active",
+                    run=active_entry.get("run_id", "–"),
+                    epochs=int(active_entry.get("completed_epochs", 0)),
                 )
             )
-
-            return
-
-        error_text = "\n".join(
-            f"• {error}"
-            for error in result["errors"]
+            training_run_lines.append(text("project_check.training.no_quality"))
+        section(
+            "project_check.section.training",
+            training_run_status,
+            training_run_lines,
         )
 
-        QMessageBox.warning(
-            self,
-            self.language.text("network.validation.title"),
-            self.language.text(
-                "network.validation.failed",
-                summary=summary,
-                errors=error_text
+        # 5. Verfügbare Quellen für Test und Analyse.
+        analysis_lines = []
+        available_sources = []
+        if training_ready:
+            available_sources.append(text("test.data.training"))
+            analysis_lines.append(text("project_check.analysis.training_ready"))
+        else:
+            analysis_lines.append(text("project_check.analysis.training_unavailable"))
+
+        test_status = None
+        if self.test_data_manager.has_document:
+            try:
+                NetworkTestDialog.prepare_document(
+                    self.scene.network,
+                    self.test_data_manager.document,
+                    data_label=text("test.data.test"),
+                    translator=text,
+                )
+                calibration_differences = self.get_test_calibration_differences()
+                if calibration_differences:
+                    test_status = "warning"
+                    available_sources.append(text("test.data.test"))
+                    analysis_lines.append(
+                        text("project_check.analysis.test_calibration_warning")
+                    )
+                else:
+                    test_status = "ok"
+                    available_sources.append(text("test.data.test"))
+                    analysis_lines.append(text("project_check.analysis.test_ready"))
+            except (KeyError, TypeError, ValueError) as error:
+                test_status = "error"
+                analysis_lines.append(
+                    text("project_check.analysis.test_invalid", error=str(error))
+                )
+        else:
+            analysis_lines.append(text("project_check.analysis.no_test_data"))
+
+        analysis_lines.append(
+            text(
+                "project_check.analysis.sources",
+                sources=(
+                    ", ".join(available_sources)
+                    if available_sources
+                    else text("common.none")
+                ),
             )
         )
+        if test_status == "error":
+            analysis_status = "error"
+        elif available_sources:
+            analysis_status = "warning" if test_status == "warning" else "ok"
+        else:
+            analysis_status = "warning"
+        section(
+            "project_check.section.analysis",
+            analysis_status,
+            analysis_lines,
+        )
+
+        statuses = [item["status"] for item in sections]
+        overall = (
+            "error" if "error" in statuses
+            else "warning" if "warning" in statuses
+            else "ok"
+        )
+        return {
+            "overall": overall,
+            "summary": text(f"project_check.summary.{overall}"),
+            "sections": sections,
+        }
 
     def forward_pass(self):
         """
@@ -7488,7 +7680,6 @@ class MainWindow(QMainWindow):
         self.example_projects_menu.menuAction().setEnabled(False)
         self.property_stack.setEnabled(False)
         self.property_math_stack.setEnabled(False)
-        self.project_workflow_widget.setEnabled(False)
         self.statusBar().showMessage(
             self.language.text("status.training_observation")
         )
@@ -7513,7 +7704,6 @@ class MainWindow(QMainWindow):
         self.example_projects_menu.menuAction().setEnabled(True)
         self.property_stack.setEnabled(True)
         self.property_math_stack.setEnabled(True)
-        self.project_workflow_widget.setEnabled(True)
         self.update_undo_redo_actions()
         self.update_test_data_actions()
         self.update_result_analysis_action_state()
@@ -8881,8 +9071,8 @@ class MainWindow(QMainWindow):
             )
 
         if self.current_project_path:
-            project_name = os.path.basename(
-                self.current_project_path
+            project_name = str(
+                Path(self.current_project_path).expanduser().resolve()
             )
 
         else:
@@ -9695,15 +9885,8 @@ class MainWindow(QMainWindow):
             Settings.save_last_project_directory(
                 directory_path
             )
-            for language_code in self.project_history_languages(file_path):
-                Settings.add_recent_project_file(
-                    file_path,
-                    language_code
-                )
-                Settings.save_last_project_file(
-                    file_path,
-                    language_code
-                )
+            Settings.add_recent_project_file(file_path)
+            Settings.save_last_project_file(file_path)
 
             if hasattr(self, "recent_projects_menu"):
                 self.update_recent_projects_menu()
@@ -9724,25 +9907,10 @@ class MainWindow(QMainWindow):
         ).strip().lower()
         return language_code if language_code in {"de", "en"} else "en"
 
-    @staticmethod
-    def project_history_languages(file_path):
-        """Ordnet Standardprojekte einer Sprache, eigene Projekte beiden zu."""
-
-        path_parts = {
-            part.casefold()
-            for part in Path(file_path).expanduser().parts
-        }
-        if "projects_de" in path_parts:
-            return ("de",)
-        if "projects_en" in path_parts:
-            return ("en",)
-        return ("de", "en")
-
     def remove_project_from_history(self, file_path):
-        """Entfernt einen Pfad aus allen Listen, in denen er erscheinen kann."""
+        """Entfernt einen Pfad aus dem sprachunabhängigen Projektverlauf."""
 
-        for language_code in self.project_history_languages(file_path):
-            Settings.remove_recent_project_file(file_path, language_code)
+        Settings.remove_recent_project_file(file_path)
 
     def update_recent_projects_menu(self):
         """Baut das Untermenü der zuletzt verwendeten Projekte neu auf."""
@@ -9750,9 +9918,7 @@ class MainWindow(QMainWindow):
         self.recent_projects_menu.clear()
 
         try:
-            recent_files = Settings.get_recent_project_files(
-                self.current_project_language()
-            )
+            recent_files = Settings.get_recent_project_files()
         except OSError:
             recent_files = []
 
@@ -9979,9 +10145,7 @@ class MainWindow(QMainWindow):
             return False
 
         try:
-            file_path = Settings.get_last_project_file(
-                self.current_project_language()
-            )
+            file_path = Settings.get_last_project_file()
         except OSError:
             return False
 
@@ -9990,9 +10154,7 @@ class MainWindow(QMainWindow):
 
         if not Path(file_path).is_file():
             try:
-                Settings.clear_last_project_file(
-                    self.current_project_language()
-                )
+                Settings.clear_last_project_file()
                 self.remove_project_from_history(file_path)
             except OSError:
                 pass
@@ -10051,9 +10213,7 @@ class MainWindow(QMainWindow):
 
             if automatic_start:
                 try:
-                    Settings.clear_last_project_file(
-                        self.current_project_language()
-                    )
+                    Settings.clear_last_project_file()
                 except OSError:
                     pass
 

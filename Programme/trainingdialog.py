@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: trainingdialog.py
 # Zweck: Steuert Trainingsläufe, Parameter, Status und Bedienung des Trainingsfensters.
-# Letzte Änderung: 20.08.2026
+# Letzte Änderung: 24.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -374,6 +374,15 @@ class TrainingDialog(QDialog):
             QSizePolicy.Policy.Expanding
         )
         self.data_layout.addRow(self.workload_container)
+
+        self.data_info_button = self.create_group_info_button(
+            self.data_group,
+            "training.info.data.title",
+            "training.info.data.text",
+        )
+        self.data_info_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.data_info_button.setAutoDefault(False)
+        self.data_info_button.setDefault(False)
 
         # Gruppe: Einstellungen, die ausschließlich einen neuen Lauf betreffen.
         self.parameter_group = QGroupBox(
@@ -1577,6 +1586,12 @@ class TrainingDialog(QDialog):
             self.monitor_training_data.isChecked()
         )
 
+        # In diesem Fenster übernehmen die Informationsschaltflächen die
+        # Erklärungen. Gewöhnliche Tooltips werden deshalb vollständig
+        # unterdrückt, auch wenn ein Steuerelement sie später aktualisiert.
+        for widget in self.findChildren(QWidget):
+            widget.installEventFilter(self)
+
     def sync_training_area_heights(self):
         """Richtet die Unterkanten der linken Gruppen und der Kurve aus."""
 
@@ -2350,7 +2365,14 @@ class TrainingDialog(QDialog):
         button = self.group_info_buttons.get(group)
         if button is None:
             return
-        button.move(max(0, group.width() - button.width() - 12), 20)
+        if group is self.data_group:
+            y_position = max(20, group.height() - button.height() - 12)
+        else:
+            y_position = 20
+        button.move(
+            max(0, group.width() - button.width() - 12),
+            y_position,
+        )
         button.raise_()
 
     def show_training_information(self, title_key, message_key):
@@ -2360,6 +2382,8 @@ class TrainingDialog(QDialog):
         dialog.setWindowTitle(self.language.text(title_key))
         dialog.setMinimumWidth(500)
         layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
 
         explanation = QLabel(self.language.text(message_key))
         explanation.setWordWrap(True)
@@ -2367,8 +2391,8 @@ class TrainingDialog(QDialog):
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         explanation.setStyleSheet(
-            "QLabel { background: #fff8d8; border: 1px solid #d6c36a; "
-            "border-radius: 4px; padding: 10px; }"
+            "QLabel { background-color: #fff8d8; color: #202020; "
+            "border: 1px solid #d8b34f; border-radius: 5px; padding: 12px; }"
         )
         layout.addWidget(explanation)
 
@@ -2382,6 +2406,9 @@ class TrainingDialog(QDialog):
 
     def eventFilter(self, watched, event):
         """Wählt das Epochenfeld auch bei einem Klick ohne Wertänderung."""
+
+        if event.type() == QEvent.Type.ToolTip:
+            return True
 
         if (
             watched in self.group_info_buttons
@@ -4013,14 +4040,19 @@ class TrainingDialog(QDialog):
         dialog.setWindowTitle(self.language.text("training.maximum_error.title"))
         dialog.setMinimumWidth(500)
         layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
 
         explanation = QLabel(
             self.language.text("training.maximum_error.explanation")
         )
         explanation.setWordWrap(True)
+        explanation.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
         explanation.setStyleSheet(
-            "QLabel { background: #fff8d8; border: 1px solid #d6c36a; "
-            "border-radius: 4px; padding: 9px; }"
+            "QLabel { background-color: #fff8d8; color: #202020; "
+            "border: 1px solid #d8b34f; border-radius: 5px; padding: 12px; }"
         )
         layout.addWidget(explanation)
 

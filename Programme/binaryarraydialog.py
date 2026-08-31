@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: binaryarraydialog.py
 # Zweck: Definiert und visualisiert zweidimensionale binäre Eingabe-Arrays.
-# Letzte Änderung: 05.08.2026
+# Letzte Änderung: 24.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from language import LanguageManager
 from numberformat import format_number
+from graphicalexperimentdialog import show_yellow_information_dialog
 
 
 class BinaryArrayPreview(QGroupBox):
@@ -102,9 +103,22 @@ class BinaryInputArrayDialog(QDialog):
         self.resize(760, 470)
         layout = QVBoxLayout(self)
 
+        intro_row = QHBoxLayout()
         intro = QLabel(self.language.text("data.array.introduction"))
         intro.setWordWrap(True)
-        layout.addWidget(intro)
+        intro_row.addWidget(intro, 1)
+        self.info_button = QPushButton("i", self)
+        self.info_button.setFixedSize(26, 24)
+        self.info_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.info_button.setAutoDefault(False)
+        self.info_button.setDefault(False)
+        self.info_button.clicked.connect(self.show_information)
+        intro_row.addWidget(
+            self.info_button,
+            0,
+            Qt.AlignmentFlag.AlignTop,
+        )
+        layout.addLayout(intro_row)
 
         dimensions = QHBoxLayout()
         dimensions.addWidget(QLabel(self.language.text("data.array.rows")))
@@ -189,6 +203,16 @@ class BinaryInputArrayDialog(QDialog):
         self.previous_button.clicked.connect(lambda: self.change_record(-1))
         self.next_button.clicked.connect(lambda: self.change_record(1))
         self.rebuild_assignments()
+
+    def show_information(self):
+        """Erläutert Zuordnung, Vorschau und Speicherung des Eingaberasters."""
+
+        show_yellow_information_dialog(
+            self,
+            self.language.text("data.array.information_title"),
+            self.language.text("data.array.information_text"),
+            self.language.text("common.close"),
+        )
 
     def nearest_divisor(self, value):
         count = len(self.binary_inputs)
