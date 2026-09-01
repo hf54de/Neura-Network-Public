@@ -185,6 +185,77 @@ class ToolbarIcons:
             <path d="M3 5c3-1 6-.5 9 2v13c-3-2.5-6-3-9-2z"/>
             <path d="M21 5c-3-1-6-.5-9 2v13c3-2.5 6-3 9-2z"/>
             <path d="M6 9h3M6 12h3M15 9h3M15 12h3" class="accent"/>
+        """,
+        "layer_front": """
+            <rect x="8" y="8" width="11" height="11" rx="1"/>
+            <rect x="4" y="4" width="11" height="11" rx="1" class="accent"/>
+        """,
+        "layer_back": """
+            <rect x="8" y="8" width="11" height="11" rx="1" class="accent"/>
+            <rect x="4" y="4" width="11" height="11" rx="1"/>
+        """,
+        "color": """
+            <path d="M12 3a9 9 0 100 18c2 0 2.5-1.5 1.5-2.5-.8-.8-.2-2.5 1.3-2.5H18a3 3 0 003-3c0-5.5-4-10-9-10z"/>
+            <circle cx="8" cy="9" r="1" class="accent fill"/>
+            <circle cx="12" cy="7" r="1" class="accent fill"/>
+            <circle cx="16" cy="10" r="1" class="accent fill"/>
+        """,
+        "line_width": """
+            <path d="M4 6h16M4 12h16"/><path d="M4 18h16" class="accent"/>
+        """,
+        "arrow": """
+            <path d="M3 12h17M15 7l5 5-5 5" class="accent"/>
+        """,
+        "reverse": """
+            <path d="M5 8h15M16 4l4 4-4 4"/>
+            <path d="M19 16H4M8 12l-4 4 4 4" class="accent"/>
+        """,
+        "transparent": """
+            <rect x="4" y="4" width="16" height="16" rx="2"/>
+            <path d="M4 12h16M12 4v16M4 4l16 16M20 4L4 20" class="accent"/>
+        """,
+        "edit": """
+            <path d="M5 19l1-5L17 3l4 4L10 19z" class="accent"/>
+            <path d="M14 6l4 4M5 19h14"/>
+        """,
+        "comment": """
+            <path d="M4 4h16v13H9l-5 4z"/><path d="M8 8h8M8 12h6" class="accent"/>
+        """,
+        "line": """
+            <circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/>
+            <path d="M7 17L17 7" class="accent"/>
+        """,
+        "curve": """
+            <circle cx="4" cy="18" r="2"/><circle cx="20" cy="6" r="2"/>
+            <path d="M6 18C8 5 14 19 18 6" class="accent"/>
+        """,
+        "rectangle": """
+            <rect x="4" y="6" width="16" height="12" rx="1" class="accent"/>
+        """,
+        "ellipse": """
+            <ellipse cx="12" cy="12" rx="9" ry="7" class="accent"/>
+        """,
+        "input": """
+            <path d="M3 12h15M13 7l5 5-5 5" class="accent"/><rect x="18" y="6" width="3" height="12"/>
+        """,
+        "output": """
+            <rect x="3" y="6" width="3" height="12"/><path d="M6 12h15M16 7l5 5-5 5" class="accent"/>
+        """,
+        "add_all": """
+            <rect x="3" y="5" width="12" height="14" rx="2"/><path d="M9 8v8M5 12h8" class="accent"/>
+            <path d="M18 8v8M14 12h8" class="accent"/>
+        """,
+        "binary_array": """
+            <rect x="3" y="5" width="18" height="14" rx="2"/>
+            <path d="M8 8v8M5 12h6M16 8v8M13 8h6M13 16h6" class="accent"/>
+        """,
+        "bar_display": """
+            <path d="M4 20V4M4 20h17"/><rect x="7" y="13" width="3" height="5" class="accent"/>
+            <rect x="12" y="9" width="3" height="9" class="accent"/><rect x="17" y="5" width="3" height="13" class="accent"/>
+        """,
+        "pointer_display": """
+            <path d="M4 17a8 8 0 0116 0"/><path d="M12 16l5-6" class="accent"/>
+            <circle cx="12" cy="16" r="1.5" class="accent fill"/>
         """
     }
 
@@ -200,7 +271,7 @@ class ToolbarIcons:
             <svg xmlns="http://www.w3.org/2000/svg"
                  width="64" height="64" viewBox="0 0 24 24">
                 <style>
-                    path, rect, circle {{
+                    path, rect, circle, ellipse {{
                         fill: none;
                         stroke: {color};
                         stroke-width: 1.8;
