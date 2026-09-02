@@ -385,7 +385,7 @@ class Settings:
 
     @classmethod
     def get_recent_project_files(cls, language_code=None):
-        """Liefert den sprachunabhängigen Verlauf mit höchstens fünf Projekten."""
+        """Liefert den Projektverlauf der gewählten Oberflächensprache."""
 
         settings_data = cls.load()
         paths_data = settings_data.get("paths")
@@ -393,31 +393,77 @@ class Settings:
         if not isinstance(paths_data, dict):
             return []
 
+        language_code = str(language_code or "").strip().lower()
+        recent_lists = cls.build_language_recent_project_lists(paths_data)
+        if "recent_project_files" in paths_data:
+            paths_data["recent_project_files_de"] = recent_lists["de"]
+            paths_data["recent_project_files_en"] = recent_lists["en"]
+            paths_data.pop("recent_project_files", None)
+            settings_data["paths"] = paths_data
+            cls.save(settings_data)
+        if language_code in {"de", "en"}:
+            return recent_lists[language_code]
+
         recent_files = []
         known_paths = set()
-        stored_lists = (
-            paths_data.get("recent_project_files"),
-            paths_data.get("recent_project_files_de"),
-            paths_data.get("recent_project_files_en"),
-        )
-        for stored_files in stored_lists:
-            if not isinstance(stored_files, list):
-                continue
+        for stored_files in (recent_lists["de"], recent_lists["en"]):
             for file_path in stored_files:
-                if not isinstance(file_path, str) or not file_path.strip():
-                    continue
-                normalized_path = str(
-                    Path(file_path).expanduser().resolve()
-                )
-                comparison_path = normalized_path.casefold()
+                comparison_path = file_path.casefold()
                 if comparison_path in known_paths:
                     continue
                 known_paths.add(comparison_path)
-                recent_files.append(normalized_path)
+                recent_files.append(file_path)
                 if len(recent_files) >= cls.MAX_RECENT_PROJECTS:
                     return recent_files
-
         return recent_files
+
+    @staticmethod
+    def recent_project_path_language(file_path):
+        """Erkennt die Sprache der mitgelieferten Ordner Projects_de/Projects_en."""
+
+        parts = {part.casefold() for part in Path(file_path).parts}
+        if "projects_de" in parts and "projects_en" not in parts:
+            return "de"
+        if "projects_en" in parts and "projects_de" not in parts:
+            return "en"
+        return None
+
+    @classmethod
+    def build_language_recent_project_lists(cls, paths_data):
+        """Überführt bei Bedarf den bisherigen gemeinsamen Verlauf verlustfrei."""
+
+        result = {"de": [], "en": []}
+        known_paths = {"de": set(), "en": set()}
+
+        def append(language_code, file_path):
+            if not isinstance(file_path, str) or not file_path.strip():
+                return
+            normalized_path = str(Path(file_path).expanduser().resolve())
+            comparison_path = normalized_path.casefold()
+            if comparison_path in known_paths[language_code]:
+                return
+            if len(result[language_code]) >= cls.MAX_RECENT_PROJECTS:
+                return
+            known_paths[language_code].add(comparison_path)
+            result[language_code].append(normalized_path)
+
+        for language_code in ("de", "en"):
+            stored_files = paths_data.get(f"recent_project_files_{language_code}")
+            if isinstance(stored_files, list):
+                for file_path in stored_files:
+                    append(language_code, file_path)
+
+        legacy_files = paths_data.get("recent_project_files")
+        if isinstance(legacy_files, list):
+            for file_path in legacy_files:
+                path_language = cls.recent_project_path_language(file_path)
+                if path_language in {"de", "en"}:
+                    append(path_language, file_path)
+                else:
+                    append("de", file_path)
+                    append("en", file_path)
+
+        return result
 
     @classmethod
     def add_recent_project_file(cls, file_path, language_code=None):
@@ -430,23 +476,29 @@ class Settings:
             Path(file_path).expanduser().resolve()
         )
         comparison_path = normalized_path.casefold()
-        recent_files = [
-            stored_path
-            for stored_path in cls.get_recent_project_files(language_code)
-            if stored_path.casefold() != comparison_path
-        ]
-        recent_files.insert(0, normalized_path)
-        recent_files = recent_files[:cls.MAX_RECENT_PROJECTS]
-
         settings_data = cls.load()
         paths_data = settings_data.get("paths")
 
         if not isinstance(paths_data, dict):
             paths_data = {}
 
-        paths_data["recent_project_files"] = recent_files
-        paths_data.pop("recent_project_files_de", None)
-        paths_data.pop("recent_project_files_en", None)
+        language_code = str(language_code or "").strip().lower()
+        if language_code not in {"de", "en"}:
+            language_code = cls.recent_project_path_language(normalized_path) or "en"
+        recent_lists = cls.build_language_recent_project_lists(paths_data)
+        recent_lists[language_code] = [
+            stored_path
+            for stored_path in recent_lists[language_code]
+            if stored_path.casefold() != comparison_path
+        ]
+        recent_lists[language_code].insert(0, normalized_path)
+        recent_lists[language_code] = recent_lists[language_code][
+            :cls.MAX_RECENT_PROJECTS
+        ]
+
+        paths_data["recent_project_files_de"] = recent_lists["de"]
+        paths_data["recent_project_files_en"] = recent_lists["en"]
+        paths_data.pop("recent_project_files", None)
         settings_data["paths"] = paths_data
         cls.save(settings_data)
         return True
@@ -461,28 +513,26 @@ class Settings:
         comparison_path = str(
             Path(file_path).expanduser().resolve()
         ).casefold()
-        recent_files = [
-            stored_path
-            for stored_path in cls.get_recent_project_files(language_code)
-            if stored_path.casefold() != comparison_path
-        ]
-
         settings_data = cls.load()
         paths_data = settings_data.get("paths")
 
         if not isinstance(paths_data, dict):
             paths_data = {}
 
-        paths_data["recent_project_files"] = recent_files
-        for key in ("recent_project_files_de", "recent_project_files_en"):
-            legacy_files = paths_data.get(key)
-            if isinstance(legacy_files, list):
-                paths_data[key] = [
-                    stored_path for stored_path in legacy_files
-                    if isinstance(stored_path, str)
-                    and str(Path(stored_path).expanduser().resolve()).casefold()
-                    != comparison_path
-                ]
+        language_code = str(language_code or "").strip().lower()
+        recent_lists = cls.build_language_recent_project_lists(paths_data)
+        target_languages = (
+            (language_code,) if language_code in {"de", "en"} else ("de", "en")
+        )
+        for target_language in target_languages:
+            recent_lists[target_language] = [
+                stored_path
+                for stored_path in recent_lists[target_language]
+                if stored_path.casefold() != comparison_path
+            ]
+        paths_data["recent_project_files_de"] = recent_lists["de"]
+        paths_data["recent_project_files_en"] = recent_lists["en"]
+        paths_data.pop("recent_project_files", None)
         settings_data["paths"] = paths_data
         cls.save(settings_data)
         return True

@@ -9885,7 +9885,10 @@ class MainWindow(QMainWindow):
             Settings.save_last_project_directory(
                 directory_path
             )
-            Settings.add_recent_project_file(file_path)
+            Settings.add_recent_project_file(
+                file_path,
+                self.current_project_language()
+            )
             Settings.save_last_project_file(file_path)
 
             if hasattr(self, "recent_projects_menu"):
@@ -9910,7 +9913,10 @@ class MainWindow(QMainWindow):
     def remove_project_from_history(self, file_path):
         """Entfernt einen Pfad aus dem sprachunabhängigen Projektverlauf."""
 
-        Settings.remove_recent_project_file(file_path)
+        Settings.remove_recent_project_file(
+            file_path,
+            self.current_project_language()
+        )
 
     def update_recent_projects_menu(self):
         """Baut das Untermenü der zuletzt verwendeten Projekte neu auf."""
@@ -9918,7 +9924,9 @@ class MainWindow(QMainWindow):
         self.recent_projects_menu.clear()
 
         try:
-            recent_files = Settings.get_recent_project_files()
+            recent_files = Settings.get_recent_project_files(
+                self.current_project_language()
+            )
         except OSError:
             recent_files = []
 

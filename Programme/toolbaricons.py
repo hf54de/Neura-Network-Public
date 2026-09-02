@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: toolbaricons.py
 # Zweck: Erzeugt und verwaltet die Symbole der Werkzeugleisten.
-# Letzte Änderung: 08.08.2026
+# Letzte Änderung: 02.09.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -194,6 +194,16 @@ class ToolbarIcons:
             <rect x="8" y="8" width="11" height="11" rx="1" class="accent"/>
             <rect x="4" y="4" width="11" height="11" rx="1"/>
         """,
+        "lock": """
+            <rect x="5" y="10" width="14" height="11" rx="2"/>
+            <path d="M8 10V7a4 4 0 018 0v3" class="accent"/>
+            <circle cx="12" cy="15" r="1.3" class="accent fill"/>
+        """,
+        "unlock": """
+            <rect x="5" y="10" width="14" height="11" rx="2"/>
+            <path d="M16 10V7a4 4 0 00-7.5-2" class="accent"/>
+            <circle cx="12" cy="15" r="1.3" class="accent fill"/>
+        """,
         "color": """
             <path d="M12 3a9 9 0 100 18c2 0 2.5-1.5 1.5-2.5-.8-.8-.2-2.5 1.3-2.5H18a3 3 0 003-3c0-5.5-4-10-9-10z"/>
             <circle cx="8" cy="9" r="1" class="accent fill"/>
@@ -213,6 +223,52 @@ class ToolbarIcons:
         "transparent": """
             <rect x="4" y="4" width="16" height="16" rx="2"/>
             <path d="M4 12h16M12 4v16M4 4l16 16M20 4L4 20" class="accent"/>
+        """,
+        "align": """
+            <path d="M4 4v16"/><rect x="7" y="6" width="12" height="4"/>
+            <rect x="7" y="14" width="8" height="4" class="accent"/>
+        """,
+        "align_left": """
+            <path d="M4 4v16"/><rect x="7" y="6" width="12" height="4"/>
+            <rect x="7" y="14" width="8" height="4" class="accent"/>
+        """,
+        "align_right": """
+            <path d="M20 4v16"/><rect x="5" y="6" width="12" height="4"/>
+            <rect x="9" y="14" width="8" height="4" class="accent"/>
+        """,
+        "align_top": """
+            <path d="M4 4h16"/><rect x="6" y="7" width="4" height="12"/>
+            <rect x="14" y="7" width="4" height="8" class="accent"/>
+        """,
+        "align_bottom": """
+            <path d="M4 20h16"/><rect x="6" y="5" width="4" height="12"/>
+            <rect x="14" y="9" width="4" height="8" class="accent"/>
+        """,
+        "distribute_horizontal": """
+            <path d="M3 4v16M21 4v16"/><rect x="6" y="8" width="4" height="8"/>
+            <rect x="14" y="8" width="4" height="8" class="accent"/>
+            <path d="M10 12h4"/>
+        """,
+        "distribute_vertical": """
+            <path d="M4 3h16M4 21h16"/><rect x="8" y="6" width="8" height="4"/>
+            <rect x="8" y="14" width="8" height="4" class="accent"/>
+            <path d="M12 10v4"/>
+        """,
+        "equal_width": """
+            <rect x="4" y="5" width="16" height="5"/><rect x="4" y="14" width="16" height="5" class="accent"/>
+        """,
+        "equal_height": """
+            <rect x="5" y="4" width="5" height="16"/><rect x="14" y="4" width="5" height="16" class="accent"/>
+        """,
+        "equal_size": """
+            <rect x="3" y="5" width="8" height="7"/><rect x="13" y="12" width="8" height="7" class="accent"/>
+            <path d="M7 15v4h4M17 9V5h-4"/>
+        """,
+        "grid": """
+            <rect x="3" y="3" width="18" height="18"/><path d="M9 3v18M15 3v18M3 9h18M3 15h18" class="accent"/>
+        """,
+        "grid_spacing": """
+            <path d="M4 5h16M4 12h16M4 19h16"/><path d="M7 3v4M17 10v4M11 17v4" class="accent"/>
         """,
         "edit": """
             <path d="M5 19l1-5L17 3l4 4L10 19z" class="accent"/>

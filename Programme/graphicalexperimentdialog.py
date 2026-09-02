@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: graphicalexperimentdialog.py
 # Zweck: Stellt ein frei gestaltbares grafisches Bedienpult für Netzwerkexperimente bereit.
-# Letzte Änderung: 01.09.2026
+# Letzte Änderung: 02.09.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -1793,7 +1793,7 @@ class BinaryArrayPaintController(QObject):
         )
         scene_position = view.mapToScene(viewport_position)
         for button in self.buttons:
-            if not button.isVisible():
+            if not button.isVisible() or not button.isEnabled():
                 continue
             top_left = button.mapTo(card, QPoint(0, 0))
             button_rect = QRectF(
@@ -1954,6 +1954,12 @@ class BinaryArrayCard(ExperimentCard):
             button.blockSignals(True)
             button.setChecked(bool(controls["editor"].isChecked()))
             button.blockSignals(False)
+
+    def set_input_enabled(self, enabled):
+        """Erlaubt das Schalten des Rasters ausschließlich im Anwendungsmodus."""
+
+        for button in self.buttons:
+            button.setEnabled(bool(enabled))
 
 
 class ExperimentCanvasView(QGraphicsView):
@@ -2217,10 +2223,10 @@ class ExperimentCanvasView(QGraphicsView):
             if (
                 isinstance(item, MovableCardProxy)
                 and item.isSelected()
-                and hasattr(dialog, "selected_card_proxies")
+                and hasattr(dialog, "selected_movable_items")
             ):
                 dialog.pending_context_card_selection = list(
-                    dialog.selected_card_proxies()
+                    dialog.selected_movable_items()
                 )
             else:
                 dialog.pending_context_card_selection = []
@@ -2365,6 +2371,59 @@ class DesignGridItem(QGraphicsItem):
             y += spacing
 
 
+def draw_locked_indicator(painter, rect, size=12.0):
+    """Zeichnet eine dezente Schlossmarkierung innerhalb eines Elements."""
+
+    size = max(8.0, float(size))
+    margin = size * 0.18
+    badge = QRectF(
+        rect.right() - size - margin,
+        rect.top() + margin,
+        size,
+        size,
+    )
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    badge_pen = QPen(QColor(23, 96, 106, 125), 0.7)
+    badge_pen.setCosmetic(True)
+    painter.setPen(badge_pen)
+    painter.setBrush(QColor(255, 255, 255, 205))
+    painter.drawRoundedRect(badge, size * 0.18, size * 0.18)
+
+    body = QRectF(
+        badge.left() + size * 0.25,
+        badge.top() + size * 0.49,
+        size * 0.50,
+        size * 0.31,
+    )
+    lock_pen = QPen(QColor("#17606a"), 0.9)
+    lock_pen.setCosmetic(True)
+    painter.setPen(lock_pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(body, size * 0.07, size * 0.07)
+    shackle = QPainterPath()
+    shackle.moveTo(body.left() + size * 0.09, body.top())
+    shackle.lineTo(body.left() + size * 0.09, badge.top() + size * 0.38)
+    shackle.cubicTo(
+        body.left() + size * 0.09,
+        badge.top() + size * 0.17,
+        body.right() - size * 0.09,
+        badge.top() + size * 0.17,
+        body.right() - size * 0.09,
+        badge.top() + size * 0.38,
+    )
+    shackle.lineTo(body.right() - size * 0.09, body.top())
+    painter.drawPath(shackle)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor("#17606a"))
+    painter.drawEllipse(
+        QPointF(badge.center().x(), body.center().y()),
+        size * 0.045,
+        size * 0.045,
+    )
+    painter.restore()
+
+
 class ResizableBackgroundItem(QGraphicsPixmapItem):
     """Verschiebbares Bild mit proportionaler Größenänderung an der rechten unteren Ecke."""
 
@@ -2373,6 +2432,7 @@ class ResizableBackgroundItem(QGraphicsPixmapItem):
     def __init__(self, pixmap):
         super().__init__(pixmap)
         self.editable = True
+        self.locked = False
         self.resizing = False
         self.resize_start = QPointF()
         self.start_scale = 1.0
@@ -2383,10 +2443,23 @@ class ResizableBackgroundItem(QGraphicsPixmapItem):
 
     def set_editable(self, editable):
         self.editable = bool(editable)
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, self.editable)
+        self.setFlag(
+            QGraphicsItem.GraphicsItemFlag.ItemIsMovable,
+            self.editable and not self.locked,
+        )
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, self.editable)
         if not self.editable:
             self.setSelected(False)
+        self.update()
+
+    def set_locked(self, locked):
+        self.locked = bool(locked)
+        self.resizing = False
+        self.group_drag_proxy = None
+        self.setFlag(
+            QGraphicsItem.GraphicsItemFlag.ItemIsMovable,
+            self.editable and not self.locked,
+        )
         self.update()
 
     def handle_rect(self):
@@ -2414,19 +2487,26 @@ class ResizableBackgroundItem(QGraphicsPixmapItem):
         )
         if (
             self.editable
+            and not self.locked
             and not handles_hidden
             and (self.isSelected() or self.resizing)
         ):
             painter.setPen(QPen(QColor("#245a94"), 2.0 / max(0.001, self.scale())))
             painter.setBrush(QColor("#ffffff"))
             painter.drawRect(self.handle_rect())
+        if self.editable and self.locked:
+            draw_locked_indicator(
+                painter,
+                self.boundingRect(),
+                12.0 / max(0.001, self.scale()),
+            )
 
     def mousePressEvent(self, event):
         dialog = self.history_dialog()
         if dialog is not None and hasattr(dialog, "begin_history_action"):
             dialog.begin_history_action()
             dialog.last_selected_card = self
-        if self.editable and self.handle_rect().contains(event.pos()):
+        if self.editable and not self.locked and self.handle_rect().contains(event.pos()):
             self.setSelected(True)
             self.resizing = True
             self.resize_start = event.scenePos()
@@ -2434,7 +2514,7 @@ class ResizableBackgroundItem(QGraphicsPixmapItem):
             self.update()
             event.accept()
             return
-        if self.editable and self.isSelected() and dialog is not None:
+        if self.editable and not self.locked and self.isSelected() and dialog is not None:
             selected_cards = dialog.selected_card_proxies()
             if selected_cards:
                 self.group_drag_proxy = selected_cards[0]
@@ -2531,6 +2611,7 @@ class DesignShapeItem(QGraphicsItem):
         fill = values.get("fill_color")
         self.fill_color = QColor(fill) if fill else None
         self.editable = True
+        self.locked = bool(values.get("locked", False))
         self.resizing = False
         self.moving = False
         self.drag_allowed = False
@@ -2567,11 +2648,28 @@ class DesignShapeItem(QGraphicsItem):
 
     def set_editable(self, editable):
         self.editable = bool(editable)
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, self.editable)
+        self.setFlag(
+            QGraphicsItem.GraphicsItemFlag.ItemIsMovable,
+            self.editable and not self.locked,
+        )
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, self.editable)
         self.setCursor(Qt.CursorShape.ArrowCursor)
         if not self.editable:
             self.setSelected(False)
+        self.update()
+
+    def set_locked(self, locked):
+        self.locked = bool(locked)
+        self.resizing = False
+        self.moving = False
+        self.drag_allowed = False
+        self.line_endpoint = None
+        self.finish_group_endpoint_drag()
+        self.setFlag(
+            QGraphicsItem.GraphicsItemFlag.ItemIsMovable,
+            self.editable and not self.locked,
+        )
+        self.setCursor(Qt.CursorShape.ArrowCursor)
         self.update()
 
     def boundingRect(self):
@@ -2654,6 +2752,8 @@ class DesignShapeItem(QGraphicsItem):
             for item in self.scene().items():
                 if not isinstance(item, DesignShapeItem) or not item.is_connector():
                     continue
+                if item.locked:
+                    continue
                 for endpoint in item.selected_endpoints:
                     self.partial_endpoint_start_positions[(item, endpoint)] = (
                         item.endpoint_scene_position(endpoint)
@@ -2691,6 +2791,8 @@ class DesignShapeItem(QGraphicsItem):
         tolerance = self.HANDLE_SIZE
         for item in self.scene().items():
             if not isinstance(item, DesignShapeItem) or not item.is_connector():
+                continue
+            if item.locked:
                 continue
             selectable_endpoints = set(item.selected_endpoints)
             if item.isSelected():
@@ -2781,7 +2883,7 @@ class DesignShapeItem(QGraphicsItem):
             dialog is not None
             and getattr(dialog, "nudge_handles_hidden", False)
         )
-        if self.editable and self.isSelected() and not self.moving:
+        if self.editable and not self.locked and self.isSelected() and not self.moving:
             selection_pen = QPen(QColor("#c51d24"), 1.5)
             selection_pen.setCosmetic(True)
             painter.setPen(selection_pen)
@@ -2809,6 +2911,7 @@ class DesignShapeItem(QGraphicsItem):
                 painter.drawRect(self.handle_rect())
         elif (
             self.editable
+            and not self.locked
             and self.is_connector()
             and self.selected_endpoints
             and not self.endpoint_group_moving
@@ -2821,14 +2924,19 @@ class DesignShapeItem(QGraphicsItem):
             for endpoint in self.selected_endpoints:
                 point = self.line_start if endpoint == "start" else self.line_end
                 painter.drawRect(self.line_handle_rect(point))
+        if self.editable and self.locked:
+            draw_locked_indicator(painter, self.content_rect())
 
     def mousePressEvent(self, event):
         dialog = self.scene().views()[0].window() if self.scene() and self.scene().views() else None
         if dialog is not None and hasattr(dialog, "begin_history_action"):
             dialog.begin_history_action()
-        self.drag_allowed = bool(self.editable and self.isSelected())
+        self.drag_allowed = bool(
+            self.editable and not self.locked and self.isSelected()
+        )
         if (
             self.editable
+            and not self.locked
             and self.is_connector()
             and (self.drag_allowed or self.selected_endpoints)
         ):
@@ -2981,6 +3089,7 @@ class DesignShapeItem(QGraphicsItem):
             "line_width": self.line_width,
             "fill_color": self.fill_color.name() if self.fill_color is not None else None,
             "layer": self.zValue(),
+            "locked": self.locked,
         }
         if self.is_connector():
             data.update({
@@ -3009,6 +3118,7 @@ class MovableCardProxy(QGraphicsProxyWidget):
         super().__init__()
         self.card_role = str(card_role)
         self.editable = True
+        self.locked = False
         self.dragging = False
         self.resizing = False
         self.drag_offset = QPointF()
@@ -3079,10 +3189,12 @@ class MovableCardProxy(QGraphicsProxyWidget):
             dialog is not None
             and getattr(dialog, "nudge_handles_hidden", False)
         )
-        if self.editable and self.isSelected() and not handles_hidden:
+        if self.editable and not self.locked and self.isSelected() and not handles_hidden:
             painter.setPen(QPen(QColor("#c51d24"), 1.5))
             painter.setBrush(QColor("#ffffff"))
             painter.drawRect(self.resize_handle_rect().adjusted(1.0, 1.0, -1.0, -1.0))
+        if self.editable and self.locked:
+            draw_locked_indicator(painter, self.boundingRect())
 
     def setWidget(self, widget):
         super().setWidget(widget)
@@ -3105,9 +3217,26 @@ class MovableCardProxy(QGraphicsProxyWidget):
             self.resizing = False
         self.setCursor(
             Qt.CursorShape.OpenHandCursor
-            if self.editable
+            if self.editable and not self.locked
             else Qt.CursorShape.ArrowCursor
         )
+
+    def set_locked(self, locked):
+        self.locked = bool(locked)
+        if self.mouse_grabber is not None:
+            self.mouse_grabber.releaseMouse()
+            self.mouse_grabber = None
+        self.dragging = False
+        self.resizing = False
+        self.drag_start_positions = {}
+        self.drag_start_bounds = {}
+        self.resize_start_sizes = {}
+        self.setCursor(
+            Qt.CursorShape.OpenHandCursor
+            if self.editable and not self.locked
+            else Qt.CursorShape.ArrowCursor
+        )
+        self.update()
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged:
@@ -3120,7 +3249,7 @@ class MovableCardProxy(QGraphicsProxyWidget):
         """Behält eine Mehrfachauswahl beim Rechtsklick auf eine markierte Karte."""
 
         if self.isSelected():
-            self.context_selection_snapshot = self.selected_card_proxies()
+            self.context_selection_snapshot = self.selected_movable_items()
             return
         if self.scene() is not None:
             self.scene().clearSelection()
@@ -3167,7 +3296,7 @@ class MovableCardProxy(QGraphicsProxyWidget):
             return [self]
         selected = [
             item for item in self.scene().selectedItems()
-            if isinstance(item, MovableCardProxy) and item.editable
+            if isinstance(item, MovableCardProxy) and item.editable and not item.locked
         ]
         return selected or [self]
 
@@ -3178,13 +3307,13 @@ class MovableCardProxy(QGraphicsProxyWidget):
             item for item in self.scene().selectedItems()
             if (
                 isinstance(item, MovableCardProxy)
-                and item.editable
+                and item.editable and not item.locked
             ) or (
                 isinstance(item, ResizableBackgroundItem)
-                and item.editable
+                and item.editable and not item.locked
             ) or (
                 isinstance(item, DesignShapeItem)
-                and item.editable
+                and item.editable and not item.locked
             )
         ]
         return selected or [self]
@@ -3194,6 +3323,8 @@ class MovableCardProxy(QGraphicsProxyWidget):
         return views[0].window() if views else None
 
     def begin_card_drag(self, scene_position, modifiers):
+        if self.locked:
+            return False
         if not modifiers & Qt.KeyboardModifier.ShiftModifier:
             if not self.isSelected() and self.scene() is not None:
                 self.scene().clearSelection()
@@ -3223,6 +3354,7 @@ class MovableCardProxy(QGraphicsProxyWidget):
                 if (
                     not isinstance(shape, DesignShapeItem)
                     or not shape.is_connector()
+                    or shape.locked
                     or shape in self.drag_start_positions
                 ):
                     continue
@@ -3247,6 +3379,8 @@ class MovableCardProxy(QGraphicsProxyWidget):
         self.setCursor(Qt.CursorShape.OpenHandCursor)
 
     def begin_card_resize(self, scene_position, modifiers):
+        if self.locked:
+            return False
         if not modifiers & Qt.KeyboardModifier.ShiftModifier:
             if not self.isSelected() and self.scene() is not None:
                 self.scene().clearSelection()
@@ -3438,6 +3572,14 @@ class MovableCardProxy(QGraphicsProxyWidget):
             event.type() == QEvent.Type.MouseButtonPress
             and event.button() == Qt.MouseButton.LeftButton
         ):
+            if self.locked:
+                if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                    self.setSelected(not self.isSelected())
+                else:
+                    if not self.isSelected() and self.scene() is not None:
+                        self.scene().clearSelection()
+                    self.setSelected(True)
+                return True
             scene_position = self.scene_position_from_mouse_event(event)
             if self.resize_handle_rect().contains(self.mapFromScene(scene_position)):
                 self.begin_card_resize(scene_position, event.modifiers())
@@ -3486,7 +3628,7 @@ class MovableCardProxy(QGraphicsProxyWidget):
         ):
             event.accept()
             return
-        if self.editable and event.button() == Qt.MouseButton.LeftButton:
+        if self.editable and not self.locked and event.button() == Qt.MouseButton.LeftButton:
             if self.resize_handle_rect().contains(event.pos()):
                 self.begin_card_resize(event.scenePos(), event.modifiers())
                 event.accept()
@@ -3574,7 +3716,6 @@ class GraphicalExperimentDialog(QDialog):
         self.shape_items = []
         self.input_array_card = None
         self.network_view_card = None
-        self.binary_intermediate_values = False
         self.background_item = None
         self.background_relative_path = ""
         self.background_color = "#f5f5f5"
@@ -3684,46 +3825,63 @@ class GraphicalExperimentDialog(QDialog):
         self.align_button = QPushButton(self.tr("Ausrichten…", "Align…"), self)
         self.align_menu = QMenu(self.align_button)
         self.align_menu.setTitle(self.tr("Ausrichten", "Align"))
+        self.align_menu.setIcon(ToolbarIcons.icon("align"))
         self.align_left_action = self.align_menu.addAction(
             self.tr("Linksbündig", "Align left")
         )
+        self.align_left_action.setIcon(ToolbarIcons.icon("align_left"))
         self.align_right_action = self.align_menu.addAction(
             self.tr("Rechtsbündig", "Align right")
         )
+        self.align_right_action.setIcon(ToolbarIcons.icon("align_right"))
         self.align_top_action = self.align_menu.addAction(
             self.tr("Oben ausrichten", "Align top")
         )
+        self.align_top_action.setIcon(ToolbarIcons.icon("align_top"))
         self.align_bottom_action = self.align_menu.addAction(
             self.tr("Unten ausrichten", "Align bottom")
         )
+        self.align_bottom_action.setIcon(ToolbarIcons.icon("align_bottom"))
         self.align_menu.addSeparator()
         self.distribute_horizontal_action = self.align_menu.addAction(
             self.tr("Horizontal gleichmäßig verteilen", "Distribute horizontally")
         )
+        self.distribute_horizontal_action.setIcon(
+            ToolbarIcons.icon("distribute_horizontal")
+        )
         self.distribute_vertical_action = self.align_menu.addAction(
             self.tr("Vertikal gleichmäßig verteilen", "Distribute vertically")
+        )
+        self.distribute_vertical_action.setIcon(
+            ToolbarIcons.icon("distribute_vertical")
         )
         self.align_button.setMenu(self.align_menu)
         self.align_button.setEnabled(False)
         self.size_button = QPushButton(self.tr("Größe…", "Size…"), self)
         self.size_menu = QMenu(self.size_button)
         self.size_menu.setTitle(self.tr("Größe", "Size"))
+        self.size_menu.setIcon(ToolbarIcons.icon("equal_size"))
         self.equal_width_action = self.size_menu.addAction(
             self.tr("Gleiche Breite", "Same width")
         )
+        self.equal_width_action.setIcon(ToolbarIcons.icon("equal_width"))
         self.equal_height_action = self.size_menu.addAction(
             self.tr("Gleiche Höhe", "Same height")
         )
+        self.equal_height_action.setIcon(ToolbarIcons.icon("equal_height"))
         self.equal_size_action = self.size_menu.addAction(
             self.tr("Gleiche Größe", "Same size")
         )
+        self.equal_size_action.setIcon(ToolbarIcons.icon("equal_size"))
         self.size_menu.addSeparator()
         self.size_all_inputs_action = self.size_menu.addAction(
             self.tr("Größe auf alle Inputs übertragen", "Apply size to all inputs")
         )
+        self.size_all_inputs_action.setIcon(ToolbarIcons.icon("input"))
         self.size_all_outputs_action = self.size_menu.addAction(
             self.tr("Größe auf alle Outputs übertragen", "Apply size to all outputs")
         )
+        self.size_all_outputs_action.setIcon(ToolbarIcons.icon("output"))
         self.size_button.setMenu(self.size_menu)
         self.size_button.setEnabled(False)
         self.card_color_button = QPushButton(
@@ -3731,12 +3889,15 @@ class GraphicalExperimentDialog(QDialog):
         )
         self.card_color_menu = QMenu(self.card_color_button)
         self.card_color_menu.setTitle(self.tr("Kachelfarbe", "Card color"))
+        self.card_color_menu.setIcon(ToolbarIcons.icon("color"))
         self.choose_card_color_action = self.card_color_menu.addAction(
             self.tr("Farbe wählen…", "Choose color…")
         )
+        self.choose_card_color_action.setIcon(ToolbarIcons.icon("color"))
         self.reset_card_color_action = self.card_color_menu.addAction(
             self.tr("Standardfarbe (Weiß)", "Default color (white)")
         )
+        self.reset_card_color_action.setIcon(ToolbarIcons.icon("color"))
         self.card_color_button.setMenu(self.card_color_menu)
         self.card_color_button.setEnabled(False)
         self.choose_card_color_action.triggered.connect(
@@ -3783,7 +3944,9 @@ class GraphicalExperimentDialog(QDialog):
         self.show_all_button.clicked.connect(self.view_show_all)
         self.edit_menu = QMenu(self)
         self.undo_action = self.edit_menu.addAction(self.tr("Rückgängig", "Undo"))
+        self.undo_action.setIcon(ToolbarIcons.icon("undo"))
         self.redo_action = self.edit_menu.addAction(self.tr("Wiederholen", "Redo"))
+        self.redo_action.setIcon(ToolbarIcons.icon("redo"))
         self.edit_menu.addSeparator()
         self.copy_shapes_action = self.edit_menu.addAction(
             self.tr("Kopieren", "Copy")
@@ -3801,43 +3964,55 @@ class GraphicalExperimentDialog(QDialog):
         self.input_elements_menu = self.add_elements_menu.addMenu(
             self.tr("Eingang", "Input")
         )
+        self.input_elements_menu.setIcon(ToolbarIcons.icon("input"))
         self.output_elements_menu = self.add_elements_menu.addMenu(
             self.tr("Ausgang", "Output")
         )
+        self.output_elements_menu.setIcon(ToolbarIcons.icon("output"))
         self.add_all_io_action = self.add_elements_menu.addAction(
             self.tr(
                 "Alle Ein- und Ausgänge hinzufügen",
                 "Add all inputs and outputs",
             )
         )
+        self.add_all_io_action.setIcon(ToolbarIcons.icon("add_all"))
         self.array_element_action = self.add_elements_menu.addAction(
             self.tr("Binäres Eingabe-Array", "Binary input array")
         )
+        self.array_element_action.setIcon(ToolbarIcons.icon("binary_array"))
         self.network_view_action = self.add_elements_menu.addAction(
             self.tr("Vereinfachte Netzwerkansicht", "Simplified network view")
         )
+        self.network_view_action.setIcon(ToolbarIcons.icon("network_layout"))
         self.add_elements_menu.addSeparator()
         self.add_comment_design_action = self.add_elements_menu.addAction(
             self.tr("Kommentar", "Comment")
         )
+        self.add_comment_design_action.setIcon(ToolbarIcons.icon("comment"))
         self.load_image_action = self.add_elements_menu.addAction(
             self.tr("Grafik laden…", "Load image…")
         )
+        self.load_image_action.setIcon(ToolbarIcons.icon("project_image"))
         self.shape_elements_menu = self.add_elements_menu.addMenu(
             self.tr("Grafische Form", "Graphic shape")
         )
+        self.shape_elements_menu.setIcon(ToolbarIcons.icon("rectangle"))
         self.add_line_action = self.shape_elements_menu.addAction(
             self.tr("Linie", "Line")
         )
+        self.add_line_action.setIcon(ToolbarIcons.icon("line"))
         self.add_curve_action = self.shape_elements_menu.addAction(
             self.tr("Kurvenverbindung", "Curved connection")
         )
+        self.add_curve_action.setIcon(ToolbarIcons.icon("curve"))
         self.add_rectangle_action = self.shape_elements_menu.addAction(
             self.tr("Rechteck", "Rectangle")
         )
+        self.add_rectangle_action.setIcon(ToolbarIcons.icon("rectangle"))
         self.add_ellipse_action = self.shape_elements_menu.addAction(
             self.tr("Kreis / Ellipse", "Circle / ellipse")
         )
+        self.add_ellipse_action.setIcon(ToolbarIcons.icon("ellipse"))
         self.paste_clipboard_action = self.add_elements_menu.addAction(
             self.tr("Einfügen", "Paste")
         )
@@ -3848,25 +4023,22 @@ class GraphicalExperimentDialog(QDialog):
         self.background_color_action = self.design_menu.addAction(
             self.tr("Hintergrundfarbe…", "Background color…")
         )
+        self.background_color_action.setIcon(ToolbarIcons.icon("color"))
         self.design_menu.addMenu(self.card_color_menu)
-        self.binary_values_action = self.design_menu.addAction(
-            self.tr(
-                "Zwischenwerte binärer Ausgänge anzeigen",
-                "Show intermediate values of binary outputs",
-            )
-        )
-        self.binary_values_action.setCheckable(True)
         self.grid_visible_action = self.design_menu.addAction(
             self.tr("Raster anzeigen", "Show grid")
         )
+        self.grid_visible_action.setIcon(ToolbarIcons.icon("grid"))
         self.grid_visible_action.setCheckable(True)
         self.grid_spacing_action = self.design_menu.addAction(
             self.tr("Rasterabstand…", "Grid spacing…")
         )
+        self.grid_spacing_action.setIcon(ToolbarIcons.icon("grid_spacing"))
         self.design_menu.addSeparator()
         self.default_layout_action = self.design_menu.addAction(
             self.tr("Standardlayout", "Default layout")
         )
+        self.default_layout_action.setIcon(ToolbarIcons.icon("network_layout"))
         self.load_image_action.triggered.connect(
             self.load_background_image_for_placement
         )
@@ -3898,16 +4070,17 @@ class GraphicalExperimentDialog(QDialog):
         self.network_view_action.triggered.connect(
             lambda: self.request_existing_element_placement(self.network_view_card)
         )
-        self.binary_values_action.toggled.connect(self.set_binary_intermediate_values)
         self.grid_visible_action.toggled.connect(self.set_grid_enabled)
         self.grid_spacing_action.triggered.connect(self.choose_grid_spacing)
         self.default_layout_action.triggered.connect(self.reset_to_default_layout)
         self.arrange_menu = QMenu(self)
+        self.arrange_menu.setIcon(ToolbarIcons.icon("align"))
         self.arrange_menu.addMenu(self.align_menu)
         self.arrange_menu.addMenu(self.size_menu)
         self.arrange_grid_action = self.arrange_menu.addAction(
             self.tr("Als Raster anordnen", "Arrange as grid")
         )
+        self.arrange_grid_action.setIcon(ToolbarIcons.icon("grid"))
         self.arrange_grid_action.triggered.connect(self.arrange_selected_as_grid)
 
         for obsolete_button in (
@@ -3949,7 +4122,6 @@ class GraphicalExperimentDialog(QDialog):
         )
         self.top_design_menu.addAction(self.background_color_action)
         self.top_design_menu.addMenu(self.card_color_menu)
-        self.top_design_menu.addAction(self.binary_values_action)
         self.top_design_menu.addAction(self.grid_visible_action)
         self.top_design_menu.addAction(self.grid_spacing_action)
         self.top_design_menu.addSeparator()
@@ -3985,6 +4157,7 @@ class GraphicalExperimentDialog(QDialog):
         self.view = ExperimentCanvasView(self.scene, self)
         self.view.zoom_changed.connect(self.update_zoom_label)
         self.scene.selectionChanged.connect(self.update_selection_actions)
+        self.scene.selectionChanged.connect(self.update_selection_status)
         self.view.setFrameShape(QFrame.Shape.StyledPanel)
         main_layout.addWidget(self.view, 1)
 
@@ -4240,6 +4413,7 @@ class GraphicalExperimentDialog(QDialog):
         for proxy, _controls, mapping in self.input_cards:
             name = str(mapping.get("name") or mapping["neuron"].name)
             action = self.input_elements_menu.addAction(name)
+            action.setIcon(ToolbarIcons.icon("input"))
             action.triggered.connect(
                 lambda _checked=False, target=proxy:
                 self.request_existing_element_placement(target)
@@ -4248,14 +4422,12 @@ class GraphicalExperimentDialog(QDialog):
         for proxy, _controls, mapping in self.output_cards:
             name = str(mapping.get("name") or mapping["neuron"].name)
             action = self.output_elements_menu.addAction(name)
+            action.setIcon(ToolbarIcons.icon("output"))
             action.triggered.connect(
                 lambda _checked=False, target=proxy:
                 self.request_existing_element_placement(target)
             )
             self.output_element_actions[proxy] = action
-        self.binary_values_action.setEnabled(
-            any(controls.get("binary") for _proxy, controls, _mapping in self.output_cards)
-        )
         self.update_element_actions()
 
     def update_element_actions(self):
@@ -4317,6 +4489,18 @@ class GraphicalExperimentDialog(QDialog):
         if self.file_path:
             project_path = str(Path(self.file_path).expanduser().resolve())
         return self.tr("Projekt: ", "Project: ") + (project_path or "–")
+
+    def update_selection_status(self):
+        """Zeigt nur bei aktiver Mehrfachauswahl deren Umfang statt des Projekts."""
+
+        selected_count = len(self.selected_movable_items())
+        if self.edit_mode and selected_count >= 2:
+            self.status_label.setText(self.tr(
+                f"{selected_count} Elemente ausgewählt",
+                f"{selected_count} elements selected",
+            ))
+        else:
+            self.status_label.setText(self.project_status_text())
 
     def placement_status_text(self, repeat_available=False):
         text = self.tr(
@@ -4466,28 +4650,53 @@ class GraphicalExperimentDialog(QDialog):
         self.start_element_placement(missing)
 
     def arrange_compact_input_output_block(self, inputs, outputs):
-        """Ordnet gemeinsam eingefügte Ein- und Ausgänge kompakt und überlappungsfrei."""
+        """Ordnet gemeinsam eingefügte Ein- und Ausgänge zoomgerecht an."""
 
-        card_width = self.COMPACT_IO_CARD_WIDTH
-        card_height = self.COMPACT_IO_CARD_HEIGHT
-        column_pitch = card_width + self.COMPACT_IO_COLUMN_GAP
-        row_pitch = card_height + self.COMPACT_IO_ROW_GAP
+        card_width, card_height, column_gap, row_gap, section_gap = (
+            self.compact_input_output_metrics_for_zoom()
+        )
+
+        for proxy in inputs + outputs:
+            proxy.set_card_size(card_width, card_height)
 
         def arrange_section(items, start_x):
-            for index, proxy in enumerate(items):
-                proxy.set_card_size(card_width, card_height)
-                proxy.setPos(
-                    start_x,
-                    index * row_pitch,
-                )
+            current_y = 0.0
+            for proxy in items:
+                proxy.setPos(start_x, current_y)
+                current_y += proxy.sceneBoundingRect().height() + row_gap
 
         arrange_section(inputs, 0.0)
+        input_width = max(
+            (proxy.sceneBoundingRect().width() for proxy in inputs),
+            default=0.0,
+        )
         output_start_x = (
-            column_pitch + self.COMPACT_IO_SECTION_GAP
+            input_width + column_gap + section_gap
             if inputs and outputs
             else 0.0
         )
         arrange_section(outputs, output_start_x)
+
+    def compact_input_output_metrics_for_zoom(self):
+        """Liefert Szenenmaße, die am Bildschirm bei jedem Zoom kompakt bleiben."""
+
+        view_scale = max(0.01, abs(float(self.view.transform().m11())))
+        return (
+            self.COMPACT_IO_CARD_WIDTH / view_scale,
+            self.COMPACT_IO_CARD_HEIGHT / view_scale,
+            self.COMPACT_IO_COLUMN_GAP / view_scale,
+            self.COMPACT_IO_ROW_GAP / view_scale,
+            self.COMPACT_IO_SECTION_GAP / view_scale,
+        )
+
+    def resize_input_output_cards_for_zoom(self, proxies):
+        """Passt neu eingeblendete Ein-/Ausgangskarten an die aktuelle Ansicht an."""
+
+        card_width, card_height, _column_gap, _row_gap, _section_gap = (
+            self.compact_input_output_metrics_for_zoom()
+        )
+        for proxy in proxies:
+            proxy.set_card_size(card_width, card_height)
 
     def request_shape_placement(self, shape_type):
         if not self.edit_mode:
@@ -4557,6 +4766,7 @@ class GraphicalExperimentDialog(QDialog):
             return
         self.begin_history_action()
         self.scene.clearSelection()
+        self.resize_input_output_cards_for_zoom(missing)
         for proxy in missing:
             saved_position = getattr(proxy, "saved_design_position", None)
             if saved_position is not None:
@@ -4570,6 +4780,7 @@ class GraphicalExperimentDialog(QDialog):
         targets = [
             proxy for proxy in proxies
             if proxy.card_role in ("input", "output", "input_array", "network_view")
+            and not proxy.locked
         ]
         if not targets:
             return
@@ -4728,6 +4939,7 @@ class GraphicalExperimentDialog(QDialog):
             self.tr("In den Hintergrund", "Send to back")
         )
         back_action.setIcon(ToolbarIcons.icon("layer_back"))
+        lock_action, unlock_action = self.add_lock_actions(menu)
         menu.addSeparator()
         line_color_action = menu.addAction(self.tr("Linienfarbe…", "Line color…"))
         line_color_action.setIcon(ToolbarIcons.icon("color"))
@@ -4759,6 +4971,11 @@ class GraphicalExperimentDialog(QDialog):
         menu.addSeparator()
         delete_action = menu.addAction(self.tr("Form entfernen", "Remove shape"))
         delete_action.setIcon(ToolbarIcons.icon("delete"))
+        selected_shapes = [
+            shape for shape in self.scene.selectedItems()
+            if isinstance(shape, DesignShapeItem)
+        ] or [item]
+        delete_action.setEnabled(any(not shape.locked for shape in selected_shapes))
         selected = menu.exec(global_position)
         targets = [
             shape for shape in self.scene.selectedItems()
@@ -4776,6 +4993,10 @@ class GraphicalExperimentDialog(QDialog):
                 if element.isSelected()
             ]
             self.send_elements_to_back(selected_elements or targets)
+        elif lock_action is not None and selected == lock_action:
+            self.set_elements_locked(self.selected_movable_items(), True)
+        elif unlock_action is not None and selected == unlock_action:
+            self.set_elements_locked(self.selected_movable_items(), False)
         elif selected == line_color_action:
             color = choose_color(item.line_color, self, self.tr("Linienfarbe", "Line color"))
             if color.isValid():
@@ -4847,19 +5068,33 @@ class GraphicalExperimentDialog(QDialog):
             not self.edit_mode
             or self.background_item is None
             or item is not self.background_item
-            or not item.isSelected()
         ):
             return
+        if not item.isSelected():
+            self.scene.clearSelection()
+            item.setSelected(True)
+        self.update_selection_actions()
         menu = QMenu(self)
+        lock_action, unlock_action = self.add_lock_actions(menu)
+        menu.addSeparator()
         remove_action = menu.addAction(
             self.tr("Aus der Gestaltung entfernen", "Remove from design")
         )
         remove_action.setIcon(ToolbarIcons.icon("delete"))
-        if menu.exec(global_position) == remove_action:
+        remove_action.setEnabled(not item.locked)
+        selected = menu.exec(global_position)
+        if lock_action is not None and selected == lock_action:
+            self.set_elements_locked(self.selected_movable_items(), True)
+        elif unlock_action is not None and selected == unlock_action:
+            self.set_elements_locked(self.selected_movable_items(), False)
+        elif selected == remove_action:
             self.remove_background_image()
 
     def remove_shapes(self, shapes, confirm=True):
-        targets = [item for item in shapes if item in self.shape_items]
+        targets = [
+            item for item in shapes
+            if item in self.shape_items and not item.locked
+        ]
         if not targets:
             return
         if confirm:
@@ -4926,6 +5161,7 @@ class GraphicalExperimentDialog(QDialog):
         proxy.configure_card_size(120.0, 52.0)
         if "width" in data and "height" in data:
             proxy.set_card_size(data["width"], data["height"])
+        proxy.set_locked(bool(data.get("locked", False)))
         self.comment_cards.append(proxy)
         return proxy
 
@@ -4940,6 +5176,7 @@ class GraphicalExperimentDialog(QDialog):
             "color": card.card_color.name(),
             "transparent": card.card_transparent,
             "layer": proxy.zValue(),
+            "locked": proxy.locked,
         })
         return data
 
@@ -4969,7 +5206,10 @@ class GraphicalExperimentDialog(QDialog):
         self.finish_history_action()
 
     def delete_comments(self, proxies, confirm=True):
-        targets = [p for p in proxies if p in self.comment_cards]
+        targets = [
+            p for p in proxies
+            if p in self.comment_cards and not p.locked
+        ]
         if not targets:
             return
         if confirm:
@@ -5150,6 +5390,7 @@ class GraphicalExperimentDialog(QDialog):
             self.tr("In den Hintergrund", "Send to back")
         )
         back_action.setIcon(ToolbarIcons.icon("layer_back"))
+        lock_action, unlock_action = self.add_lock_actions(menu)
         menu.addSeparator()
         choose_color = menu.addAction(self.tr("Kachelfarbe…", "Card color…"))
         choose_color.setIcon(ToolbarIcons.icon("color"))
@@ -5165,6 +5406,7 @@ class GraphicalExperimentDialog(QDialog):
         transparent_action.setChecked(proxy.widget().card_transparent)
         edit_action = delete_action = remove_action = bar_action = pointer_action = None
         input_values_action = output_values_action = None
+        binary_intermediate_action = None
         rename_array_action = None
         if proxy.card_role == "comment":
             menu.addSeparator()
@@ -5173,6 +5415,7 @@ class GraphicalExperimentDialog(QDialog):
             edit_action.setIcon(ToolbarIcons.icon("edit"))
             delete_action = menu.addAction(self.tr("Kommentar löschen", "Delete comment"))
             delete_action.setIcon(ToolbarIcons.icon("delete"))
+            delete_action.setEnabled(not proxy.locked)
         elif proxy.card_role in ("input", "output", "input_array", "network_view"):
             menu.addSeparator()
             if proxy.card_role == "input_array":
@@ -5184,6 +5427,11 @@ class GraphicalExperimentDialog(QDialog):
                 self.tr("Aus Gestaltung entfernen", "Remove from design")
             )
             remove_action.setIcon(ToolbarIcons.icon("delete"))
+            remove_action.setEnabled(any(
+                item.card_role in ("input", "output", "input_array", "network_view")
+                and not item.locked
+                for item in self.selected_card_proxies()
+            ))
             if proxy.card_role == "network_view":
                 input_values_action = menu.addAction(
                     self.tr("Eingabewerte anzeigen", "Show input values")
@@ -5202,7 +5450,19 @@ class GraphicalExperimentDialog(QDialog):
                     proxy.widget().show_output_values
                 )
         controls = self.output_controls_for_proxy(proxy)
-        if controls is not None and controls.get("display_mode") != "binary":
+        if controls is not None and controls.get("binary"):
+            menu.addSeparator()
+            binary_intermediate_action = menu.addAction(
+                self.tr("Zwischenwert anzeigen", "Show intermediate value")
+            )
+            binary_intermediate_action.setIcon(
+                ToolbarIcons.icon("output")
+            )
+            binary_intermediate_action.setCheckable(True)
+            binary_intermediate_action.setChecked(
+                bool(controls["card"].binary_intermediate_enabled)
+            )
+        elif controls is not None and controls.get("display_mode") != "binary":
             menu.addSeparator()
             bar_action = menu.addAction(self.tr("Balkenanzeige", "Bar display"))
             bar_action.setIcon(ToolbarIcons.icon("bar_display"))
@@ -5225,6 +5485,10 @@ class GraphicalExperimentDialog(QDialog):
                 if element.isSelected()
             ]
             self.send_elements_to_back(selected_elements or [proxy])
+        elif lock_action is not None and selected == lock_action:
+            self.set_elements_locked(self.selected_movable_items(), True)
+        elif unlock_action is not None and selected == unlock_action:
+            self.set_elements_locked(self.selected_movable_items(), False)
         elif selected == choose_color:
             self.choose_card_color(color_targets)
         elif selected == default_color:
@@ -5269,6 +5533,14 @@ class GraphicalExperimentDialog(QDialog):
                 output_values_action.isChecked()
             )
             self.finish_history_action()
+        elif (
+            binary_intermediate_action is not None
+            and selected == binary_intermediate_action
+        ):
+            self.set_binary_output_intermediate_value(
+                proxy,
+                binary_intermediate_action.isChecked(),
+            )
         elif bar_action is not None and selected in (bar_action, pointer_action):
             self.begin_history_action()
             self.set_output_display_mode(
@@ -5290,6 +5562,39 @@ class GraphicalExperimentDialog(QDialog):
                 (MovableCardProxy, ResizableBackgroundItem, DesignShapeItem),
             )
         ]
+
+    def add_lock_actions(self, menu):
+        """Ergänzt passende Sperraktionen für die aktuelle Auswahl."""
+
+        selected = self.selected_movable_items()
+        lock_action = unlock_action = None
+        if any(not item.locked for item in selected):
+            lock_action = menu.addAction(
+                self.tr("Auswahl sperren", "Lock selection")
+            )
+            lock_action.setIcon(ToolbarIcons.icon("lock"))
+        if any(item.locked for item in selected):
+            unlock_action = menu.addAction(
+                self.tr("Auswahl entsperren", "Unlock selection")
+            )
+            unlock_action.setIcon(ToolbarIcons.icon("unlock"))
+        return lock_action, unlock_action
+
+    def set_elements_locked(self, elements, locked):
+        targets = [
+            item for item in elements
+            if isinstance(
+                item,
+                (MovableCardProxy, ResizableBackgroundItem, DesignShapeItem),
+            ) and item.scene() is self.scene and item.locked != bool(locked)
+        ]
+        if not self.edit_mode or not targets:
+            return
+        self.begin_history_action()
+        for item in targets:
+            item.set_locked(locked)
+        self.finish_history_action()
+        self.update_selection_actions()
 
     def update_selection_actions(self):
         selected = self.selected_card_proxies()
@@ -5393,7 +5698,9 @@ class GraphicalExperimentDialog(QDialog):
         save_custom_colors()
 
     def equalize_selected_size(self, dimension):
-        selected = self.selected_card_proxies()
+        selected = [
+            item for item in self.selected_card_proxies() if not item.locked
+        ]
         if len(selected) < 2 or len({item.card_role for item in selected}) != 1:
             return
         reference = (
@@ -5419,11 +5726,14 @@ class GraphicalExperimentDialog(QDialog):
         items = self.input_cards if role == "input" else self.output_cards
         self.begin_history_action()
         for proxy, _controls, _mapping in items:
-            proxy.set_card_size(width, height)
+            if not proxy.locked:
+                proxy.set_card_size(width, height)
         self.finish_history_action()
 
     def align_selected(self, direction):
-        selected = self.selected_card_proxies()
+        selected = [
+            item for item in self.selected_card_proxies() if not item.locked
+        ]
         if len(selected) < 2:
             return
         self.begin_history_action()
@@ -5450,7 +5760,9 @@ class GraphicalExperimentDialog(QDialog):
         self.finish_history_action()
 
     def distribute_selected(self, orientation):
-        selected = self.selected_card_proxies()
+        selected = [
+            item for item in self.selected_card_proxies() if not item.locked
+        ]
         if len(selected) < 3:
             return
         self.begin_history_action()
@@ -5477,7 +5789,9 @@ class GraphicalExperimentDialog(QDialog):
         self.finish_history_action()
 
     def arrange_selected_as_grid(self):
-        selected = self.selected_card_proxies()
+        selected = [
+            item for item in self.selected_card_proxies() if not item.locked
+        ]
         if len(selected) < 2:
             return
         selected.sort(key=lambda item: (item.sceneBoundingRect().center().y(), item.pos().x()))
@@ -5524,7 +5838,9 @@ class GraphicalExperimentDialog(QDialog):
         self.finish_history_action()
 
     def nudge_selected(self, dx, dy):
-        selected = self.selected_movable_items()
+        selected = [
+            item for item in self.selected_movable_items() if not item.locked
+        ]
         if not self.edit_mode or not selected:
             return
         if not self.nudge_history_active:
@@ -5927,31 +6243,59 @@ class GraphicalExperimentDialog(QDialog):
                 editor.setToolTip(editor.text())
             editor.blockSignals(False)
 
-    def set_binary_intermediate_values(self, enabled, record_history=True):
+    def set_binary_output_intermediate_value(
+        self,
+        proxy,
+        enabled,
+        record_history=True,
+    ):
+        """Schaltet den Zwischenwert genau eines binären Ausgangs um."""
+
+        controls = self.output_controls_for_proxy(proxy)
+        if controls is None or not controls.get("binary"):
+            return
+        card = controls["card"]
         enabled = bool(enabled)
-        if self.binary_intermediate_values == enabled:
+        if bool(card.binary_intermediate_enabled) == enabled:
             return
         if record_history:
             self.begin_history_action()
-        self.binary_intermediate_values = enabled
-        for proxy, controls, _mapping in self.output_cards:
-            if controls.get("binary"):
-                value_label = controls["value"]
-                value_label.setVisible(enabled)
-                controls["led"].setVisible(enabled)
-                controls["binary_stack"].setCurrentIndex(1 if enabled else 0)
-                card = controls["card"]
-                card.binary_intermediate_enabled = enabled
-                card.responsive_binary_state = None
-                main_layout = controls.get("main_layout")
-                if main_layout is not None:
-                    main_layout.setStretch(0, 1)
-                    main_layout.setStretch(2, 0 if enabled else 2)
-                    main_layout.setStretch(4, 1)
-                    main_layout.invalidate()
-                proxy.set_card_size(card.width(), card.height())
+        controls["value"].setVisible(enabled)
+        controls["led"].setVisible(enabled)
+        controls["binary_stack"].setCurrentIndex(1 if enabled else 0)
+        card.binary_intermediate_enabled = enabled
+        card.responsive_binary_state = None
+        main_layout = controls.get("main_layout")
+        if main_layout is not None:
+            main_layout.setStretch(0, 1)
+            main_layout.setStretch(2, 0 if enabled else 2)
+            main_layout.setStretch(4, 1)
+            main_layout.invalidate()
+        proxy.set_card_size(card.width(), card.height())
         if record_history:
             self.finish_history_action()
+
+    def restore_binary_output_intermediate_values(self, document):
+        """Lädt Einzelwerte und übernimmt alte globale Layoutangaben."""
+
+        cards = document.get("cards", {})
+        legacy_enabled = bool(
+            document.get("binary_intermediate_values", False)
+        )
+        for proxy, controls, mapping in self.output_cards:
+            if not controls.get("binary"):
+                continue
+            geometry = cards.get(self.card_key("output", mapping))
+            enabled = legacy_enabled
+            if isinstance(geometry, dict):
+                enabled = bool(
+                    geometry.get("binary_intermediate", legacy_enabled)
+                )
+            self.set_binary_output_intermediate_value(
+                proxy,
+                enabled,
+                record_history=False,
+            )
 
     def input_state_changed(self, *_):
         """Markiert eine Eingabeänderung ohne teuren Gesamtvergleich."""
@@ -6156,9 +6500,11 @@ class GraphicalExperimentDialog(QDialog):
             self.cancel_element_placement()
         self.finish_nudge_history()
         self.edit_mode = self.mode_combo.currentData() == "edit"
-        for proxy, controls, _mapping in self.input_cards:
+        for proxy, controls, mapping in self.input_cards:
             proxy.set_editable(self.edit_mode)
             controls["card"].setEnabled(True)
+            if mapping.get("data_type") == "binary":
+                controls["editor"].setEnabled(not self.edit_mode)
         for proxy, controls, _mapping in self.output_cards:
             proxy.set_editable(self.edit_mode)
             controls["card"].setEnabled(True)
@@ -6168,6 +6514,7 @@ class GraphicalExperimentDialog(QDialog):
             item.set_editable(self.edit_mode)
         if self.input_array_card is not None:
             self.input_array_card.set_editable(self.edit_mode)
+            self.input_array_card.widget().set_input_enabled(not self.edit_mode)
         if self.network_view_card is not None:
             self.network_view_card.set_editable(self.edit_mode)
         self.view.setDragMode(
@@ -6204,9 +6551,10 @@ class GraphicalExperimentDialog(QDialog):
         self.update_grid_visibility()
         self.update_element_actions()
         if self.edit_mode:
-            self.status_label.setText(self.edit_status_text())
+            self.update_selection_status()
         else:
             self.calculate()
+            self.update_selection_status()
         self.update_selection_actions()
         self.update_history_buttons()
 
@@ -6459,13 +6807,18 @@ class GraphicalExperimentDialog(QDialog):
     def delete_selected_image(self):
         if not self.edit_mode:
             return
-        selected = self.selected_card_proxies()
+        selected = [
+            proxy for proxy in self.selected_card_proxies()
+            if not proxy.locked
+        ]
         selected_shapes = [
             item for item in self.scene.selectedItems()
-            if isinstance(item, DesignShapeItem)
+            if isinstance(item, DesignShapeItem) and not item.locked
         ]
         background_selected = (
-            self.background_item is not None and self.background_item.isSelected()
+            self.background_item is not None
+            and self.background_item.isSelected()
+            and not self.background_item.locked
         )
         if not selected and not selected_shapes and not background_selected:
             return
@@ -6502,7 +6855,7 @@ class GraphicalExperimentDialog(QDialog):
         self.update_element_actions()
 
     def remove_background_image(self):
-        if self.background_item is None:
+        if self.background_item is None or self.background_item.locked:
             return
         answer = QMessageBox.question(
             self,
@@ -6687,6 +7040,7 @@ class GraphicalExperimentDialog(QDialog):
         )
         if "layer" in geometry:
             proxy.setZValue(float(geometry["layer"]))
+        proxy.set_locked(bool(geometry.get("locked", False)))
         if not proxy.isVisible():
             proxy.saved_design_position = QPointF(proxy.pos())
 
@@ -6733,14 +7087,7 @@ class GraphicalExperimentDialog(QDialog):
                     self.network_view_card.widget().set_show_output_values(
                         bool(network_state.get("show_output_values", True))
                     )
-            self.binary_values_action.blockSignals(True)
-            self.binary_values_action.setChecked(
-                bool(document.get("binary_intermediate_values", False))
-            )
-            self.binary_values_action.blockSignals(False)
-            self.set_binary_intermediate_values(
-                document.get("binary_intermediate_values", False), False
-            )
+            self.restore_binary_output_intermediate_values(document)
             self.apply_saved_input_values(document.get("input_values", {}))
 
             self.background_color = str(
@@ -6768,6 +7115,9 @@ class GraphicalExperimentDialog(QDialog):
                 )
                 self.background_item.setScale(
                     max(0.05, float(background.get("scale", 1.0)))
+                )
+                self.background_item.set_locked(
+                    bool(background.get("locked", False))
                 )
                 self.background_item.setSelected(False)
             self.scene.clearSelection()
@@ -6803,8 +7153,8 @@ class GraphicalExperimentDialog(QDialog):
 
         cards = {}
         for role, items in (("input", self.input_cards), ("output", self.output_cards)):
-            for proxy, _controls, mapping in items:
-                cards[self.card_key(role, mapping)] = {
+            for proxy, controls, mapping in items:
+                geometry = {
                     "x": proxy.pos().x(),
                     "y": proxy.pos().y(),
                     "width": proxy.widget().width(),
@@ -6813,7 +7163,13 @@ class GraphicalExperimentDialog(QDialog):
                     "transparent": proxy.widget().card_transparent,
                     "layer": proxy.zValue(),
                     "visible": proxy.isVisible(),
+                    "locked": proxy.locked,
                 }
+                if role == "output" and controls.get("binary"):
+                    geometry["binary_intermediate"] = bool(
+                        controls["card"].binary_intermediate_enabled
+                    )
+                cards[self.card_key(role, mapping)] = geometry
         background = None
         if self.background_item is not None:
             background = {
@@ -6821,6 +7177,7 @@ class GraphicalExperimentDialog(QDialog):
                 "x": self.background_item.pos().x(),
                 "y": self.background_item.pos().y(),
                 "scale": self.background_item.scale(),
+                "locked": self.background_item.locked,
             }
         comments = []
         for proxy in self.comment_cards:
@@ -6834,6 +7191,7 @@ class GraphicalExperimentDialog(QDialog):
                 "color": card.card_color.name(),
                 "transparent": card.card_transparent,
                 "layer": proxy.zValue(),
+                "locked": proxy.locked,
             })
             comments.append(data)
         input_array_element = None
@@ -6849,6 +7207,7 @@ class GraphicalExperimentDialog(QDialog):
                 "layer": proxy.zValue(),
                 "visible": proxy.isVisible(),
                 "title": proxy.widget().custom_title,
+                "locked": proxy.locked,
             }
         network_view_element = None
         if self.network_view_card is not None:
@@ -6864,9 +7223,10 @@ class GraphicalExperimentDialog(QDialog):
                 "visible": proxy.isVisible(),
                 "show_input_values": proxy.widget().show_input_values,
                 "show_output_values": proxy.widget().show_output_values,
+                "locked": proxy.locked,
             }
         return {
-            "version": 7,
+            "version": 9,
             "cards": cards,
             "input_values": {
                 str(mapping["neuron"].id): float(
@@ -6878,7 +7238,6 @@ class GraphicalExperimentDialog(QDialog):
             "shapes": [item.to_data() for item in self.shape_items],
             "input_array_element": input_array_element,
             "network_view_element": network_view_element,
-            "binary_intermediate_values": self.binary_intermediate_values,
             "background": background,
             "background_color": self.background_color,
             "grid_enabled": self.grid_enabled,
@@ -7003,14 +7362,7 @@ class GraphicalExperimentDialog(QDialog):
                 )
             else:
                 self.network_view_card.setVisible(False)
-        self.binary_values_action.blockSignals(True)
-        self.binary_values_action.setChecked(
-            bool(document.get("binary_intermediate_values", False))
-        )
-        self.binary_values_action.blockSignals(False)
-        self.set_binary_intermediate_values(
-            document.get("binary_intermediate_values", False), False
-        )
+        self.restore_binary_output_intermediate_values(document)
         self.apply_saved_input_values(document.get("input_values", {}))
         background = document.get("background")
         if isinstance(background, dict) and background.get("path"):
@@ -7023,6 +7375,7 @@ class GraphicalExperimentDialog(QDialog):
                 self.set_background_pixmap(pixmap)
                 self.background_item.setPos(float(background.get("x", 0.0)), float(background.get("y", 0.0)))
                 self.background_item.setScale(max(0.05, float(background.get("scale", 1.0))))
+                self.background_item.set_locked(bool(background.get("locked", False)))
         self.update_element_actions()
 
     def showEvent(self, event):
