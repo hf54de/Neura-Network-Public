@@ -2,7 +2,7 @@
 
 [English](#english-version) | [Deutsch](#deutsche-version)
 
-**Current version / Aktuelle Version:** `0.10.0-beta.01`  
+**Current version / Aktuelle Version:** `0.10.0-beta.02`  
 [Download the latest Windows release / Aktuelle Windows-Version herunterladen](https://github.com/hf54de/Neura-Network-Public/releases/latest)
 
 > **Project status:** Public beta. NeuronNetz is a personal
@@ -74,6 +74,7 @@ A network can be drawn freely, generated automatically from a specified layer st
 | **Training History** | Compare multiple training runs, settings, and error curves, and restore suitable network states. |
 | **Result Analysis** | Compare target and calculated values, inspect the largest deviations, apply output-specific tolerances, and examine input influence. |
 | **Application View** | Build a freely designed application-oriented view with interactive inputs, outputs, binary input arrays, images, labels, shapes, and a simplified live network display. |
+| **PLC Export (Experimental)** | Transfer a trained network to Mitsubishi GX Works2 or GX Works3 as editable declarations and Structured Text. |
 | **Project Assistant** | Prepare an editable prompt for an external AI to develop a project idea, propose a network structure, and generate clearly formatted training data. |
 | **Documentation** | Store formatted project notes and export project and training reports. |
 
@@ -95,6 +96,31 @@ simplified live network display show the reaction immediately. Cards can be
 moved, resized, colored, and arranged on a project-specific canvas. Background
 images, comments, lines, curves, arrows, rectangles, and circles can be added
 to explain the application. The complete layout is stored with the project.
+
+### Experimental PLC Export
+
+NeuronNetz can generate the declarations and forward-calculation code of a
+trained network for **Mitsubishi GX Works2** and **Mitsubishi GX Works3**. Both
+targets have been tested in their respective engineering environments and use
+dedicated adapters for their different declaration layouts, clipboard formats,
+and exponential-function syntax.
+
+The transfer is deliberately transparent and editable:
+
+1. Create an empty function block in the Mitsubishi project.
+2. Copy the generated declarations from NeuronNetz into the local-label table.
+3. Copy the generated Structured Text into the empty program body.
+4. Compile, inspect, and test the function block in the PLC environment.
+
+Numeric signals are transferred as `REAL` and recognized by Mitsubishi as
+**FLOAT (Single Precision)**. Binary signals use `BOOL` and are recognized as
+**Bit**. Scaling values, trained weights, biases, and the complete forward
+calculation are included. The export changes neither the trained network nor
+its project data.
+
+Enable the feature under **Settings → Program Settings → Experimental → Show
+PLC Export in the menu bar**. CODESYS, TwinCAT, and Siemens SCL are shown as
+planned targets but are not yet implemented or validated.
 
 ### Projects and Documentation
 
@@ -118,6 +144,9 @@ The program is deliberately designed as a learning and experimentation tool for 
 - Example projects describing buildings, machines, alarms, or control systems
   are demonstrations only. They must not be used directly for real control,
   safety, emergency, medical, or other critical applications.
+- Generated PLC code must be reviewed, compiled, simulated, and validated in
+  the target engineering environment before use. The experimental export is
+  not certified for safety-related or unattended production control.
 - Results depend on the data, scaling, network structure, initialization, and
   training settings. Plausibility and suitability must always be checked by
   the user.
@@ -197,6 +226,7 @@ Ein Netzwerk kann frei gezeichnet, aus einer vorgegebenen Schichtenstruktur auto
 | **Trainingshistorie** | Mehrere Trainingsläufe, Einstellungen und Fehlerkurven miteinander vergleichen und geeignete Netzwerkzustände wiederherstellen. |
 | **Ergebnisanalyse** | Soll- und Istwerte vergleichen, größte Abweichungen untersuchen, Output-spezifische Toleranzen anwenden und den Einfluss der Eingänge betrachten. |
 | **Anwendungsansicht** | Eine frei gestaltbare Anwendungsdarstellung mit interaktiven Eingängen, Ausgängen, binärer Eingabematrix, Bildern, Beschriftungen, Formen und vereinfachter Live-Netzwerkanzeige aufbauen. |
+| **SPS-Export (experimentell)** | Ein trainiertes Netzwerk als bearbeitbare Deklaration und Structured Text nach Mitsubishi GX Works2 oder GX Works3 übertragen. |
 | **Projektassistent** | Einen bearbeitbaren Prompt für eine externe KI vorbereiten, um eine Projektidee auszuarbeiten, eine Netzstruktur vorzuschlagen und sauber formatierte Trainingsdaten zu erzeugen. |
 | **Dokumentation** | Formatierte Projekthinweise speichern und Projekt- sowie Trainingsberichte exportieren. |
 
@@ -221,6 +251,32 @@ Zeichenfläche verschieben, skalieren, einfärben und anordnen. Hintergrundbilde
 Kommentare, Linien, Kurven, Pfeile, Rechtecke und Kreise erläutern den
 Anwendungsfall. Die vollständige Gestaltung wird mit dem Projekt gespeichert.
 
+### Experimenteller SPS-Export
+
+NeuronNetz kann die Deklarationen und die Vorwärtsberechnung eines trainierten
+Netzes für **Mitsubishi GX Works2** und **Mitsubishi GX Works3** erzeugen. Beide
+Zielsysteme wurden in der jeweiligen Entwicklungsumgebung praktisch getestet.
+Getrennte Adapter berücksichtigen die unterschiedlichen Deklarationstabellen,
+Zwischenablageformate und Schreibweisen der Exponentialfunktion.
+
+Die Übertragung bleibt bewusst transparent und bearbeitbar:
+
+1. Im Mitsubishi-Projekt einen leeren Funktionsbaustein anlegen.
+2. Die erzeugten Deklarationen aus NeuronNetz in die Local-Label-Tabelle kopieren.
+3. Den erzeugten Structured Text in den leeren Programmkörper kopieren.
+4. Den Baustein in der SPS-Umgebung übersetzen, prüfen und testen.
+
+Numerische Signale werden als `REAL` übertragen und von Mitsubishi als
+**FLOAT (Single Precision)** erkannt. Binäre Signale verwenden `BOOL` und
+erscheinen als **Bit**. Skalierungswerte, trainierte Gewichte, Bias-Werte und
+die vollständige Vorwärtsberechnung sind enthalten. Der Export verändert weder
+das trainierte Netz noch seine Projektdaten.
+
+Die Funktion wird unter **Einstellungen → Programmeinstellungen →
+Experimentell → SPS-Export in der Menüleiste anzeigen** aktiviert. CODESYS,
+TwinCAT und Siemens SCL werden als geplante Zielsysteme angezeigt, sind aber
+noch nicht implementiert oder validiert.
+
 ### Projekte und Dokumentation
 
 Netzwerk, Darstellung, Trainingshistorie und Projekteinstellungen werden gemeinsam in einer Projektdatei gespeichert. Trainings- und Testdaten, Exporte sowie die Anwendungsansicht werden in einer strukturierten Projektablage verwaltet. Zusätzlich lässt sich eine formatierte Projektbeschreibung hinterlegen. Damit können Zweck, Aufbau und Besonderheiten eines Projekts direkt beim Netzwerk dokumentiert werden.
@@ -244,6 +300,10 @@ Das Programm ist bewusst als Lern- und Experimentierwerkzeug für kleine, übers
   Demonstrationen. Sie dürfen nicht unmittelbar für reale Steuerungen,
   Sicherheitseinrichtungen, Notfallsysteme, medizinische oder andere kritische
   Anwendungen eingesetzt werden.
+- Erzeugter SPS-Code muss vor der Verwendung in der Zielumgebung kontrolliert,
+  übersetzt, simuliert und validiert werden. Der experimentelle Export ist
+  nicht für sicherheitsbezogene oder unbeaufsichtigte Produktionssteuerungen
+  zertifiziert.
 - Ergebnisse hängen von Daten, Skalierung, Netzstruktur, Initialisierung und
   Trainingseinstellungen ab. Plausibilität und Eignung müssen immer vom
   Benutzer geprüft werden.
