@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.0-beta.02 – 02.09.2026
+
+- Added an optional experimental PLC Export menu.
+- Added export support for Mitsubishi GX Works2 and GX Works3.
+- Generated editable local-label declarations and Structured Text from trained networks.
+- Added separate copy functions for declarations and ST code.
+- Added GX Works2- and GX Works3-specific declaration layouts.
+- Added Excel-compatible clipboard data for GX Works3.
+- Added target-specific EXP syntax for GX Works2 and GX Works3.
+- Added support for analog and binary inputs and outputs.
+- Added scaling constants, trained weights, and bias values to the generated declarations.
+- Added syntax highlighting and editable export content.
+- Added placeholders for future CODESYS, TwinCAT, and Siemens SCL exporters.
+- Added an Experimental settings page for showing or hiding the PLC Export menu.
+- Updated the German and English integrated help.
+
 ## 0.10.0-beta.01 – 31.08.2026
 
 - Added a comprehensive project health check covering the network, training data, calibration, training status, and analysis availability.

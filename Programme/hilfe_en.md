@@ -32,6 +32,7 @@ Important menus:
 - **Network:** create, arrange, validate, explore, train, and analyze.
 - **Training Data:** manage training and test data.
 - **Settings:** program settings and language.
+- **PLC Export:** transfer trained networks to Mitsubishi function blocks.
 - **Help:** integrated help, tutorials, and program information.
 
 # 3. New Project
@@ -125,7 +126,9 @@ Project-specific settings include:
 - weight visualization by color and line width,
 - colors of neurons, connections, comments, and canvas.
 
-Toolbars, Properties panel, project previews, project assistant, editor behavior, startup, project folder, and language are program-wide settings.
+Toolbars, Properties panel, project previews, project assistant, editor behavior, startup, project folder, language, and experimental functions are program-wide settings.
+
+On the **Experimental** page, **Show PLC Export in the menu bar** immediately shows or hides the complete export menu. The selection is stored in `settings.json` and does not modify the project.
 
 A new project starts with the fixed defaults for project-specific settings.
 
@@ -233,13 +236,15 @@ The **(i) button** to the left of **Show All** displays this introduction at any
 - In **Explore** mode, input controls and binary array cells can be operated. Layout objects are protected from accidental movement.
 - The window opens in Explore mode. Switch to Edit mode only when the presentation is to be changed.
 
+Binary inputs and binary-array cells can be switched only in Explore mode. In Edit mode, mouse clicks are reserved for editing the layout.
+
 In the **Design** menu, **Show Grid** displays a layout grid. **Grid Spacing…** sets its spacing between 5 and 200 pixels. The setting is stored with the project, but the grid is visible only in Edit mode and is automatically hidden while exploring.
 
 Right-click an empty area and use **Add Element** to add individual inputs, outputs, a binary input array, a background graphic, a comment, or a graphical shape. **Add all inputs and outputs** adds every neuron card that is not yet visible in one step without creating duplicates. Elements can later be removed from the layout without deleting their neurons from the project. Removal requires confirmation.
 
 ### Input and output cards
 
-Analog input cards contain the value in its original unit and a slider. Binary inputs contain an On/Off switch. Output cards can display an analog bar, a semicircular gauge, or a binary decision. For analog outputs, the scale limits come from the assigned calibration. For binary outputs, **Show Intermediate Values** replaces the compact decision display with the numerical network value and its interpreted 0/1 state.
+Analog input cards contain the value in its original unit and a slider. Binary inputs contain an On/Off switch. Output cards can display an analog bar, a semicircular gauge, or a binary decision. For analog outputs, the scale limits come from the assigned calibration. For each binary output, its own context menu controls whether only the decision or also the numerical network value and interpreted 0/1 state are shown.
 
 Cards can be resized. Their background color can be set individually or transferred to a selected group. Several selected input cards or output cards can also receive a common size and alignment.
 
@@ -256,6 +261,10 @@ Comments provide freely placeable explanatory text with configurable font, align
 ### Selecting, arranging, and navigating
 
 Drag a selection rectangle around elements in Edit mode. Only elements completely enclosed by the rectangle are selected. Selected elements have a red outline. They can be moved together, nudged pixel by pixel with the arrow keys, aligned, distributed, copied with **Ctrl+C**, and pasted with **Ctrl+V**. Copy and paste apply only to graphical layout elements, not to neuron input and output cards.
+
+The context menu can **Lock** or **Unlock** one or several elements. Locked elements show a small padlock in Edit mode and can still be selected and unlocked, but cannot be moved, changed, or deleted. **Bring to Front** and **Send to Back** change the stored layer order; the background image always remains at the very back. Rectangles and ellipses remain selectable across their complete area even when their fill is transparent.
+
+While several elements are selected, the information area shows shared details for that selection. Without a multiple selection, it returns to the normal project display.
 
 Use the mouse wheel to zoom around the pointer. Pan with **Alt+Drag** or the closed hand after zooming. **Show All** fits the current layout into the available area. The status line reports the zoom level. Window size, zoom, element positions, sizes, colors, and visibility are saved with the project.
 
@@ -295,6 +304,8 @@ ProjectName/
 
 Choose the preferred project folder under **Program Settings → Editor → Project Folder**. Without a custom choice, the German interface uses `Projects_de` and the English interface uses `Projects_en`. A selected folder can be used independently of the interface language.
 
+Recent projects are stored in the same `settings.json` but kept in separate German and English lists. Projects from the German list therefore do not appear in the English interface and vice versa.
+
 # 27. Training and Test Data Files
 
 Training and test data are stored as `.nndata` files. Assigned files can be saved with the project or copied into a new project folder during **Save As**.
@@ -303,7 +314,9 @@ Relative references inside a structured project folder make the complete project
 
 # 28. Project Information and Report
 
-**Project Description** stores formatted text directly in the project. **Project Overview** summarizes structure, data, and training state. **Project Workflow** guides the user through important steps.
+**Project Description** stores formatted text directly in the project. Selected text can immediately be changed in font, size, bold, italic, and underline. When a selection contains mixed formatting, the controls do not show a misleading single value. Tabs, line breaks, indentation, and inserted mathematical notation are preserved.
+
+**Project Overview** summarizes structure, data, and training state. **Project Workflow** guides the user through important steps.
 
 The project report can be exported as a Word or PDF document. Language and file format follow the selected settings or save dialog.
 
@@ -362,7 +375,54 @@ Runs can be exported to CSV, deleted, or restored when compatible with the curre
 
 If all runs are deleted, result values and curve disappear from the open training window. Current network weights and biases remain unchanged.
 
-# 34. Illustrated Manual
+# 34. PLC Export
+
+The experimental PLC export transfers the forward calculation of an already trained network to a PLC function block. Training remains in NeuronNetz; exporting does not change weights or bias values.
+
+Enable the menu under **Settings → Program Settings... → Experimental → Show PLC Export in the menu bar**. **Mitsubishi GX Works2** and **Mitsubishi GX Works3** have been tested in practice. CODESYS, TwinCAT, and Siemens SCL are visible as **In preparation**, but remain disabled.
+
+Export requires a valid network, completely assigned and calibrated training columns, and a completed training run matching the current network structure.
+
+The export window contains two editable areas:
+
+1. Declarations for inputs, outputs, internal variables, scaling values, weights, and biases.
+2. Indented and syntax-highlighted Structured Text for forward calculation.
+
+Each area has its own copy button. First create an empty function block in the PLC environment, then transfer the declarations and finally the ST program body. `REAL` is recognized as **FLOAT (Single Precision)** and `BOOL` as **Bit**.
+
+## GX Works2
+
+The declaration order is:
+
+```text
+Class | Label Name | Data Type | Constant | Comment
+```
+
+Select the first free Local Label row and paste the copied declarations. Then paste the ST code. GX Works2 uses this exponential-function form:
+
+```st
+EXP(TRUE, -1.0 * N_N_15_Sum, EXP_Result);
+```
+
+## GX Works3
+
+Before pasting, enable **Show Details** in the Local Label editor. The extended order is:
+
+```text
+Label Name | Data Type | Class | Initial Value | Constant | Comment
+```
+
+**Initial Value** remains empty for `VAR_CONSTANT`. Weights, biases, and scaling values must appear under **Constant**, while descriptions must appear under **Comment**. NeuronNetz therefore provides both an Excel-like HTML table and tab-separated text on the Windows clipboard.
+
+GX Works3 uses the IEC function form with a return value:
+
+```st
+EXP_Result := EXP(-1.0 * N_N_15_Sum);
+```
+
+After transferring, verify the constants, input scaling, at least one analog output, and any binary outputs. GX Works2 and GX Works3 were tested in practice with a mass-spring network and produced the same results as NeuronNetz for equal inputs.
+
+# 35. Illustrated Manual
 
 This Markdown file is the integrated operational reference. The illustrated manual supplements it with screenshots, marked controls, and complete examples.
 

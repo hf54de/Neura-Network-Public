@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: helpdialog.py
 # Zweck: Zeigt die sprachabhängige Markdown-Hilfe innerhalb des Programms an.
-# Letzte Änderung: 09.08.2026
+# Letzte Änderung: 02.09.2026
 # Copyright © 2026 Helwig Fülling
 # -------------------------------------------------------------------------------------------------
 import re
@@ -396,7 +396,7 @@ class HelpDialog(QDialog):
             (7, 15, self.t("help.group.editing")),
             (16, 24, self.t("help.group.training")),
             (25, 28, self.t("help.group.files")),
-            (29, 33, self.t("help.group.reference"))
+            (29, 34, self.t("help.group.reference"))
         ]
 
         group_items = []

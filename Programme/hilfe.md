@@ -64,6 +64,7 @@ Die wichtigsten Menüs sind:
 - **Netzwerk**
 - **Trainingsdaten**
 - **Einstellungen**
+- **SPS-Export** (optional, experimentell)
 - **Hilfe**
 
 **Hilfe → Tutorials** öffnet den normalen Windows-Dateidialog. Ohne einen
@@ -624,6 +625,7 @@ Es enthält links die Kategorien:
 - Werkzeugleisten
 - Editor
 - Sprache
+- Experimentell
 
 Ein Hinweis auf jeder Seite zeigt, ob die Werte mit dem aktuellen
 Projekt oder als persönliche Programmeinstellung gespeichert werden.
@@ -856,6 +858,18 @@ Zusätzlich kann die vereinfachte Verschiebung großer Netzbereiche ein- oder
 ausgeschaltet werden. Bei sehr vielen betroffenen Verbindungen blendet das
 Programm die Linien während des Ziehens kurz aus und berechnet sie beim
 Loslassen einmal vollständig neu.
+
+## Experimentell
+
+Auf der Seite **Experimentell** können Funktionen eingeblendet werden, die
+bereits praktisch nutzbar sind, aber noch erweitert werden. Die Option
+**SPS-Export in der Menüleiste anzeigen** blendet das vollständige Menü
+**SPS-Export** unmittelbar ein oder aus. Die Auswahl ist projektunabhängig und
+wird dauerhaft in `AppData\Roaming\NeuronNetz\settings.json` gespeichert.
+
+Derzeit sind die praktisch geprüften Zielsysteme **Mitsubishi GX Works2** und
+**Mitsubishi GX Works3** verfügbar. CODESYS, TwinCAT und Siemens SCL werden im
+Menü als **In Vorbereitung** angezeigt und können noch nicht ausgewählt werden.
 
 ---
 
@@ -3196,6 +3210,146 @@ kann der Bericht anschließend in Word als PDF gespeichert werden.
 ---
 
 
+# 38. SPS-Export
+
+Der experimentelle SPS-Export überträgt die Vorwärtsberechnung eines bereits
+trainierten neuronalen Netzes in einen Funktionsbaustein einer
+SPS-Entwicklungsumgebung. Das Training selbst findet weiterhin in NeuronNetz
+statt. Gewichte und Bias-Werte werden durch den Export nicht verändert.
+
+Das Menü wird unter
+**Einstellungen → Programmeinstellungen... → Experimentell** mit der Option
+**SPS-Export in der Menüleiste anzeigen** ein- oder ausgeblendet.
+
+Verfügbar und praktisch geprüft sind:
+
+- **Mitsubishi GX Works2...**
+- **Mitsubishi GX Works3...**
+
+Als spätere Erweiterungen werden CODESYS, TwinCAT und Siemens SCL angezeigt.
+Diese Einträge tragen den Hinweis **In Vorbereitung** und sind deaktiviert.
+
+## Voraussetzungen
+
+Der Export wird für ein Projekt freigegeben, wenn:
+
+- das Netzwerk strukturell gültig ist,
+- jedem Ein- und Ausgang eine Trainingsdatenspalte zugeordnet ist,
+- die Kalibrierungen vollständig und gültig sind,
+- für das aktuelle Netzwerk und die aktuellen Trainingsdaten ein passender
+  abgeschlossener Trainingslauf vorhanden ist.
+
+Fehlt eine Voraussetzung, bleibt der Export gesperrt oder zeigt beim Aufruf
+einen entsprechenden Hinweis.
+
+## Aufbau des Exportfensters
+
+Das Exportfenster besitzt zwei unabhängig bearbeitbare Bereiche:
+
+1. **Deklaration** – Tabelle mit Ein-, Ausgängen, internen Variablen,
+   Skalierungswerten, Gewichten und Bias-Werten.
+2. **Structured Text** – eingerückter und farblich hervorgehobener ST-Code für
+   die Vorwärtsberechnung.
+
+Unter beiden Bereichen befindet sich eine eigene Kopiertaste. Dadurch werden
+Deklaration und Programmkörper nacheinander in einen zuvor leer angelegten
+Funktionsbaustein übertragen. Beide Inhalte können vor dem Kopieren im
+Exportfenster geändert werden.
+
+Numerische Signale werden als `REAL` kopiert und von Mitsubishi als
+**FLOAT (Single Precision)** erkannt. Binäre Signale werden als `BOOL` kopiert
+und erscheinen in Mitsubishi als **Bit**.
+
+Der erzeugte Code unterstützt Linear, ReLU, Sigmoid und Tanh sowie die im
+Projekt gespeicherten Skalierungsarten. Er enthält Kommentare zu den
+Berechnungsabschnitten und verwendet GX-kompatible Bezeichner mit höchstens
+32 Zeichen.
+
+## Mitsubishi GX Works2
+
+Für GX Works2 wird die Deklaration in dieser Reihenfolge kopiert:
+
+```text
+Class | Label Name | Data Type | Constant | Comment
+```
+
+Vorgehensweise:
+
+1. In GX Works2 einen leeren Funktionsbaustein anlegen.
+2. Im NeuronNetz-Exportfenster **Deklaration kopieren** wählen.
+3. In der Local-Label-Tabelle die erste freie Zeile markieren und einfügen.
+4. Im Exportfenster **ST-Code kopieren** wählen.
+5. Den Code in den leeren ST-Programmkörper einfügen.
+6. Den Baustein übersetzen und wie gewohnt im SPS-Programm aufrufen.
+
+GX Works2 verwendet für die Exponentialfunktion die dreiparametrige
+Mitsubishi-Schreibweise:
+
+```st
+EXP(TRUE, -1.0 * N_N_15_Sum, EXP_Ergebnis);
+```
+
+## Mitsubishi GX Works3
+
+GX Works3 besitzt eine andere Labeltabelle und eine andere Schnittstelle der
+Exponentialfunktion. Deshalb verwendet NeuronNetz dafür einen getrennten
+Exportadapter.
+
+Vor dem Einfügen muss im GX-Works3-Label-Editor **Show Details** aktiviert
+werden. In der erweiterten Ansicht lautet die Reihenfolge:
+
+```text
+Label Name | Data Type | Class | Initial Value | Constant | Comment
+```
+
+Die Spalte **Initial Value** bleibt bei `VAR_CONSTANT` leer. Gewichte,
+Bias-Werte und Skalierungsgrenzen stehen unter **Constant**. NeuronNetz legt
+die Deklaration für GX Works3 gleichzeitig als formatierte HTML-Tabelle und als
+tabulatorgetrennten Text in die Windows-Zwischenablage. Dadurch bleiben die
+leere Zwischenspalte, Konstanten und Kommentare beim direkten Einfügen
+erhalten.
+
+Vorgehensweise:
+
+1. In GX Works3 einen leeren Funktionsbaustein mit ST-Programmkörper anlegen.
+2. Im Local-Label-Editor **Show Details** aktivieren.
+3. Im NeuronNetz-Exportfenster **Deklaration kopieren** wählen.
+4. In GX Works3 die erste freie Zeile unter **Label Name** markieren und
+   einfügen.
+5. Prüfen, ob die Zahlen unter **Constant** und die Beschreibungen unter
+   **Comment** stehen.
+6. Im Exportfenster **ST-Code kopieren** wählen und in den leeren
+   ST-Programmkörper einfügen.
+7. Den Baustein konvertieren beziehungsweise übersetzen und im Programm
+   aufrufen.
+
+GX Works3 verwendet die einargumentige IEC-Schreibweise mit Rückgabewert:
+
+```st
+EXP_Ergebnis := EXP(-1.0 * N_N_15_Sum);
+```
+
+## Genauigkeit und Prüfung
+
+NeuronNetz exportiert die trainierten Parameter mit ausreichender Genauigkeit
+für die Mitsubishi-Datentypen mit einfacher Genauigkeit. Wegen der gerundeten
+Anzeige in NeuronNetz kann die SPS mehr Nachkommastellen darstellen, obwohl
+beide Berechnungen übereinstimmen.
+
+Nach dem ersten Einfügen sollten stets geprüft werden:
+
+- Eingangswerte und ihre Skalierung,
+- mindestens ein analoger Ausgang,
+- vorhandene binäre Ausgänge,
+- die Werte der Konstanten,
+- fehlerfreie Übersetzung des ST-Codes.
+
+GX Works2 und GX Works3 wurden praktisch mit demselben trainierten
+Feder-Masse-Netz getestet. Die SPS-Bausteine lieferten bei gleichen Eingängen
+denselben analogen Wert und dieselbe binäre Entscheidung wie NeuronNetz.
+
+---
+
 # Versionsnotizen der Hilfe
 
 Diese Hilfedatei beschreibt den aktuellen Entwicklungsstand des Programms mit:
@@ -3216,6 +3370,7 @@ Diese Hilfedatei beschreibt den aktuellen Entwicklungsstand des Programms mit:
 - frei formatierbare, projektbezogen gespeicherte Projektbeschreibung
 - kompakte Projektübersicht und optionaler Projektablauf
 - bearbeitbarer Projektbericht zum aktiven Trainingsergebnis
+- experimenteller SPS-Export für Mitsubishi GX Works2 und GX Works3
 
 Eigene Ergänzungen können direkt unterhalb dieser Zeile eingetragen werden.
 

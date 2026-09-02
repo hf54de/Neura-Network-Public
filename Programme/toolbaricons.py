@@ -312,6 +312,14 @@ class ToolbarIcons:
         "pointer_display": """
             <path d="M4 17a8 8 0 0116 0"/><path d="M12 16l5-6" class="accent"/>
             <circle cx="12" cy="16" r="1.5" class="accent fill"/>
+        """,
+        "sps_export": """
+            <rect x="3" y="4" width="18" height="16" rx="2"/>
+            <path d="M7 8h10M7 12h10M7 16h10"/>
+            <circle cx="5" cy="8" r="1" class="accent fill"/>
+            <circle cx="5" cy="12" r="1" class="accent fill"/>
+            <circle cx="5" cy="16" r="1" class="accent fill"/>
+            <path d="M18 7l3 3-3 3" class="accent"/>
         """
     }
 

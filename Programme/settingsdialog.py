@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: settingsdialog.py
 # Zweck: Stellt die Seiten und Bedienelemente der Programmeinstellungen bereit.
-# Letzte Änderung: 20.08.2026
+# Letzte Änderung: 02.09.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -127,7 +127,8 @@ class SettingsDialog(QDialog):
         "colors",
         "toolbar",
         "editor",
-        "language"
+        "language",
+        "experimental"
     )
 
     def __init__(
@@ -178,6 +179,9 @@ class SettingsDialog(QDialog):
                 ),
                 self.language_manager.text(
                     "settings.category.language"
+                ),
+                self.language_manager.text(
+                    "settings.category.experimental"
                 )
             ]
         )
@@ -194,6 +198,7 @@ class SettingsDialog(QDialog):
         self.create_toolbar_page(ui_settings)
         self.create_editor_page(ui_settings)
         self.create_language_page(ui_settings)
+        self.create_experimental_page(ui_settings)
 
         self.button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -605,6 +610,33 @@ class SettingsDialog(QDialog):
         layout.addStretch()
         self.pages.addWidget(page)
 
+    def create_experimental_page(self, settings):
+        page, layout = self.create_page(
+            self.language_manager.text("settings.experimental.title"),
+            self.language_manager.text("settings.experimental.scope")
+        )
+        group = QGroupBox(
+            self.language_manager.text("settings.experimental.group")
+        )
+        group_layout = QVBoxLayout(group)
+        self.show_sps_export = QCheckBox(
+            self.language_manager.text("settings.experimental.sps_export")
+        )
+        self.show_sps_export.setChecked(
+            settings.get("show_sps_export", True)
+        )
+        self.show_sps_export.toggled.connect(self.emit_preview)
+        group_layout.addWidget(self.show_sps_export)
+        hint = QLabel(
+            self.language_manager.text("settings.experimental.sps_export_hint")
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #666666; padding-left: 22px;")
+        group_layout.addWidget(hint)
+        layout.addWidget(group)
+        layout.addStretch()
+        self.pages.addWidget(page)
+
     def project_settings(self):
         settings = dict(self.base_project_settings)
 
@@ -645,6 +677,7 @@ class SettingsDialog(QDialog):
                 "show_project_assistant": (
                     self.show_project_assistant.isChecked()
                 ),
+                "show_sps_export": self.show_sps_export.isChecked(),
                 "editor_scene_margin": self.editor_scene_margin.value(),
                 "editor_zoom_step_percent": self.editor_zoom_step.value(),
                 "simplify_large_moves": self.simplify_large_moves.isChecked()
@@ -722,6 +755,10 @@ class SettingsDialog(QDialog):
                 self.language_combo.setCurrentIndex(
                     default_index
                 )
+        elif page_index == 5:
+            self.show_sps_export.setChecked(
+                self.ui_defaults["show_sps_export"]
+            )
 
         self.loading = False
         self.emit_preview()

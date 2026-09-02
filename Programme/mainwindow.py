@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: mainwindow.py
 # Zweck: Verbindet Hauptfenster, Menüs, Werkzeugleisten und zentrale Programmabläufe.
-# Letzte Änderung: 31.08.2026
+# Letzte Änderung: 02.09.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -68,6 +68,8 @@ from connection import Connection
 from editorscene import EditorScene
 from forwardcalibrationdialog import ForwardCalibrationDialog
 from graphicalexperimentdialog import GraphicalExperimentDialog
+from gxworks2export import GxWorks2ExportGenerator
+from gxworks3export import GxWorks3ExportGenerator
 from graphicsview import GraphicsView
 from helpdialog import HelpDialog
 from language import LanguageManager
@@ -90,6 +92,7 @@ from resultanalysisdialog import ResultAnalysisDialog
 from projectsavedialog import ProjectSaveDialog
 from settings import Settings
 from settingsdialog import SettingsDialog
+from spsexportdialog import SpsExportDialog
 from trainingdialog import TrainingDialog
 from traininghistorydialog import TrainingHistoryDialog
 from trainingdatadialog import TrainingDataDialog
@@ -749,6 +752,45 @@ class MainWindow(QMainWindow):
         self.action_display_settings.triggered.connect(
             self.open_settings_dialog
         )
+
+        # Menü SPS-Export
+        self.sps_export_menu = menubar.addMenu(
+            text("menu.sps_export")
+        )
+
+        self.action_sps_export_gxworks2 = self.sps_export_menu.addAction(
+            text("action.sps_export.gxworks2")
+        )
+        self.action_sps_export_gxworks2.setIcon(
+            ToolbarIcons.icon("sps_export", accent="#167c80")
+        )
+        self.action_sps_export_gxworks2.triggered.connect(
+            self.open_gxworks2_export
+        )
+
+        self.action_sps_export_gxworks3 = self.sps_export_menu.addAction(
+            text("action.sps_export.gxworks3")
+        )
+        self.action_sps_export_gxworks3.setIcon(
+            ToolbarIcons.icon("sps_export", accent="#d77a1f")
+        )
+        self.action_sps_export_gxworks3.triggered.connect(
+            self.open_gxworks3_export
+        )
+
+        planned_sps_targets = (
+            ("action.sps_export.codesys", "#8a58a8"),
+            ("action.sps_export.twincat", "#c53838"),
+            ("action.sps_export.siemens_scl", "#1689a6"),
+        )
+        self.planned_sps_export_actions = []
+        for text_key, accent in planned_sps_targets:
+            action = self.sps_export_menu.addAction(text(text_key))
+            action.setIcon(ToolbarIcons.icon("sps_export", accent=accent))
+            action.setEnabled(False)
+            action.setToolTip(text("action.sps_export.planned"))
+            action.setStatusTip(text("action.sps_export.planned"))
+            self.planned_sps_export_actions.append(action)
 
         # Menü Hilfe
         hilfe_menu = menubar.addMenu(
@@ -2617,6 +2659,10 @@ class MainWindow(QMainWindow):
         self.scene.simplify_large_moves = self.ui_settings[
             "simplify_large_moves"
         ]
+        if hasattr(self, "sps_export_menu"):
+            self.sps_export_menu.menuAction().setVisible(
+                self.ui_settings["show_sps_export"]
+            )
         self.view.update_scene_rect()
 
     def preview_settings(self, project_settings, ui_settings):
@@ -3372,6 +3418,8 @@ class MainWindow(QMainWindow):
         required_names = (
             "action_forward_pass",
             "action_graphical_experiment",
+            "action_sps_export_gxworks2",
+            "action_sps_export_gxworks3",
             "action_training_step",
             "action_result_analysis",
             "action_mathematics_mode",
@@ -6787,6 +6835,78 @@ class MainWindow(QMainWindow):
             )
 
 
+    def open_gxworks2_export(self):
+        """Erzeugt Deklarationen und ST-Code für Mitsubishi GX Works2."""
+
+        self.open_mitsubishi_export(GxWorks2ExportGenerator)
+
+    def open_gxworks3_export(self):
+        """Erzeugt Deklarationen und ST-Code für Mitsubishi GX Works3."""
+
+        self.open_mitsubishi_export(GxWorks3ExportGenerator)
+
+    def open_mitsubishi_export(self, generator_class):
+        """Bereitet einen Mitsubishi-Export aus dem trainierten Netz vor."""
+
+        german = self.language.current_language == "de"
+        title = "SPS-Export" if german else "PLC Export"
+        if not self.network_data_functions_available():
+            QMessageBox.warning(
+                self,
+                title,
+                (
+                    "Für den Export werden ein gültiges Netzwerk, zugeordnete "
+                    "Trainingsdaten und eine vollständige Kalibrierung benötigt."
+                    if german else
+                    "Export requires a valid network, assigned training data, "
+                    "and complete calibration."
+                ),
+            )
+            return
+
+        if self.active_training_history_entry() is None:
+            QMessageBox.warning(
+                self,
+                title,
+                (
+                    "Für die aktuellen Trainingsdaten ist kein abgeschlossener, "
+                    "zum Netzwerk passender Trainingslauf vorhanden."
+                    if german else
+                    "There is no completed training run matching the current "
+                    "training data and network."
+                ),
+            )
+            return
+
+        try:
+            _records, input_mappings, output_mappings = (
+                NetworkTestDialog.prepare_document(
+                    self.scene.network,
+                    self.training_data_manager.document,
+                    data_label=self.language.text("test.data.training"),
+                    translator=self.language.text,
+                )
+            )
+            project_name = (
+                Path(self.current_project_path).stem
+                if self.current_project_path
+                else "NeuronNetz"
+            )
+            export_data = generator_class(
+                self.scene.network,
+                input_mappings,
+                output_mappings,
+                project_name=project_name,
+                language_code=self.language.current_language,
+            ).generate()
+            SpsExportDialog(
+                export_data,
+                language_code=self.language.current_language,
+                parent=self,
+            ).exec()
+        except (KeyError, TypeError, ValueError) as error:
+            QMessageBox.warning(self, title, str(error))
+
     def training_data_state_changed(self):
         """
         Aktualisiert den sichtbaren Status der zentral
@@ -7652,6 +7772,8 @@ class MainWindow(QMainWindow):
             self.action_validate_network,
             self.action_forward_pass,
             self.action_graphical_experiment,
+            self.action_sps_export_gxworks2,
+            self.action_sps_export_gxworks3,
             self.action_training_step,
             self.action_test_network,
             self.action_result_analysis,

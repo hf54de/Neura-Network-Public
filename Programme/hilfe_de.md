@@ -32,6 +32,7 @@ Wichtige Menüs:
 - **Netzwerk:** erzeugen, anordnen, prüfen, erproben, trainieren und analysieren.
 - **Trainingsdaten:** Trainings- und Testdaten verwalten.
 - **Einstellungen:** Programmeinstellungen und Sprache.
+- **SPS-Export:** trainierte Netze als Mitsubishi-Funktionsbaustein übertragen.
 - **Hilfe:** integrierte Hilfe, Tutorials und Programminformationen.
 
 # 3. Neues Projekt
@@ -125,7 +126,9 @@ Projektbezogen sind insbesondere:
 - Darstellung der Gewichte durch Farbe und Linienstärke,
 - Farben von Neuronen, Verbindungen, Kommentaren und Zeichenfläche.
 
-Projektunabhängig sind Werkzeugleisten, Eigenschaftenfenster, Projektvorschauen, Projektassistent, Editor-Bedienung, Programmstart, Projektordner und Sprache.
+Projektunabhängig sind Werkzeugleisten, Eigenschaftenfenster, Projektvorschauen, Projektassistent, Editor-Bedienung, Programmstart, Projektordner, Sprache und experimentelle Funktionen.
+
+Auf der Seite **Experimentell** blendet **SPS-Export in der Menüleiste anzeigen** das vollständige SPS-Menü unmittelbar ein oder aus. Die Auswahl wird in `settings.json` gespeichert und verändert das Projekt nicht.
 
 Ein neues Projekt beginnt mit den festen Standardwerten der projektbezogenen Einstellungen.
 
@@ -225,11 +228,13 @@ Der **(i)-Button** links neben **Alles zeigen** ruft diese Einführung jederzeit
 - Im Modus **Erproben** lassen sich Inputs und das binäre Eingabe-Array bedienen. Die Gestaltung ist dabei vor unbeabsichtigtem Verschieben geschützt.
 - Das Fenster startet im Modus **Erproben**.
 
+Binäre Eingänge und Zellen des binären Eingabe-Arrays lassen sich nur im Modus **Erproben** schalten. Im Bearbeitungsmodus dienen Mausklicks ausschließlich der Gestaltung.
+
 Im Menü **Gestaltung** blendet **Raster anzeigen** ein Hilfsraster ein. Über **Rasterabstand…** wird dessen Abstand zwischen 5 und 200 Pixeln festgelegt. Das Raster wird mit dem Projekt gespeichert und ist ausschließlich im Modus **Bearbeiten** sichtbar; beim Erproben wird es automatisch ausgeblendet.
 
 Mit einem Rechtsklick auf eine freie Stelle können einzelne Eingänge und Ausgänge, das binäre Eingabe-Array, eine Grafik, Kommentare sowie Linien, Rechtecke und Kreise eingefügt werden. **Alle Ein- und Ausgänge hinzufügen** ergänzt in einem Schritt sämtliche noch nicht sichtbaren Neuronenkacheln, ohne vorhandene Kacheln zu verdoppeln. Nicht benötigte Ein- und Ausgänge lassen sich aus der Gestaltung entfernen, ohne die zugehörigen Neuronen aus dem Projekt zu löschen.
 
-Analoge Eingänge besitzen Zahlenfeld und Regler, binäre Eingänge einen Ein-/Aus-Schalter. Analoge Ausgänge können als Balken oder Zeigerinstrument dargestellt werden. Binäre Ausgänge zeigen ihre Entscheidung; auf Wunsch werden zusätzlich Zwischenwert und daraus abgeleiteter Zustand angezeigt.
+Analoge Eingänge besitzen Zahlenfeld und Regler, binäre Eingänge einen Ein-/Aus-Schalter. Analoge Ausgänge können als Balken oder Zeigerinstrument dargestellt werden. Bei jedem binären Ausgang kann im eigenen Kontextmenü individuell gewählt werden, ob nur die Entscheidung oder zusätzlich Zwischenwert und daraus abgeleiteter Zustand angezeigt werden.
 
 ## Grafik, Kommentare und Formen
 
@@ -238,6 +243,10 @@ Eine Grafik kann aus einer Datei geladen, per Drag-and-drop abgelegt oder aus de
 ## Auswählen, anordnen und speichern
 
 Ein Auswahlrahmen markiert nur vollständig eingeschlossene Elemente. Markierte Elemente erhalten einen roten Rahmen und können gemeinsam verschoben, mit den Pfeiltasten pixelweise bewegt, ausgerichtet, verteilt oder in eine einheitliche Größe gebracht werden. Grafische Gestaltungselemente können mit **Strg+C** und **Strg+V** kopiert werden.
+
+Das Kontextmenü kann einzelne oder mehrere Elemente **sperren** und wieder **entsperren**. Gesperrte Elemente sind im Bearbeitungsmodus durch ein kleines Schloss gekennzeichnet, lassen sich weiterhin auswählen und entsperren, aber weder verschieben, verändern noch löschen. **In den Vordergrund** und **In den Hintergrund** ändern die gespeicherte Ebenenreihenfolge; das Hintergrundbild bleibt immer ganz hinten. Rechtecke und Kreise bleiben auch mit transparenter Füllung über ihre gesamte Fläche greifbar.
+
+Bei einer aktiven Mehrfachauswahl zeigt der rechte Informationsbereich gemeinsame Angaben zur Auswahl. Ohne Mehrfachauswahl erscheint dort wieder die normale Projektanzeige.
 
 Das Mausrad zoomt um den Mauszeiger. Mit **Alt+Ziehen** wird die Ansicht verschoben; **Alles zeigen** passt die vollständige Gestaltung in das Fenster ein. Zoomstufe, Fenstergröße, sichtbare Elemente, Positionen, Größen und Farben werden mit dem Projekt gespeichert.
 
@@ -275,6 +284,8 @@ Projektname/
 
 Der bevorzugte Projektordner wird unter **Programmeinstellungen → Editor → Projektpfad** gewählt. Ohne eigene Auswahl verwendet die deutsche Oberfläche `Projects_de`, die englische `Projects_en`. Ein frei gewählter Ordner kann unabhängig von der Programmsprache verwendet werden.
 
+Die zuletzt geöffneten Projekte werden innerhalb derselben `settings.json` getrennt für Deutsch und Englisch geführt. Dadurch erscheinen in der englischen Oberfläche keine Einträge aus der deutschen Liste und umgekehrt.
+
 # 27. Trainings- und Testdatendateien
 
 Trainings- und Testdaten werden als `.nndata` gespeichert. Zugeordnete Dateien können gemeinsam mit dem Projekt gespeichert oder bei **Speichern unter** in den neuen Projektordner übernommen werden.
@@ -283,7 +294,9 @@ Relative Verweise innerhalb eines strukturierten Projektordners erleichtern das 
 
 # 28. Projektinformationen und Bericht
 
-**Projektbeschreibung** speichert formatierten Text direkt im Projekt. **Projektübersicht** fasst Struktur, Daten und Trainingszustand zusammen. Der **Projektablauf** führt als Navigator durch wichtige Arbeitsschritte.
+**Projektbeschreibung** speichert formatierten Text direkt im Projekt. Markierter Text kann unmittelbar in Schriftart, Schriftgröße, Fett, Kursiv und Unterstrichen geändert werden. Enthält eine Markierung unterschiedliche Formatierungen, zeigen die Bedienelemente keinen irreführenden Einzelwert. Tabulatoren, Zeilenumbrüche, Einzüge und eingefügte mathematische Schreibweisen bleiben erhalten.
+
+**Projektübersicht** fasst Struktur, Daten und Trainingszustand zusammen. Der **Projektablauf** führt als Navigator durch wichtige Arbeitsschritte.
 
 Der Projektbericht kann als Word- oder PDF-Dokument exportiert werden. Sprache und Dateiformat richten sich nach den gewählten Einstellungen beziehungsweise dem Speicherdialog.
 
@@ -338,7 +351,54 @@ Die Trainingshistorie speichert Läufe projektbezogen mit Parametern, Ergebniswe
 
 Werden alle Läufe gelöscht, verschwinden Ergebnisanzeige und Kurve im geöffneten Trainingsfenster. Die aktuellen Gewichte und Bias-Werte des Netzwerks bleiben erhalten.
 
-# 34. Ausführliches Handbuch
+# 34. SPS-Export
+
+Der experimentelle SPS-Export überträgt die Vorwärtsberechnung eines bereits trainierten Netzes in einen SPS-Funktionsbaustein. Das Training bleibt in NeuronNetz; der Export verändert keine Gewichte oder Bias-Werte.
+
+Aktivieren Sie das Menü mit **Einstellungen → Programmeinstellungen... → Experimentell → SPS-Export in der Menüleiste anzeigen**. Praktisch geprüft sind **Mitsubishi GX Works2** und **Mitsubishi GX Works3**. CODESYS, TwinCAT und Siemens SCL sind als **In Vorbereitung** sichtbar, aber deaktiviert.
+
+Voraussetzungen sind ein gültiges Netzwerk, vollständig zugeordnete und kalibrierte Trainingsspalten sowie ein zur aktuellen Struktur passender abgeschlossener Trainingslauf.
+
+Das Exportfenster enthält zwei bearbeitbare Bereiche:
+
+1. Deklaration mit Ein- und Ausgängen, internen Variablen, Skalierungswerten, Gewichten und Bias-Werten.
+2. Eingerückter und farblich hervorgehobener Structured Text für die Vorwärtsberechnung.
+
+Unter jedem Bereich steht eine eigene Kopiertaste. Legen Sie in der SPS-Umgebung zuerst einen leeren Funktionsbaustein an, übertragen Sie danach die Deklaration und anschließend den ST-Programmkörper. `REAL` wird als **FLOAT (Single Precision)** erkannt, `BOOL` als **Bit**.
+
+## GX Works2
+
+Die Deklarationsreihenfolge lautet:
+
+```text
+Class | Label Name | Data Type | Constant | Comment
+```
+
+Markieren Sie die erste freie Local-Label-Zeile und fügen Sie die kopierte Deklaration ein. Übertragen Sie danach den ST-Code. GX Works2 verwendet für die Exponentialfunktion:
+
+```st
+EXP(TRUE, -1.0 * N_N_15_Sum, EXP_Ergebnis);
+```
+
+## GX Works3
+
+Aktivieren Sie im Local-Label-Editor vor dem Einfügen unbedingt **Show Details**. Die erweiterte Reihenfolge lautet:
+
+```text
+Label Name | Data Type | Class | Initial Value | Constant | Comment
+```
+
+**Initial Value** bleibt für `VAR_CONSTANT` leer. Gewichte, Bias und Skalierungswerte müssen unter **Constant**, die Beschreibungen unter **Comment** erscheinen. NeuronNetz stellt dafür eine Excel-ähnliche HTML-Tabelle und tabulatorgetrennten Text gleichzeitig in der Windows-Zwischenablage bereit.
+
+GX Works3 verwendet die IEC-Schreibweise mit Rückgabewert:
+
+```st
+EXP_Ergebnis := EXP(-1.0 * N_N_15_Sum);
+```
+
+Prüfen Sie nach der Übertragung Konstanten, Eingangsskalierung, mindestens einen analogen Ausgang und vorhandene binäre Ausgänge. GX Works2 und GX Works3 wurden mit einem Feder-Masse-Netz praktisch getestet und lieferten bei gleichen Eingängen dieselben Ergebnisse wie NeuronNetz.
+
+# 35. Ausführliches Handbuch
 
 Diese Markdown-Datei ist eine kompakte Soforthilfe. Das vollständige bebilderte Handbuch erklärt sämtliche Fenster, Schaltflächen und ausführlichen Beispiele.
 

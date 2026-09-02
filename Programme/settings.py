@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: settings.py
 # Zweck: Speichert und lädt projektunabhängige Programmeinstellungen.
-# Letzte Änderung: 31.08.2026
+# Letzte Änderung: 02.09.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -556,6 +556,7 @@ class Settings:
             "show_startup_splash": True,
             "show_project_menu_previews": True,
             "show_project_assistant": True,
+            "show_sps_export": True,
             "project_directory": "",
             "editor_scene_margin": 100,
             "editor_zoom_step_percent": 15
@@ -660,6 +661,10 @@ class Settings:
         )
         if isinstance(show_project_assistant, bool):
             normalized["show_project_assistant"] = show_project_assistant
+
+        show_sps_export = ui_settings.get("show_sps_export")
+        if isinstance(show_sps_export, bool):
+            normalized["show_sps_export"] = show_sps_export
 
         project_directory = ui_settings.get("project_directory")
         if isinstance(project_directory, str):
