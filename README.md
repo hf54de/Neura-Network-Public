@@ -2,7 +2,7 @@
 
 [English](#english-version) | [Deutsch](#deutsche-version)
 
-**Current version / Aktuelle Version:** `0.9.0-beta.15`  
+**Current version / Aktuelle Version:** `0.10.0-beta.01`  
 [Download the latest Windows release / Aktuelle Windows-Version herunterladen](https://github.com/hf54de/Neura-Network-Public/releases/latest)
 
 > **Project status:** Public beta. NeuronNetz is a personal
