@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.0-beta.03 – 03.09.2026
+
+- add SPS export
+
 ## 0.10.0-beta.02 – 02.09.2026
 
 - Added an optional experimental PLC Export menu.

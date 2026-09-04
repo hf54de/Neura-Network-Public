@@ -74,7 +74,7 @@ A network can be drawn freely, generated automatically from a specified layer st
 | **Training History** | Compare multiple training runs, settings, and error curves, and restore suitable network states. |
 | **Result Analysis** | Compare target and calculated values, inspect the largest deviations, apply output-specific tolerances, and examine input influence. |
 | **Application View** | Build a freely designed application-oriented view with interactive inputs, outputs, binary input arrays, images, labels, shapes, and a simplified live network display. |
-| **PLC Export (Experimental)** | Transfer a trained network to Mitsubishi GX Works2 or GX Works3 as editable declarations and Structured Text. |
+| **PLC Export (Experimental)** | Export a trained network using individual variables: Mitsubishi-specific ASC for GX Works2/3, manufacturer-neutral IEC 61131-10 XML, or a separate GX Works3 XML transfer profile. |
 | **Project Assistant** | Prepare an editable prompt for an external AI to develop a project idea, propose a network structure, and generate clearly formatted training data. |
 | **Documentation** | Store formatted project notes and export project and training reports. |
 
@@ -99,13 +99,21 @@ to explain the application. The complete layout is stored with the project.
 
 ### Experimental PLC Export
 
-NeuronNetz can generate the declarations and forward-calculation code of a
-trained network for **Mitsubishi GX Works2** and **Mitsubishi GX Works3**. Both
-targets have been tested in their respective engineering environments and use
-dedicated adapters for their different declaration layouts, clipboard formats,
-and exponential-function syntax.
+NeuronNetz generates the declarations and forward-calculation code of a trained
+network exclusively with the transparent, practically tested
+**individual-variable structure**. The separate ASC exports for
+**Mitsubishi GX Works2** and **Mitsubishi GX Works3** use dedicated adapters for
+their different declaration layouts, clipboard formats, and
+exponential-function syntax. The additional **IEC 61131-10 XML** export uses a
+dedicated manufacturer-neutral IEC generator and contains neither Mitsubishi
+designations nor GX Works-specific function calls. The completeness of an IEC
+61131-10 import must be verified in the respective target system. A separate
+**Mitsubishi GX Works3 – XML** command keeps the individual-variable layout but
+stores variable comments in GX Works3's `AddData/VariableComments` structure;
+general comment No. 1 is used so that they appear in the normal comment column.
+The neutral XML output remains unchanged.
 
-The transfer is deliberately transparent and editable:
+For the transparent ASC transfer:
 
 1. Create an empty function block in the Mitsubishi project.
 2. Copy the generated declarations from NeuronNetz into the local-label table.
@@ -117,6 +125,15 @@ Numeric signals are transferred as `REAL` and recognized by Mitsubishi as
 **Bit**. Scaling values, trained weights, biases, and the complete forward
 calculation are included. The export changes neither the trained network nor
 its project data.
+
+The export windows keep declarations, Structured Text, and XML read-only.
+Block name, model version, and additional connections remain configurable;
+NeuronNetz immediately regenerates the preview and all generated output.
+Optional connections provide enable control, input-range checking, diagnostics,
+fallback values, and retention of the last outputs. Complete ASC and XML files
+can be saved directly, and the generated content can be copied to the
+clipboard. Any required manual code changes should be made after export in the
+target engineering environment or an external editor.
 
 Enable the feature under **Settings → Program Settings → Experimental → Show
 PLC Export in the menu bar**. CODESYS, TwinCAT, and Siemens SCL are shown as
@@ -226,7 +243,7 @@ Ein Netzwerk kann frei gezeichnet, aus einer vorgegebenen Schichtenstruktur auto
 | **Trainingshistorie** | Mehrere Trainingsläufe, Einstellungen und Fehlerkurven miteinander vergleichen und geeignete Netzwerkzustände wiederherstellen. |
 | **Ergebnisanalyse** | Soll- und Istwerte vergleichen, größte Abweichungen untersuchen, Output-spezifische Toleranzen anwenden und den Einfluss der Eingänge betrachten. |
 | **Anwendungsansicht** | Eine frei gestaltbare Anwendungsdarstellung mit interaktiven Eingängen, Ausgängen, binärer Eingabematrix, Bildern, Beschriftungen, Formen und vereinfachter Live-Netzwerkanzeige aufbauen. |
-| **SPS-Export (experimentell)** | Ein trainiertes Netzwerk als bearbeitbare Deklaration und Structured Text nach Mitsubishi GX Works2 oder GX Works3 übertragen. |
+| **SPS-Export (experimentell)** | Ein trainiertes Netz im geprüften Einzelvariablenaufbau exportieren: Mitsubishi-spezifisches ASC für GX Works2/3 oder herstellerneutrales IEC-61131-10-XML. |
 | **Projektassistent** | Einen bearbeitbaren Prompt für eine externe KI vorbereiten, um eine Projektidee auszuarbeiten, eine Netzstruktur vorzuschlagen und sauber formatierte Trainingsdaten zu erzeugen. |
 | **Dokumentation** | Formatierte Projekthinweise speichern und Projekt- sowie Trainingsberichte exportieren. |
 
@@ -253,13 +270,23 @@ Anwendungsfall. Die vollständige Gestaltung wird mit dem Projekt gespeichert.
 
 ### Experimenteller SPS-Export
 
-NeuronNetz kann die Deklarationen und die Vorwärtsberechnung eines trainierten
-Netzes für **Mitsubishi GX Works2** und **Mitsubishi GX Works3** erzeugen. Beide
-Zielsysteme wurden in der jeweiligen Entwicklungsumgebung praktisch getestet.
-Getrennte Adapter berücksichtigen die unterschiedlichen Deklarationstabellen,
-Zwischenablageformate und Schreibweisen der Exponentialfunktion.
+NeuronNetz erzeugt Deklarationen und Vorwärtsberechnung eines trainierten Netzes
+ausschließlich im transparenten und praktisch geprüften
+**Einzelvariablenaufbau**. Die getrennten ASC-Exporte für
+**Mitsubishi GX Works2** und **Mitsubishi GX Works3** berücksichtigen mit eigenen
+Adaptern die unterschiedlichen Deklarationstabellen, Zwischenablageformate und
+Schreibweisen der Exponentialfunktion. Der zusätzliche Export
+**IEC 61131-10 XML** verwendet einen eigenen herstellerneutralen IEC-Generator
+und enthält weder Mitsubishi-Bezeichnungen noch GX-Works-spezifische
+Funktionsaufrufe. Wie vollständig eine Entwicklungsumgebung IEC 61131-10
+importiert, muss im jeweiligen Zielsystem praktisch geprüft werden. Der eigene
+Menüpunkt **Mitsubishi GX Works3 – XML** behält den Einzelvariablenaufbau bei,
+legt Variablenkommentare aber in der von GX Works3 erwarteten Struktur
+`AddData/VariableComments` als allgemeinen Kommentar Nr. 1 ab, sodass sie in
+der normalen Kommentarspalte erscheinen. Der neutrale XML-Export bleibt davon
+unberührt.
 
-Die Übertragung bleibt bewusst transparent und bearbeitbar:
+Für die transparente ASC-Übertragung gilt:
 
 1. Im Mitsubishi-Projekt einen leeren Funktionsbaustein anlegen.
 2. Die erzeugten Deklarationen aus NeuronNetz in die Local-Label-Tabelle kopieren.
@@ -271,6 +298,15 @@ Numerische Signale werden als `REAL` übertragen und von Mitsubishi als
 erscheinen als **Bit**. Skalierungswerte, trainierte Gewichte, Bias-Werte und
 die vollständige Vorwärtsberechnung sind enthalten. Der Export verändert weder
 das trainierte Netz noch seine Projektdaten.
+
+Deklarationen, Structured Text und XML bleiben in den Exportfenstern
+schreibgeschützt. Änderbar sind FB-Name, Modellversion und Zusatzanschlüsse;
+NeuronNetz erzeugt daraus Vorschau und sämtliche Ausgabedaten unmittelbar neu.
+Optionale Anschlüsse ermöglichen Freigabe, Eingangsbereichsprüfung, Diagnose,
+Ersatzwerte und das Halten der letzten Ausgänge. Vollständige ASC- und XML-Dateien
+können direkt gespeichert und die erzeugten Inhalte in die Zwischenablage
+kopiert werden. Erforderliche manuelle Codeänderungen sollten erst nach dem
+Export in der Zielumgebung oder einem externen Editor vorgenommen werden.
 
 Die Funktion wird unter **Einstellungen → Programmeinstellungen →
 Experimentell → SPS-Export in der Menüleiste anzeigen** aktiviert. CODESYS,

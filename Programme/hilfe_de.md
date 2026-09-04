@@ -187,7 +187,7 @@ Trainingsziele sind **1 Epoche**, eine feste **Anzahl** oder **Bis Fehlergrenze*
 
 - **Neues Training starten:** neuen Lauf mit den gewählten Initialisierungsoptionen beginnen.
 - **Neues Training mit gleicher Initialisierung:** einen getrennten Lauf mit den ursprünglichen Gewichten und Bias-Werten des angezeigten Laufes beginnen. Die aktuell eingestellte Lernrate, das Momentum, die Fehlergrenze und die maximale Epochenzahl werden verwendet; Momentumzustände beginnen bei null. Die Funktion ist nur für künftig gespeicherte, zur aktuellen Netzwerkstruktur passende Läufe verfügbar.
-- **Fortsetzen:** denselben Lauf mit Gewichten, Bias, Momentumzuständen, Epochenzähler und Fehlerkurve weiterführen. Lernrate und Momentum müssen dabei den ursprünglichen Werten entsprechen.
+- **Fortsetzen:** Bei unveränderter Lernrate und unverändertem Momentum wird derselbe Lauf mit Gewichten, Bias, Momentumzuständen, Epochenzähler und Fehlerkurve weitergeführt. Wurden Lernrate oder Momentum geändert, können entweder die ursprünglichen Werte wiederhergestellt oder die aktuellen Gewichte und Bias-Werte in einen neuen, mit dem bisherigen Lauf verknüpften Lauf übernommen werden. Im neuen Lauf beginnen Momentumzustände und Fehlerkurve neu.
 - **Stoppen:** den laufenden Rechenschritt kontrolliert beenden.
 - **Erproben:** aktuellen trainierten Zustand interaktiv untersuchen.
 - **Test und Analyse:** Trainings- oder Testdaten auswerten.
@@ -359,12 +359,32 @@ Aktivieren Sie das Menü mit **Einstellungen → Programmeinstellungen... → Ex
 
 Voraussetzungen sind ein gültiges Netzwerk, vollständig zugeordnete und kalibrierte Trainingsspalten sowie ein zur aktuellen Struktur passender abgeschlossener Trainingslauf.
 
-Das Exportfenster enthält zwei bearbeitbare Bereiche:
+Das Exportfenster enthält zwei schreibgeschützte Ausgabebereiche:
 
 1. Deklaration mit Ein- und Ausgängen, internen Variablen, Skalierungswerten, Gewichten und Bias-Werten.
 2. Eingerückter und farblich hervorgehobener Structured Text für die Vorwärtsberechnung.
 
+Oberhalb der Exportdaten zeigt NeuronNetz die Anzahl der Variablen, getrennt nach Ein-/Ausgängen, Skalierung, Gewichten `W`, Bias-Werten `B`, internen Neuronwerten `N` und Hilfswerten. Eine statische Aufwandsschätzung nennt Multiplikationen, Additionen, `EXP`-Aufrufe und eine Größenklasse. Sie ist keine garantierte Zykluszeit; diese hängt von SPS-Typ, CPU und Projekt ab.
+
+Der Metadatenkopf enthält Exportdatum, NeuronNetz-Version, editierbare Modellversion, automatisch berechnete Modellkennung, Netzarchitektur, Aktivierungsfunktionen und Angaben zum Trainingslauf.
+
+Der Menüpunkt **IEC 61131-10 XML** verwendet einen eigenen herstellerneutralen IEC-Generator. Er enthält weder Mitsubishi-Bezeichnungen noch GX-Works-spezifische Funktionsaufrufe. Der getrennte Menüpunkt **Mitsubishi GX Works3 – XML** verwendet denselben Aufbau mit Einzelvariablen und denselben GX-Works3-kompatiblen ST-Code, schreibt Variablenkommentare aber als allgemeinen Kommentar Nr. 1 in Mitsubishis `AddData/VariableComments`-Struktur. Damit bleibt der neutrale Export unverändert und die Herstellererweiterung klar abgegrenzt. Wie vollständig eine Entwicklungsumgebung den IEC-61131-10-Standard importiert, muss im jeweiligen Zielsystem praktisch geprüft werden.
+
+Ein exportierter Baustein kann den Freigabeeingang `Enable` und den Statusausgang `Network_Active` besitzen. Die optionale Plausibilitätsprüfung wird mit `Enable_Range_Check` aktiviert. `Range_Tolerance_Percent` erweitert die beim Training gespeicherten Min-/Max-Grenzen standardmäßig um 10 %. `Input_Range_Error` meldet eine Verletzung; `Invalid_Input_Number` enthält die Nummer des ersten ungültigen Eingangs (0 = kein Fehler). Bei deaktiviertem Netz oder Eingangsfehler können die `Fallback_...`-Ersatzwerte ausgegeben werden; mit `Hold_Last_Output` bleiben stattdessen die letzten Ausgänge erhalten. Diese Betriebsfunktionen sind keine Sicherheitsfunktionen. Die aufklappbare FB-Vorschau im Exportfenster zeigt alle Anschlüsse; über `(i)` werden Steuerung, Prüfung, Diagnose und Fallback-Verhalten erklärt.
+
+Im Bereich **Bausteineinstellungen** können diese Zusatzanschlüsse einzeln ausgewählt werden. Nicht sinnvolle abhängige Optionen werden automatisch deaktiviert. Ohne Fallback-Anschlüsse bleiben die letzten Ausgangswerte bei einer übersprungenen Berechnung erhalten. Ist Fallback gewählt, aber `Hold_Last_Output` nicht, werden die Ersatzwerte immer ausgegeben. Mit beiden Anschlüssen kann das Verhalten zur Laufzeit gewählt werden. Wird `Range_Tolerance_Percent` nicht als Eingang erzeugt, bleibt die Toleranz als interne Konstante von 10 % erhalten. Vorschau, Deklarationen, ST-, ASC- und XML-Code werden bei jeder Auswahl unmittelbar neu erzeugt.
+
+Deklarationen, Structured Text und XML sind im Exportfenster schreibgeschützt. Änderbar bleiben FB-Name, Modellversion und die Auswahl der Zusatzanschlüsse; daraus erzeugt NeuronNetz die Ausgabedaten neu. Falls individuelle Codeänderungen erforderlich sind, nehmen Sie diese nach dem Export in der SPS-Entwicklungsumgebung oder einem externen Editor vor. Die abschließende Prüfung, Übersetzung und Freigabe erfolgt stets im Compiler des jeweiligen SPS-Zielsystems.
+
 Unter jedem Bereich steht eine eigene Kopiertaste. Legen Sie in der SPS-Umgebung zuerst einen leeren Funktionsbaustein an, übertragen Sie danach die Deklaration und anschließend den ST-Programmkörper. `REAL` wird als **FLOAT (Single Precision)** erkannt, `BOOL` als **Bit**.
+
+Alternativ speichert **Vollständige ASC-Datei speichern...** den gesamten Funktionsbaustein für GX Works2 oder GX Works3. **IEC 61131-10 XML...** öffnet den vollständigen, schreibgeschützten und herstellerneutral erzeugten XML-Code. Für den direkten Import in GX Works3 ist **Mitsubishi GX Works3 – XML...** vorgesehen. Mit **XML kopieren** wird das jeweilige Dokument vollständig in die Zwischenablage übernommen; **XML-Datei speichern...** speichert genau den sichtbaren Inhalt. Geringfügige Ergebnisabweichungen gegenüber NeuronNetz können durch die 32-Bit-Single-Precision-Rechnung der jeweiligen SPS entstehen.
+
+## Sicherheit und Verantwortung
+
+Der erzeugte SPS-Code dient als technische Unterstützung und muss vor dem produktiven Einsatz durch eine qualifizierte Fachkraft geprüft, getestet und für die konkrete Anlage freigegeben werden. Der Anwender ist für die korrekte Integration, Validierung, Risikobeurteilung und Einhaltung aller geltenden Sicherheitsvorschriften verantwortlich. Der Code ist nicht als Sicherheitsfunktion, Not-Aus-Funktion oder Ersatz für zertifizierte Schutzmaßnahmen vorgesehen. NeuronNetz übernimmt keine Verantwortung für Schäden, Betriebsunterbrechungen oder Fehlfunktionen, die aus der ungeprüften oder unsachgemäßen Verwendung des erzeugten Codes entstehen.
+
+Beim ersten SPS-Export erscheint dieser Verantwortungshinweis einmalig zur Bestätigung. Im Exportfenster bleibt eine Kurzfassung sichtbar; das Informationssymbol **(i)** öffnet jederzeit den vollständigen Text. Auch der erzeugte ST-Code enthält einen kompakten Sicherheitshinweis.
 
 ## GX Works2
 

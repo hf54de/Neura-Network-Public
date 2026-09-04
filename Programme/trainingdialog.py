@@ -175,6 +175,7 @@ class TrainingDialog(QDialog):
         self.current_run_learning_rate = None
         self.current_run_momentum = None
         self.current_run_shuffle_seed = None
+        self.current_run_parent_id = None
         self.current_run_can_continue = False
         self.current_run_stopped = False
         self.current_run_initial_state = None
@@ -2318,7 +2319,7 @@ class TrainingDialog(QDialog):
         )
         self.update_compact_status()
 
-    def begin_new_training_run(self):
+    def begin_new_training_run(self, parent_run_id=None):
         """Vergibt Nummer und Startzeit für einen bewusst neuen Lauf."""
 
         self.current_run_id = self.next_training_run_id
@@ -2332,6 +2333,9 @@ class TrainingDialog(QDialog):
         self.current_run_initialized = self.initialize_network.isChecked()
         self.current_run_learning_rate = float(self.learning_rate.value())
         self.current_run_momentum = float(self.momentum.value())
+        self.current_run_parent_id = (
+            int(parent_run_id) if parent_run_id is not None else None
+        )
         self.current_run_can_continue = False
         self.current_run_stopped = False
         self.update_training_run_label()
@@ -2590,10 +2594,10 @@ class TrainingDialog(QDialog):
         self.maximum_epochs.setValue(maximum_epochs)
 
     def prepare_continuation_parameters(self):
-        """Sichert für eine echte Fortsetzung Lernrate und Momentum."""
+        """Bestimmt, ob derselbe oder ein verknüpfter neuer Lauf startet."""
 
         if self.is_training or not self.current_run_can_continue:
-            return False
+            return None
 
         original_rate = self.current_run_learning_rate
         if original_rate is None:
@@ -2634,24 +2638,49 @@ class TrainingDialog(QDialog):
                 self.language.text("training.resume.restore_and_continue"),
                 QMessageBox.ButtonRole.AcceptRole,
             )
+            changed_button = message_box.addButton(
+                self.language.text("training.resume.changed_and_continue"),
+                QMessageBox.ButtonRole.ActionRole,
+            )
             message_box.addButton(
                 self.language.text("common.cancel"),
                 QMessageBox.ButtonRole.RejectRole,
             )
             message_box.exec()
-            if message_box.clickedButton() is not restore_button:
-                return False
-            self.learning_rate.setValue(original_rate)
-            self.momentum.setValue(original_momentum)
-        return True
+            clicked_button = message_box.clickedButton()
+            if clicked_button is restore_button:
+                self.learning_rate.setValue(original_rate)
+                self.momentum.setValue(original_momentum)
+                return "continue"
+            if clicked_button is changed_button:
+                return "changed"
+            return None
+        return "continue"
 
     def continue_selected_training(self):
         """Setzt denselben Lauf mit dem gemeinsam gewählten Trainingsziel fort."""
 
-        if not self.prepare_continuation_parameters():
+        continuation_mode = self.prepare_continuation_parameters()
+        if continuation_mode is None:
             return
 
         total_epoch_limit = int(self.maximum_epochs.value())
+        if continuation_mode == "changed":
+            if self.training_target_mode == "one":
+                section_epochs, stop_at_limit = 1, False
+            elif self.training_target_mode == "limit":
+                section_epochs, stop_at_limit = total_epoch_limit, True
+            else:
+                section_epochs = min(self.epoch_count.value(), total_epoch_limit)
+                stop_at_limit = False
+            self.execute_training(
+                maximum_epochs=section_epochs,
+                stop_at_error_limit=stop_at_limit,
+                initial_state=self.capture_training_state(),
+                parent_run_id=self.current_run_id,
+            )
+            return
+
         remaining_epochs = total_epoch_limit - self.current_run_completed_epochs
         if remaining_epochs <= 0:
             QMessageBox.information(
@@ -2808,6 +2837,13 @@ class TrainingDialog(QDialog):
             )
         except (TypeError, ValueError):
             self.current_run_shuffle_seed = None
+        try:
+            stored_parent_id = history_entry.get("parent_run_id")
+            self.current_run_parent_id = (
+                int(stored_parent_id) if stored_parent_id is not None else None
+            )
+        except (TypeError, ValueError):
+            self.current_run_parent_id = None
         self.current_run_can_continue = (
             self.current_run_id is not None
             and bool(history_entry.get("continuable", True))
@@ -2864,6 +2900,7 @@ class TrainingDialog(QDialog):
         self.current_run_learning_rate = None
         self.current_run_momentum = None
         self.current_run_shuffle_seed = None
+        self.current_run_parent_id = None
         self.network.reset_momentum_state()
         self.current_run_can_continue = False
         self.current_run_stopped = False
@@ -4460,6 +4497,7 @@ class TrainingDialog(QDialog):
         continue_existing=False,
         initial_state=None,
         shuffle_seed=None,
+        parent_run_id=None,
     ):
         """
         Führt den vollständigen Trainingslauf aus.
@@ -4498,7 +4536,7 @@ class TrainingDialog(QDialog):
 
         maximum_epochs = max(1, int(maximum_epochs))
         if not continue_existing:
-            self.begin_new_training_run()
+            self.begin_new_training_run(parent_run_id=parent_run_id)
             self.network.reset_momentum_state()
             self.current_run_shuffle_seed = (
                 int(shuffle_seed)
@@ -4947,6 +4985,7 @@ class TrainingDialog(QDialog):
                 "run_id": self.current_run_id,
                 "timestamp": self.current_run_timestamp,
                 "continue_existing": bool(continue_existing),
+                "parent_run_id": self.current_run_parent_id,
                 "continuable": True,
                 "initial_network_state": deepcopy(
                     self.current_run_initial_state

@@ -1702,6 +1702,17 @@ class ProjectIO:
                     "Die Trainingshistorie enthält einen ungültigen Fortsetzungsstatus."
                 )
 
+            parent_run_id = entry.get("parent_run_id")
+            if parent_run_id is not None and (
+                not isinstance(parent_run_id, int)
+                or isinstance(parent_run_id, bool)
+                or parent_run_id < 1
+                or parent_run_id == run_id
+            ):
+                raise ValueError(
+                    "Die Trainingshistorie enthält eine ungültige Verknüpfung."
+                )
+
             if entry.get("fast_mode") not in (True, False, None):
                 raise ValueError(
                     "Die Trainingshistorie enthält einen ungültigen "

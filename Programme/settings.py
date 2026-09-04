@@ -704,6 +704,29 @@ class Settings:
         return cls.save(settings_data)
 
     @classmethod
+    def sps_export_notice_acknowledged(cls):
+        """Liefert, ob der einmalige SPS-Verantwortungshinweis bestätigt wurde."""
+
+        settings_data = cls.load()
+        sps_export = settings_data.get("sps_export")
+        return bool(
+            isinstance(sps_export, dict)
+            and sps_export.get("responsibility_notice_acknowledged") is True
+        )
+
+    @classmethod
+    def acknowledge_sps_export_notice(cls):
+        """Speichert ausschließlich die Bestätigung des SPS-Verantwortungshinweises."""
+
+        settings_data = cls.load()
+        sps_export = settings_data.get("sps_export")
+        if not isinstance(sps_export, dict):
+            sps_export = {}
+        sps_export["responsibility_notice_acknowledged"] = True
+        settings_data["sps_export"] = sps_export
+        return cls.save(settings_data)
+
+    @classmethod
     def get_project_assistant_selections(cls):
         """Liefert die zuletzt verwendeten projektunabhängigen Auswahlen."""
 

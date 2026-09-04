@@ -189,7 +189,7 @@ Training targets are **1 Epoch**, a fixed **Count**, or **Until Error Limit**.
 
 - **Start New Training:** begin a new run with the selected initialization options.
 - **New Training with Same Starting Conditions:** begin a separate run with the original weights, bias values, and training-record order of the displayed run. The currently selected learning rate, momentum, error limit, and maximum epoch count are used; momentum states start at zero. With unchanged parameters, the resulting curves are reproducible. The function is available only when compatible starting conditions have been stored for the current network structure.
-- **Continue:** continue the same run with its weights, biases, momentum states, epoch count, and error curve. Learning rate and momentum must retain their original values.
+- **Continue:** With unchanged learning rate and momentum, continue the same run with its weights, biases, momentum states, epoch count, and error curve. If learning rate or momentum was changed, either restore the original values or retain the current weights and biases in a new run linked to the preceding run. Momentum states and the error curve start over in the new run.
 - **Stop:** finish the current calculation step in a controlled way.
 - **Explore:** inspect the current trained state interactively.
 - **Test and Analyze:** evaluate training or test data.
@@ -383,12 +383,32 @@ Enable the menu under **Settings → Program Settings... → Experimental → Sh
 
 Export requires a valid network, completely assigned and calibrated training columns, and a completed training run matching the current network structure.
 
-The export window contains two editable areas:
+The export window contains two read-only output areas:
 
 1. Declarations for inputs, outputs, internal variables, scaling values, weights, and biases.
 2. Indented and syntax-highlighted Structured Text for forward calculation.
 
+Above the export data, NeuronNetz shows the variable count split into inputs/outputs, scaling values, weights `W`, biases `B`, internal neuron values `N`, and helper values. A static effort estimate lists multiplications, additions, `EXP` calls, and a size rating. It is not a guaranteed cycle time, which depends on the PLC type, CPU, and project.
+
+The metadata header contains the export date, NeuronNetz version, editable model version, automatically calculated model signature, network architecture, activation functions, and training-run information.
+
+The **IEC 61131-10 XML** menu item uses a dedicated manufacturer-neutral IEC generator. It contains neither Mitsubishi designations nor GX Works-specific function calls. The separate **Mitsubishi GX Works3 – XML** command uses the same individual-variable layout and the same GX Works3-compatible ST code, but writes variable comments as general comment No. 1 in Mitsubishi's `AddData/VariableComments` structure. This keeps the neutral export unchanged and clearly separates the vendor extension. How completely a development environment imports the IEC 61131-10 standard must be verified in the respective target system.
+
+An exported block can include the `Enable` input and the `Network_Active` status output. Optional plausibility checking is enabled with `Enable_Range_Check`. `Range_Tolerance_Percent` extends the training-data minimum/maximum limits by 10% by default. `Input_Range_Error` reports a violation; `Invalid_Input_Number` contains the number of the first invalid input (0 = no error). When the network is disabled or an input error is present, the `Fallback_...` values can be written; `Hold_Last_Output` keeps the previous outputs instead. These operating functions are not safety functions. The collapsible FB preview in the export window shows every connection; `(i)` explains control, checking, diagnostics, and fallback behavior.
+
+The **Block settings** area allows these additional connections to be selected individually. Dependent options that are not meaningful are disabled automatically. Without fallback connections, the last outputs are retained when calculation is skipped. If fallback is selected but `Hold_Last_Output` is not, the substitute values are always written. With both connections, the behavior can be selected at runtime. If `Range_Tolerance_Percent` is not generated as an input, the tolerance remains an internal constant of 10%. Preview, declarations, ST, ASC, and XML code are regenerated immediately after each selection.
+
+Declarations, Structured Text, and XML are read-only in the export window. The FB name, model version, and additional-connection selection remain editable; NeuronNetz regenerates the output from these settings. If individual code changes are required, make them after export in the PLC development environment or an external editor. Final checking, compilation, and approval must always take place in the compiler of the respective PLC target system.
+
 Each area has its own copy button. First create an empty function block in the PLC environment, then transfer the declarations and finally the ST program body. `REAL` is recognized as **FLOAT (Single Precision)** and `BOOL` as **Bit**.
+
+Alternatively, **Save complete ASC file...** stores the complete function block for GX Works2 or GX Works3. **IEC 61131-10 XML...** opens the complete read-only, manufacturer-neutral XML code. For direct import into GX Works3, use **Mitsubishi GX Works3 – XML...**. **Copy XML** copies the complete current document to the clipboard, while **Save XML file...** stores exactly the visible content. Small result differences compared with NeuronNetz can be caused by the respective PLC's 32-bit single-precision calculation.
+
+## Safety and responsibility
+
+The generated PLC code is provided as technical assistance and must be reviewed, tested, and approved for the specific installation by a qualified professional before production use. The user is responsible for correct integration, validation, risk assessment, and compliance with all applicable safety requirements. The code is not intended as a safety function, emergency-stop function, or replacement for certified protective measures. NeuronNetz assumes no responsibility for damage, operational interruptions, or malfunctions resulting from unreviewed or improper use of the generated code.
+
+This responsibility notice is shown once for acknowledgement before the first PLC export. A short version remains visible in the export window, and the **(i)** button opens the complete notice at any time. The generated ST code also contains a compact safety notice.
 
 ## GX Works2
 

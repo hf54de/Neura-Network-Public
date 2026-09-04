@@ -62,14 +62,15 @@ from PySide6.QtWidgets import (
     QWidget
 )
 
-from aboutdialog import AboutDialog
+from aboutdialog import AboutDialog, program_version
 from commentitem import CommentItem
 from connection import Connection
 from editorscene import EditorScene
 from forwardcalibrationdialog import ForwardCalibrationDialog
 from graphicalexperimentdialog import GraphicalExperimentDialog
 from gxworks2export import GxWorks2ExportGenerator
-from gxworks3export import GxWorks3ExportGenerator
+from gxworks3export import GxWorks3ExportGenerator, GxWorks3XmlExportGenerator
+from iec61131export import Iec61131ExportGenerator
 from graphicsview import GraphicsView
 from helpdialog import HelpDialog
 from language import LanguageManager
@@ -93,6 +94,7 @@ from projectsavedialog import ProjectSaveDialog
 from settings import Settings
 from settingsdialog import SettingsDialog
 from spsexportdialog import SpsExportDialog
+from xmlexportdialog import XmlExportDialog
 from trainingdialog import TrainingDialog
 from traininghistorydialog import TrainingHistoryDialog
 from trainingdatadialog import TrainingDataDialog
@@ -758,14 +760,26 @@ class MainWindow(QMainWindow):
             text("menu.sps_export")
         )
 
-        self.action_sps_export_gxworks2 = self.sps_export_menu.addAction(
-            text("action.sps_export.gxworks2")
+        self.action_sps_export_iec_xml = self.sps_export_menu.addAction(
+            text("action.sps_export.iec_xml")
         )
-        self.action_sps_export_gxworks2.setIcon(
-            ToolbarIcons.icon("sps_export", accent="#167c80")
+        self.action_sps_export_iec_xml.setIcon(
+            ToolbarIcons.icon("sps_export", accent="#2369b3")
         )
-        self.action_sps_export_gxworks2.triggered.connect(
-            self.open_gxworks2_export
+        self.action_sps_export_iec_xml.triggered.connect(
+            self.open_iec61131_xml_export
+        )
+
+        self.sps_export_menu.addSeparator()
+
+        self.action_sps_export_gxworks3_xml = self.sps_export_menu.addAction(
+            text("action.sps_export.gxworks3_xml")
+        )
+        self.action_sps_export_gxworks3_xml.setIcon(
+            ToolbarIcons.icon("sps_export", accent="#d77a1f")
+        )
+        self.action_sps_export_gxworks3_xml.triggered.connect(
+            self.open_gxworks3_xml_export
         )
 
         self.action_sps_export_gxworks3 = self.sps_export_menu.addAction(
@@ -776,6 +790,16 @@ class MainWindow(QMainWindow):
         )
         self.action_sps_export_gxworks3.triggered.connect(
             self.open_gxworks3_export
+        )
+
+        self.action_sps_export_gxworks2 = self.sps_export_menu.addAction(
+            text("action.sps_export.gxworks2")
+        )
+        self.action_sps_export_gxworks2.setIcon(
+            ToolbarIcons.icon("sps_export", accent="#167c80")
+        )
+        self.action_sps_export_gxworks2.triggered.connect(
+            self.open_gxworks2_export
         )
 
         planned_sps_targets = (
@@ -3418,8 +3442,10 @@ class MainWindow(QMainWindow):
         required_names = (
             "action_forward_pass",
             "action_graphical_experiment",
+            "action_sps_export_iec_xml",
             "action_sps_export_gxworks2",
             "action_sps_export_gxworks3",
+            "action_sps_export_gxworks3_xml",
             "action_training_step",
             "action_result_analysis",
             "action_mathematics_mode",
@@ -6838,15 +6864,25 @@ class MainWindow(QMainWindow):
     def open_gxworks2_export(self):
         """Erzeugt Deklarationen und ST-Code für Mitsubishi GX Works2."""
 
-        self.open_mitsubishi_export(GxWorks2ExportGenerator)
+        self.open_plc_export(GxWorks2ExportGenerator)
 
     def open_gxworks3_export(self):
         """Erzeugt Deklarationen und ST-Code für Mitsubishi GX Works3."""
 
-        self.open_mitsubishi_export(GxWorks3ExportGenerator)
+        self.open_plc_export(GxWorks3ExportGenerator)
 
-    def open_mitsubishi_export(self, generator_class):
-        """Bereitet einen Mitsubishi-Export aus dem trainierten Netz vor."""
+    def open_iec61131_xml_export(self):
+        """Erzeugt einen vollständigen IEC-61131-10-XML-Funktionsbaustein."""
+
+        self.open_plc_export(iec_xml=True)
+
+    def open_gxworks3_xml_export(self):
+        """Erzeugt XML mit der von GX Works3 erwarteten Kommentarstruktur."""
+
+        self.open_plc_export(GxWorks3XmlExportGenerator, iec_xml=True)
+
+    def open_plc_export(self, generator_class=None, iec_xml=False):
+        """Bereitet einen Mitsubishi-ASC- oder neutralen IEC-XML-Export vor."""
 
         german = self.language.current_language == "de"
         title = "SPS-Export" if german else "PLC Export"
@@ -6878,6 +6914,9 @@ class MainWindow(QMainWindow):
             )
             return
 
+        if not self.confirm_sps_export_responsibility():
+            return
+
         try:
             _records, input_mappings, output_mappings = (
                 NetworkTestDialog.prepare_document(
@@ -6892,20 +6931,86 @@ class MainWindow(QMainWindow):
                 if self.current_project_path
                 else "NeuronNetz"
             )
-            export_data = generator_class(
-                self.scene.network,
-                input_mappings,
-                output_mappings,
-                project_name=project_name,
-                language_code=self.language.current_language,
-            ).generate()
-            SpsExportDialog(
+            def build_export(export_options=None, model_version=""):
+                if iec_xml:
+                    selected_generator = generator_class or Iec61131ExportGenerator
+                else:
+                    selected_generator = generator_class
+                data = selected_generator(
+                    self.scene.network,
+                    input_mappings,
+                    output_mappings,
+                    project_name=project_name,
+                    language_code=self.language.current_language,
+                    application_version=program_version(self.language),
+                    training_entry=self.active_training_history_entry(),
+                    model_version=model_version,
+                    export_options=export_options,
+                ).generate()
+                data["regenerate_export"] = build_export
+                data["export_options"] = dict(export_options or {})
+                return data
+
+            export_data = build_export()
+            dialog_class = XmlExportDialog if iec_xml else SpsExportDialog
+            dialog_class(
                 export_data,
                 language_code=self.language.current_language,
                 parent=self,
             ).exec()
         except (KeyError, TypeError, ValueError) as error:
             QMessageBox.warning(self, title, str(error))
+
+    def confirm_sps_export_responsibility(self):
+        """Zeigt den Verantwortungshinweis einmalig vor dem ersten SPS-Export."""
+
+        if Settings.sps_export_notice_acknowledged():
+            return True
+        german = self.language.current_language == "de"
+        message = QMessageBox(self)
+        message.setIcon(QMessageBox.Icon.Warning)
+        message.setWindowTitle(
+            "SPS-Export – Verantwortungshinweis"
+            if german else
+            "PLC Export – Responsibility notice"
+        )
+        message.setText(
+            "Der erzeugte SPS-Code muss vor dem produktiven Einsatz durch eine "
+            "qualifizierte Fachkraft geprüft, getestet und freigegeben werden."
+            if german else
+            "The generated PLC code must be reviewed, tested, and approved by a "
+            "qualified professional before production use."
+        )
+        message.setInformativeText(
+            (
+                "Der Code ist keine Sicherheits- oder Not-Aus-Funktion. Der Anwender "
+                "ist für Integration, Validierung, Risikobeurteilung und die Einhaltung "
+                "aller geltenden Sicherheitsvorschriften verantwortlich."
+            )
+            if german else
+            (
+                "The code is not a safety or emergency-stop function. The user is "
+                "responsible for integration, validation, risk assessment, and "
+                "compliance with all applicable safety requirements."
+            )
+        )
+        understand_button = message.addButton(
+            "Verstanden" if german else "I understand",
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        message.addButton(QMessageBox.StandardButton.Cancel)
+        message.exec()
+        if message.clickedButton() is not understand_button:
+            return False
+        try:
+            Settings.acknowledge_sps_export_notice()
+        except OSError as error:
+            QMessageBox.warning(
+                self,
+                message.windowTitle(),
+                str(error),
+            )
+        return True
 
     def training_data_state_changed(self):
         """
@@ -7772,8 +7877,10 @@ class MainWindow(QMainWindow):
             self.action_validate_network,
             self.action_forward_pass,
             self.action_graphical_experiment,
+            self.action_sps_export_iec_xml,
             self.action_sps_export_gxworks2,
             self.action_sps_export_gxworks3,
+            self.action_sps_export_gxworks3_xml,
             self.action_training_step,
             self.action_test_network,
             self.action_result_analysis,
@@ -8371,6 +8478,7 @@ class MainWindow(QMainWindow):
                     result.get("training_stopped", False)
                 ),
                 "continuable": bool(result.get("continuable", True)),
+                "parent_run_id": result.get("parent_run_id"),
                 "curve_points": deepcopy(
                     result.get("curve_points", [])
                 ),

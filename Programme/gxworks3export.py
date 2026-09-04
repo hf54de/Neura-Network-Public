@@ -63,3 +63,14 @@ class GxWorks3ExportGenerator(GxWorks2ExportGenerator):
             1,
         )
         return export_data
+
+
+class GxWorks3XmlExportGenerator(GxWorks3ExportGenerator):
+    """Liefert den GX-Works3-ST-Code für den separaten XML-Transfer."""
+
+    def generate(self):
+        export_data = super().generate()
+        export_data["target_system"] = "Mitsubishi GX Works3 XML"
+        export_data["xml_profile"] = "gxworks3"
+        export_data["complete_export_format"] = "gxworks3_xml"
+        return export_data

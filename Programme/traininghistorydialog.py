@@ -666,6 +666,9 @@ class TrainingHistoryDialog(QDialog):
             old_run_id = entry.get("run_id")
             old_to_new[old_run_id] = new_run_id
             entry["run_id"] = new_run_id
+        for entry in self.training_history:
+            parent_run_id = entry.get("parent_run_id")
+            entry["parent_run_id"] = old_to_new.get(parent_run_id)
         self.restorable_run_ids = {
             old_to_new[run_id]
             for run_id in self.restorable_run_ids
@@ -685,6 +688,11 @@ class TrainingHistoryDialog(QDialog):
     def initialization_text(self, entry, repeated_from=None):
         """Beschreibt verständlich, woher die Startparameter des Laufs stammen."""
 
+        parent_run_id = entry.get("parent_run_id")
+        if parent_run_id is not None:
+            return self.t(
+                "history.initialization.changed_parameters", run=parent_run_id
+            )
         if repeated_from is not None:
             return self.t(
                 "history.initialization.repeated", run=repeated_from
