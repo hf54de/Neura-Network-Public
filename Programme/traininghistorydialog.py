@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: traininghistorydialog.py
 # Zweck: Verwaltet, vergleicht und lädt gespeicherte Trainingsläufe.
-# Letzte Änderung: 24.08.2026
+# Letzte Änderung: 05.09.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 
 from numberformat import format_number as format_display_number
 from language import LanguageManager
+from trainingcomparison import metric_curve_key, metric_chart_title
 
 
 class CleanTableSelectionDelegate(QStyledItemDelegate):
@@ -66,6 +67,7 @@ class TrainingHistoryChart(QWidget):
         self.language = language_manager or LanguageManager()
         self.t = self.language.text
         self.runs = []
+        self.error_metric = "mse"
         self.scale_mode = "linear"
         self.view_bounds = None
         self.data_bounds = None
@@ -255,10 +257,10 @@ class TrainingHistoryChart(QWidget):
             return
 
         valid_runs = [
-            run
+            dict(run, curve_points=run.get(metric_curve_key(self.error_metric), []))
             for run in self.runs
-            if isinstance(run.get("curve_points"), list)
-            and run["curve_points"]
+            if isinstance(run.get(metric_curve_key(self.error_metric)), list)
+            and run[metric_curve_key(self.error_metric)]
         ]
 
         painter.setPen(QColor(38, 52, 66))
@@ -266,9 +268,7 @@ class TrainingHistoryChart(QWidget):
             QRectF(plot_rect.left(), 5.0, plot_rect.width(), 20.0),
             Qt.AlignmentFlag.AlignCenter,
             (
-                self.t("history.chart.title_log")
-                if self.scale_mode == "logarithmic"
-                else self.t("history.chart.title")
+                metric_chart_title(self.language, self.error_metric, self.scale_mode == "logarithmic")
             )
         )
 
@@ -279,7 +279,7 @@ class TrainingHistoryChart(QWidget):
             painter.drawText(
                 plot_rect,
                 Qt.AlignmentFlag.AlignCenter,
-                self.t("history.chart.none_selected")
+                self.t("training.metric.unavailable") if self.error_metric == "maximum" and self.runs else self.t("history.chart.none_selected")
             )
             return
 
@@ -415,8 +415,12 @@ class TrainingHistoryChart(QWidget):
 
         legend_x = plot_rect.left()
 
+        run_colors = {
+            run["run_id"]: self.COLORS[index % len(self.COLORS)]
+            for index, run in enumerate(self.runs)
+        }
         for run_index, run in enumerate(valid_runs[:6]):
-            color = self.COLORS[run_index % len(self.COLORS)]
+            color = run_colors[run["run_id"]]
             painter.setPen(QPen(color, 2.0))
             painter.drawLine(
                 QPointF(legend_x, 34.0),
@@ -444,7 +448,7 @@ class TrainingHistoryChart(QWidget):
         painter.setClipRect(plot_rect)
 
         for run_index, run in enumerate(valid_runs):
-            color = self.COLORS[run_index % len(self.COLORS)]
+            color = run_colors[run["run_id"]]
             path = QPainterPath()
             last_chart_point = None
             path_started = False
@@ -577,13 +581,16 @@ class TrainingHistoryDialog(QDialog):
         main_layout.addWidget(self.table, 1)
 
         chart_controls = QHBoxLayout()
+        self.metric_combo = QComboBox()
+        self.metric_combo.addItem(self.t("training.metric.mse"), "mse")
+        self.metric_combo.addItem(self.t("training.metric.maximum"), "maximum")
+        self.metric_combo.setToolTip(self.t("training.metric.hint"))
+        chart_controls.addWidget(self.metric_combo)
         chart_controls.addWidget(QLabel(self.t("history.comparison_view")))
         self.scale_combo = QComboBox()
         self.scale_combo.addItem(self.t("common.linear"), "linear")
         self.scale_combo.addItem(self.t("common.logarithmic"), "logarithmic")
         chart_controls.addWidget(self.scale_combo)
-        chart_controls.addSpacing(18)
-        chart_controls.addWidget(QLabel(self.t("history.chart.mouse_help")))
         self.full_range_button = QPushButton(self.t("history.full_range"))
         chart_controls.addWidget(self.full_range_button)
         chart_controls.addStretch(1)
@@ -597,6 +604,8 @@ class TrainingHistoryDialog(QDialog):
         main_layout.addLayout(chart_controls)
 
         self.chart = TrainingHistoryChart(language_manager=self.language)
+        self.chart.setToolTip(self.t("history.chart.mouse_help"))
+        self.metric_combo.currentIndexChanged.connect(self.update_chart_metric)
         self.scale_combo.currentIndexChanged.connect(
             self.update_chart_scale
         )
@@ -839,11 +848,27 @@ class TrainingHistoryDialog(QDialog):
             if entry["run_id"] in selected_ids
         ]
         self.chart.set_runs(selected_runs)
+        by_id = {entry["run_id"]: entry for entry in self.training_history}
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            run = by_id[item.data(Qt.ItemDataRole.UserRole)]
+            original_role = Qt.ItemDataRole.UserRole + 1
+            original_text = item.data(original_role)
+            if original_text is None:
+                original_text = item.text()
+                item.setData(original_role, original_text)
+            missing = self.chart.error_metric == "maximum" and not run.get("maximum_error_curve_points")
+            item.setText(original_text + (" –" if missing else ""))
+            item.setToolTip(self.t("training.metric.unavailable") if missing else "")
         self.delete_button.setEnabled(bool(selected_ids))
         self.restore_button.setEnabled(
             len(selected_ids) == 1
             and next(iter(selected_ids), None) in self.restorable_run_ids
         )
+
+    def update_chart_metric(self, index=None):
+        self.chart.error_metric = self.metric_combo.currentData() or "mse"
+        self.update_chart_selection()
 
     def update_chart_scale(self, index=None):
         self.chart.set_scale_mode(

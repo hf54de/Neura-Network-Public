@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: projectio.py
 # Zweck: Liest, schreibt und normalisiert NeuronNetz-Projektdateien.
-# Letzte Änderung: 20.08.2026
+# Letzte Änderung: 05.09.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -12,6 +12,7 @@ import re
 from copy import deepcopy
 from pathlib import Path
 
+from atomicjson import write_json_atomic
 from commentitem import CommentItem
 from connection import Connection
 from neuron import Neuron
@@ -235,18 +236,7 @@ class ProjectIO:
                 }
             )
 
-        path = Path(file_path)
-
-        with path.open(
-            mode="w",
-            encoding="utf-8"
-        ) as project_file:
-            json.dump(
-                project_data,
-                project_file,
-                ensure_ascii=False,
-                indent=4
-            )
+        write_json_atomic(file_path, project_data)
 
     @staticmethod
     def default_training_settings():
@@ -1793,45 +1783,46 @@ class ProjectIO:
                         "Epochenzahl."
                     )
 
-            curve_points = entry["curve_points"]
+            for curve_key in ("curve_points", "maximum_error_curve_points"):
+                curve_points = entry.get(curve_key, [])
 
-            if not isinstance(curve_points, list) or len(curve_points) > 10000:
-                raise ValueError(
-                    "Die Trainingshistorie enthält eine ungültige Fehlerkurve."
-                )
-
-            previous_epoch = 0
-
-            for point in curve_points:
-                if not isinstance(point, list) or len(point) != 2:
+                if not isinstance(curve_points, list) or len(curve_points) > 10000:
                     raise ValueError(
-                        "Die Trainingshistorie enthält einen ungültigen Kurvenpunkt."
+                        "Die Trainingshistorie enthält eine ungültige Fehlerkurve."
                     )
 
-                epoch, error_value = point
+                previous_epoch = 0
 
-                if (
-                    not isinstance(epoch, int)
-                    or isinstance(epoch, bool)
-                    or epoch <= previous_epoch
-                ):
-                    raise ValueError(
-                        "Die Fehlerkurve der Trainingshistorie enthält eine "
-                        "ungültige Epoche."
+                for point in curve_points:
+                    if not isinstance(point, list) or len(point) != 2:
+                        raise ValueError(
+                            "Die Trainingshistorie enthält einen ungültigen Kurvenpunkt."
+                        )
+
+                    epoch, error_value = point
+
+                    if (
+                        not isinstance(epoch, int)
+                        or isinstance(epoch, bool)
+                        or epoch <= previous_epoch
+                    ):
+                        raise ValueError(
+                            "Die Fehlerkurve der Trainingshistorie enthält eine "
+                            "ungültige Epoche."
+                        )
+
+                    ProjectIO._validate_number(
+                        error_value,
+                        "Die Fehlerkurve der Trainingshistorie enthält einen "
+                        "ungültigen Fehlerwert."
                     )
 
-                ProjectIO._validate_number(
-                    error_value,
-                    "Die Fehlerkurve der Trainingshistorie enthält einen "
-                    "ungültigen Fehlerwert."
-                )
+                    if error_value < 0.0:
+                        raise ValueError(
+                            "Ein Fehlerwert der Trainingshistorie ist negativ."
+                        )
 
-                if error_value < 0.0:
-                    raise ValueError(
-                        "Ein Fehlerwert der Trainingshistorie ist negativ."
-                    )
-
-                previous_epoch = epoch
+                    previous_epoch = epoch
 
             ProjectIO._validate_training_network_state(
                 entry["network_state"]

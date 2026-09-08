@@ -2,7 +2,7 @@
 
 [English](#english-version) | [Deutsch](#deutsche-version)
 
-**Current version / Aktuelle Version:** `0.10.0-beta.02`  
+**Current version / Aktuelle Version:** `0.10.0-beta.03`\
 [Download the latest Windows release / Aktuelle Windows-Version herunterladen](https://github.com/hf54de/Neura-Network-Public/releases/latest)
 
 > **Project status:** Public beta. NeuronNetz is a personal
@@ -68,7 +68,7 @@ A network can be drawn freely, generated automatically from a specified layer st
 | :--- | :--- |
 | **Network Design** | Create neurons and connections manually or generate complete layered networks automatically. |
 | **Training Data** | Enter data, paste it from the clipboard, or import it as CSV; assign columns to neurons and scale values automatically. |
-| **Training** | Optimize weights and bias values using an adjustable learning rate, momentum, error limit, and number of epochs; use suitable starting values according to Xavier/Glorot. |
+| **Training** | Optimize weights and bias values using an adjustable learning rate, momentum, error limit, and number of epochs; initialize weights automatically with He for ReLU and Xavier/Glorot for Sigmoid, Tanh, and Linear. |
 | **Evaluation** | Evaluate the trained network using training data or independent test data without changing its parameters. |
 | **Forward Calculation** | Enter custom input values in their original units and immediately observe the resulting outputs. |
 | **Training History** | Compare multiple training runs, settings, and error curves, and restore suitable network states. |
@@ -237,7 +237,7 @@ Ein Netzwerk kann frei gezeichnet, aus einer vorgegebenen Schichtenstruktur auto
 | :--- | :--- |
 | **Netzwerkaufbau** | Neuronen und Verbindungen manuell anlegen oder vollständige Schichtnetze automatisch erzeugen. |
 | **Trainingsdaten** | Daten eingeben, aus der Zwischenablage übernehmen oder als CSV importieren; Spalten Neuronen zuordnen und Werte automatisch skalieren. |
-| **Training** | Gewichte und Bias-Werte mit einstellbarer Lernrate, Momentum, Fehlergrenze und Epochenzahl optimieren; geeignete Startwerte nach Xavier/Glorot verwenden. |
+| **Training** | Gewichte und Bias-Werte mit einstellbarer Lernrate, Momentum, Fehlergrenze und Epochenzahl optimieren; Gewichte automatisch mit He für ReLU und Xavier/Glorot für Sigmoid, Tanh und Linear initialisieren. |
 | **Prüfung** | Das gelernte Netzwerk mit Trainings- oder unabhängigen Testdaten berechnen, ohne die Parameter weiter zu verändern. |
 | **Vorwärtsberechnung** | Eigene Eingangswerte in ihren ursprünglichen Einheiten eingeben und die resultierenden Ausgaben sofort beobachten. |
 | **Trainingshistorie** | Mehrere Trainingsläufe, Einstellungen und Fehlerkurven miteinander vergleichen und geeignete Netzwerkzustände wiederherstellen. |

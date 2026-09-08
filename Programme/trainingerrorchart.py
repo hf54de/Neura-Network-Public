@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: trainingerrorchart.py
 # Zweck: Zeichnet und aktualisiert den Fehlerverlauf eines Trainingslaufs.
-# Letzte Änderung: 03.08.2026
+# Letzte Änderung: 05.09.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -13,11 +13,14 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from language import LanguageManager
+from trainingcomparison import (
+    clipped_curve, comparison_color, normalized_curve, metric_curve_key, metric_chart_title,
+)
 
 
 class TrainingErrorChart(QWidget):
     """
-    Zeigt den mittleren Epochenfehler eines Trainingslaufes.
+    Zeigt wahlweise den mittleren Epochenfehler oder maximalen Einzelfehler.
 
     Das Diagramm verwendet ausschließlich PySide6 und begrenzt
     sowohl die gespeicherte Punktzahl als auch die Häufigkeit der
@@ -29,6 +32,9 @@ class TrainingErrorChart(QWidget):
 
         self.language = language_manager or LanguageManager()
         self.points = []
+        self.comparison_runs = []
+        self.maximum_points = []
+        self.error_metric = "mse"
         self.error_limit = None
         self.scale_mode = "linear"
         self.maximum_stored_points = 10000
@@ -42,6 +48,15 @@ class TrainingErrorChart(QWidget):
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Preferred
         )
+
+    def set_comparison_runs(self, runs):
+        """Speichert nur die ausgewählten Referenzkurven, ohne Trainingswerte zu ändern."""
+
+        self.comparison_runs = [
+            (run["run_id"], normalized_curve(run.get(metric_curve_key(self.error_metric))))
+            for run in runs
+        ]
+        self.update()
 
     def set_scale_mode(self, scale_mode):
         """Stellt die Y-Achse auf lineare oder logarithmische Anzeige."""
@@ -61,6 +76,7 @@ class TrainingErrorChart(QWidget):
         """
 
         self.points = []
+        self.maximum_points = []
         self.error_limit = (
             float(error_limit)
             if error_limit is not None
@@ -123,6 +139,19 @@ class TrainingErrorChart(QWidget):
             self._last_visible_update = current_time
             self.update()
 
+    def add_maximum_point(self, epoch, error_value):
+        point = (int(epoch), float(error_value))
+        if point[0] < 1 or not math.isfinite(point[1]) or point[1] < 0:
+            return
+        if self.maximum_points and self.maximum_points[-1][0] == point[0]:
+            self.maximum_points[-1] = point
+        else:
+            self.maximum_points.append(point)
+        if len(self.maximum_points) > self.maximum_stored_points:
+            self.maximum_points = self.maximum_points[::2]
+            if self.maximum_points[-1] != point:
+                self.maximum_points.append(point)
+
     @staticmethod
     def format_axis_value(value):
         """
@@ -147,6 +176,8 @@ class TrainingErrorChart(QWidget):
         Zeichnet Achsen, Fehlergrenze und Fehlerkurve.
         """
 
+        active_points = self.maximum_points if self.error_metric == "maximum" else self.points
+        error_limit = self.error_limit if self.error_metric == "mse" else None
         painter = QPainter(
             self
         )
@@ -190,7 +221,7 @@ class TrainingErrorChart(QWidget):
         if plot_rect.width() <= 20.0 or plot_rect.height() <= 20.0:
             return
 
-        if not self.points:
+        if not active_points:
             painter.setPen(
                 QColor(38, 52, 66)
             )
@@ -202,7 +233,7 @@ class TrainingErrorChart(QWidget):
                     20.0
                 ),
                 Qt.AlignmentFlag.AlignCenter,
-                self.language.text("training.chart.title")
+                metric_chart_title(self.language, self.error_metric)
             )
             painter.setPen(
                 QColor(105, 115, 125)
@@ -210,38 +241,45 @@ class TrainingErrorChart(QWidget):
             painter.drawText(
                 plot_rect,
                 Qt.AlignmentFlag.AlignCenter,
-                self.language.text("training.chart.no_data")
+                self.language.text("training.metric.unavailable") if self.error_metric == "maximum" else self.language.text("training.chart.no_data")
             )
             return
 
         maximum_epoch = max(
             1,
-            self.points[-1][0]
+            active_points[-1][0]
         )
+        comparison_curves = [
+            (run_id, clipped_curve(points, maximum_epoch, self.scale_mode == "logarithmic"))
+            for run_id, points in self.comparison_runs
+        ]
+        scale_points = list(active_points) + [
+            point for _run_id, points in comparison_curves for point in points
+        ]
         maximum_error = max(
             point[1]
-            for point in self.points
+            for point in scale_points
         )
 
         positive_scale_values = [
             point[1]
-            for point in self.points
+            for point in scale_points
             if point[1] > 0.0
         ]
 
         if (
-            self.error_limit is not None
-            and math.isfinite(self.error_limit)
-            and self.error_limit >= 0.0
+            error_limit is not None
+            and math.isfinite(error_limit)
+            and error_limit >= 0.0
         ):
             maximum_error = max(
                 maximum_error,
-                self.error_limit
+                error_limit
             )
 
-            if self.error_limit > 0.0:
+            if error_limit > 0.0:
                 positive_scale_values.append(
-                    self.error_limit
+                    error_limit
                 )
 
         if maximum_error <= 0.0:
@@ -312,9 +350,7 @@ class TrainingErrorChart(QWidget):
             ),
             Qt.AlignmentFlag.AlignCenter,
             (
-                self.language.text("training.chart.title_logarithmic")
-                if logarithmic_scale
-                else self.language.text("training.chart.title")
+                metric_chart_title(self.language, self.error_metric, logarithmic_scale)
             )
         )
 
@@ -458,16 +494,16 @@ class TrainingErrorChart(QWidget):
         )
 
         if (
-            self.error_limit is not None
-            and self.error_limit >= 0.0
+            error_limit is not None
+            and error_limit >= 0.0
             and (
                 not logarithmic_scale
-                or self.error_limit > 0.0
+                or error_limit > 0.0
             )
         ):
             limit_y = (
                 plot_rect.bottom()
-                - scale_error(self.error_limit) * plot_rect.height()
+                - scale_error(error_limit) * plot_rect.height()
             )
             limit_pen = QPen(
                 QColor(190, 95, 55),
@@ -501,15 +537,35 @@ class TrainingErrorChart(QWidget):
                 (
                     self.language.text(
                         "training.chart.error_limit",
-                        value=self.format_axis_value(self.error_limit)
+                        value=self.format_axis_value(error_limit)
                     )
                 )
             )
 
+        # Referenzen zuerst zeichnen; die kräftige aktuelle Kurve bleibt darüber sichtbar.
+        painter.save()
+        painter.setClipRect(plot_rect.adjusted(-2, -2, 2, 2))
+        for run_id, points in comparison_curves:
+            reference_path = QPainterPath()
+            for index, (epoch, error_value) in enumerate(points):
+                point = QPointF(
+                    plot_rect.left() + epoch / maximum_epoch * plot_rect.width(),
+                    plot_rect.bottom() - scale_error(error_value) * plot_rect.height(),
+                )
+                if index == 0:
+                    reference_path.moveTo(point)
+                else:
+                    reference_path.lineTo(point)
+            painter.setPen(QPen(QColor(comparison_color(run_id)), 1.3))
+            painter.drawPath(reference_path)
+            if len(points) == 1:
+                painter.drawPoint(point)
+        painter.restore()
+
         curve_path = QPainterPath()
 
         for point_index, (epoch, error_value) in enumerate(
-            self.points
+            active_points
         ):
             x_position = (
                 plot_rect.left()
@@ -545,7 +601,7 @@ class TrainingErrorChart(QWidget):
             curve_path
         )
 
-        last_epoch, last_error = self.points[-1]
+        last_epoch, last_error = active_points[-1]
         last_x = (
             plot_rect.left()
             + (last_epoch / maximum_epoch)

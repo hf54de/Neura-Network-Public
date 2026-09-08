@@ -1,13 +1,19 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: plcfileexport.py
 # Zweck: Verpackt editierte SPS-Deklarationen und ST-Code als GX-Works2-ASC bzw. IEC-61131-10-XML.
-# Letzte Änderung: 03.09.2026
+# Letzte Änderung: 05.09.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
 from datetime import datetime
 import re
 from xml.etree import ElementTree as ET
+
+
+def st_comment_text(value):
+    """Entschärft Kommentargrenzen ausschließlich im ausgegebenen ST-Kommentar."""
+
+    return str(value).replace("(*", "( *").replace("*)", "* )")
 
 
 def _table_records(headers, rows):
@@ -123,7 +129,10 @@ class GxWorks2AscExporter:
             for record in section_rows:
                 data_type = "BOOL" if record["type"] == "BIT" else record["type"]
                 initial = record["initial"] or _default_value(data_type)
-                comment = f" (* {record['comment']} *)" if record["comment"] else ""
+                comment = (
+                    f" (* {st_comment_text(record['comment'])} *)"
+                    if record["comment"] else ""
+                )
                 lines.append(
                     f"\t\t{record['name']}: {data_type}:={initial};{comment}"
                 )

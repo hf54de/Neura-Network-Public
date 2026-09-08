@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: mainwindow.py
 # Zweck: Verbindet Hauptfenster, Menüs, Werkzeugleisten und zentrale Programmabläufe.
-# Letzte Änderung: 02.09.2026
+# Letzte Änderung: 07.09.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -4066,6 +4066,35 @@ class MainWindow(QMainWindow):
 
         self.set_project_modified(True)
 
+    def confirm_io_structure_change(self, *, deleting=False):
+        """Bestätigt I/O-Änderungen vor jeder Mutation; None bedeutet Abbruch."""
+        prefix = "network.io_delete" if deleting else "network.io_change"
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle(self.language.text("network.data_mapping_warning.title"))
+        box.setText(self.language.text(f"{prefix}.message"))
+        adjust = box.addButton(self.language.text(f"{prefix}.adjust"), QMessageBox.ButtonRole.AcceptRole)
+        change = box.addButton(self.language.text(f"{prefix}.only"), QMessageBox.ButtonRole.ActionRole)
+        cancel = box.addButton(self.language.text("network.io_change.cancel"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(cancel)
+        box.setEscapeButton(cancel)
+        box.exec()
+        if box.clickedButton() == adjust:
+            return True
+        if box.clickedButton() == change:
+            return False
+        return None
+
+    def finish_io_structure_change(self, adjust_data):
+        """Entfernt alte Trainingszustände erst nach bestätigter I/O-Änderung."""
+        self.training_history = []
+        self.active_training_run_id = None
+        self.analysis_tolerances = {}
+        self.set_project_modified(True)
+        self.update_network_data_action_states()
+        if adjust_data:
+            self.open_training_data_dialog(adjust_structure=True)
+
     def update_neuron_type(self):
         """
         Übernimmt den gewählten Typ
@@ -4098,16 +4127,11 @@ class MainWindow(QMainWindow):
         old_type = self.current_object.neuron_type
         data_types = {NeuronType.INPUT, NeuronType.OUTPUT}
 
-        if old_type in data_types or new_type in data_types:
-            answer = QMessageBox.warning(
-                self,
-                self.language.text("network.data_mapping_warning.title"),
-                self.language.text("network.data_mapping_warning.message"),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-
-            if answer != QMessageBox.StandardButton.Yes:
+        io_changed = old_type in data_types or new_type in data_types
+        adjust_data = False
+        if io_changed:
+            adjust_data = self.confirm_io_structure_change()
+            if adjust_data is None:
                 self.property_type.blockSignals(True)
                 try:
                     old_index = self.property_type.findData(old_type)
@@ -4131,6 +4155,9 @@ class MainWindow(QMainWindow):
             True
         )
         self.refresh_current_math_display()
+        if io_changed:
+            self.finish_io_structure_change(adjust_data)
+
 
     def update_activation(
         self,
@@ -4801,6 +4828,16 @@ class MainWindow(QMainWindow):
 
         clipboard_data = self.object_clipboard
 
+        io_changed = any(
+            NeuronType(item["type"]) in (NeuronType.INPUT, NeuronType.OUTPUT)
+            for item in clipboard_data["neurons"]
+        )
+        adjust_data = False
+        if io_changed:
+            adjust_data = self.confirm_io_structure_change()
+            if adjust_data is None:
+                return
+
         paste_count = int(
             clipboard_data.get(
                 "paste_count",
@@ -4962,6 +4999,9 @@ class MainWindow(QMainWindow):
                 3000
             )
 
+        if created_items and io_changed:
+            self.finish_io_structure_change(adjust_data)
+
     def select_all_objects(self):
         """
         Markiert alle Neuronen und Verbindungen
@@ -5003,20 +5043,6 @@ class MainWindow(QMainWindow):
         if not selected_items:
             return
 
-        answer = QMessageBox.question(
-            self,
-            self.language.text("dialog.delete_objects.title"),
-            self.language.text(
-                "dialog.delete_objects.question",
-                count=len(selected_items)
-            ),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-
         selected_connections = [
             item
             for item in selected_items
@@ -5044,20 +5070,31 @@ class MainWindow(QMainWindow):
             )
         ]
 
-        if any(
+        io_changed = any(
             neuron.neuron_type in (NeuronType.INPUT, NeuronType.OUTPUT)
             for neuron in selected_neurons
-        ):
-            answer = QMessageBox.warning(
+        )
+        adjust_data = False
+        if io_changed:
+            adjust_data = self.confirm_io_structure_change(deleting=True)
+            if adjust_data is None:
+                return
+
+        else:
+            answer = QMessageBox.question(
                 self,
-                self.language.text("network.data_mapping_warning.title"),
-                self.language.text("network.data_mapping_warning.message"),
+                self.language.text("dialog.delete_objects.title"),
+                self.language.text(
+                    "dialog.delete_objects.question",
+                    count=len(selected_items)
+                ),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
 
             if answer != QMessageBox.StandardButton.Yes:
                 return
+
 
         for item in (
             selected_connections
@@ -5077,6 +5114,9 @@ class MainWindow(QMainWindow):
             self.set_project_modified(
                 True
             )
+
+        if io_changed:
+            self.finish_io_structure_change(adjust_data)
 
     def open_neuron_edit_dialog(self, neuron):
         """Bearbeitet Name, Typ und Aktivierung eines Neurons."""
@@ -5228,19 +5268,14 @@ class MainWindow(QMainWindow):
             old_type = neuron.neuron_type
             data_types = {NeuronType.INPUT, NeuronType.OUTPUT}
 
-            if (
+            io_changed = (
                 new_type != old_type
                 and (old_type in data_types or new_type in data_types)
-            ):
-                answer = QMessageBox.warning(
-                    dialog,
-                    self.language.text("network.data_mapping_warning.title"),
-                    self.language.text("network.data_mapping_warning.message"),
-                    QMessageBox.StandardButton.Yes
-                    | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No,
-                )
-                if answer != QMessageBox.StandardButton.Yes:
+            )
+            adjust_data = False
+            if io_changed:
+                adjust_data = self.confirm_io_structure_change()
+                if adjust_data is None:
                     continue
 
             changed = False
@@ -5268,6 +5303,8 @@ class MainWindow(QMainWindow):
                 self.refresh_current_math_display()
 
             self.object_selected(neuron)
+            if io_changed:
+                self.finish_io_structure_change(adjust_data)
             break
 
     def open_comment_edit_dialog(self, comment):
@@ -7599,7 +7636,7 @@ class MainWindow(QMainWindow):
 
         return differences
 
-    def open_training_data_dialog(self):
+    def open_training_data_dialog(self, checked=False, *, adjust_structure=False):
         """
         Öffnet den unabhängigen Editor für
         Trainingsdatendateien.
@@ -7625,6 +7662,9 @@ class MainWindow(QMainWindow):
             language_manager=self.language,
             color_settings=self.display_settings.get("colors", {}),
         )
+
+        if adjust_structure:
+            QTimer.singleShot(0, dialog.adjust_structure_to_network)
 
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
@@ -8479,6 +8519,9 @@ class MainWindow(QMainWindow):
                 ),
                 "continuable": bool(result.get("continuable", True)),
                 "parent_run_id": result.get("parent_run_id"),
+                "maximum_error_curve_points": deepcopy(
+                    result.get("maximum_error_curve_points", [])
+                ),
                 "curve_points": deepcopy(
                     result.get("curve_points", [])
                 ),

@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: aboutdialog.py
 # Zweck: Zeigt Programmversion, Systeminformationen und Copyright-Hinweise an.
-# Letzte Änderung: 03.08.2026
+# Letzte Änderung: 04.09.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import PySide6
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from language import LanguageManager
+from startsplash import splash_image_path
 
 
 # ---------------------------------------------------------------------
@@ -145,6 +146,22 @@ class AboutDialog(QDialog):
             True
         )
 
+        self.illustration_label = QLabel()
+        self.illustration_label.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
+        illustration = QPixmap(str(splash_image_path()))
+        self.illustration_label.setVisible(not illustration.isNull())
+        if not illustration.isNull():
+            self.illustration_label.setPixmap(
+                illustration.scaled(
+                    448,
+                    168,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
+                )
+            )
+
         self.separator_top = QFrame()
         self.separator_top.setFrameShape(
             QFrame.Shape.HLine
@@ -221,6 +238,10 @@ class AboutDialog(QDialog):
 
         self.main_layout.addWidget(
             self.subtitle_label
+        )
+
+        self.main_layout.addWidget(
+            self.illustration_label
         )
 
         self.main_layout.addWidget(

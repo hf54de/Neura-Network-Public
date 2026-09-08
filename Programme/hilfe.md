@@ -1444,9 +1444,17 @@ Ohne Haken wird auf dem vorhandenen Lernstand weitertrainiert.
 
 ## Gewichtsinitialisierung
 
+### Automatisch nach Aktivierungsfunktion (empfohlen)
+
+Verwendet He für ReLU und Xavier/Glorot für Sigmoid, Tanh und Linear.
+
 ### Xavier/Glorot
 
-Empfohlene Initialisierung mit zufälligen Startwerten.
+Initialisiert alle Gewichte mit zufälligen Startwerten nach Xavier/Glorot.
+
+### He
+
+Initialisiert alle Gewichte mit zufälligen Startwerten nach He.
 
 ### Alle Gewichte = 0
 
@@ -1568,6 +1576,8 @@ Mit der Option **Daten monitoren** wird gesteuert, ob die grafische Netzwerkdars
   abschließend aktualisiert
 
 ## Fehlerkurve anzeigen
+
+**Kurvenanzeige** oben im Ergebnisrahmen wechselt zwischen mittlerem Epochenfehler (MSE) und maximalem Einzelfehler in internen Netzwerten. Beide Verläufe werden beim Training aufgezeichnet und mit dem Lauf gespeichert; lange Verläufe werden wie bisher verdichtet. Das Umschalten ist während des Trainings möglich und verändert weder die Trainingsrechnung noch die MSE-Fehlergrenze. Epochen und Laufzeit teilen sich eine Zeile, sodass die Fenster- und Diagrammhöhe erhalten bleiben. Auch in der Trainingshistorie lässt sich die Fehlergröße wählen. Vergleichsläufe ohne den gewählten Verlauf bleiben ausgewählt, werden aber nicht gezeichnet und mit einem Strich sowie dem Hinweis „Kein Verlauf vorhanden“ gekennzeichnet. Bei fortgesetzten alten Läufen beginnt die Maximalfehlerkurve erst mit den neu trainierten Epochen.
 
 Mit **Fehlerkurve während des Trainings anzeigen** wird gesteuert,
 ob der mittlere Epochenfehler als Diagramm dargestellt wird.
@@ -2958,8 +2968,9 @@ Die linke Seite enthält kompakt:
 - Erklärung und Formeln
 - einstellbare Anzeigegenauigkeit von zwei bis zehn Nachkommastellen
 Beim Fortsetzen werden die beim Start vorhandenen Gewichte, Bias-Werte und
-Momentumzustände übernommen. Bei einem neuen Experiment stehen Xavier/Glorot oder Nullwerte
-für die Gewichte sowie Null- oder Xavier/Glorot-Werte für den Bias zur
+Momentumzustände übernommen. Bei einem neuen Experiment stehen die automatische
+Initialisierung (He für ReLU, Xavier/Glorot für Sigmoid, Tanh und Linear),
+Xavier/Glorot, He oder Nullwerte für die Gewichte sowie Null- oder Xavier/Glorot-Werte für den Bias zur
 Verfügung. Neue Zufallswerte entstehen beim Klick auf **Experiment starten**.
 Die gewählten Startbedingungen gelten ausschließlich im Mathematikmodus.
 

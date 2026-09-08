@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: trainingdialog.py
 # Zweck: Steuert Trainingsläufe, Parameter, Status und Bedienung des Trainingsfensters.
-# Letzte Änderung: 24.08.2026
+# Letzte Änderung: 05.09.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
-from PySide6.QtGui import QFontDatabase
+from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -45,6 +45,9 @@ from numberformat import format_number
 from resultanalysisdialog import ResultAnalysisDialog
 from trainingdebugdialog import TrainingDebugDialog
 from trainingerrorchart import TrainingErrorChart
+from trainingcomparison import (
+    MAX_COMPARISON_RUNS, TrainingComparisonPopup, comparison_color, normalized_curve,
+)
 from trainingdataio import TrainingDataIO
 
 
@@ -149,6 +152,9 @@ class TrainingDialog(QDialog):
         self.full_view_geometry = None
         self.maximum_error_details = None
         self.group_info_buttons = {}
+        self.comparison_popup = None
+        self.comparison_run_ids = set()
+        self.comparison_runs = []
 
         # Begrenzte Ereignisverarbeitung hält die Stop-Taste
         # funktionsfähig, ohne in jedem Datensatz die komplette
@@ -162,6 +168,7 @@ class TrainingDialog(QDialog):
         self.error_chart_start_value = None
         self.error_chart_current_value = None
         self.history_curve_points = []
+        self.maximum_error_curve_points = []
         self.plateau_history = []
         self.plateau_warning_detected = False
         self.plateau_warning_dismissed = False
@@ -791,6 +798,14 @@ class TrainingDialog(QDialog):
         )
         self.result_layout.setContentsMargins(9, 8, 9, 8)
         self.result_layout.setVerticalSpacing(5)
+        self.error_metric_combo = QComboBox()
+        self.error_metric_combo.addItem(text("training.metric.mse"), "mse")
+        self.error_metric_combo.addItem(text("training.metric.maximum"), "maximum")
+        metric_font = QFont(self.font())
+        metric_font.setBold(False)
+        self.error_metric_combo.setFont(metric_font)
+        self.error_metric_combo.setToolTip(text("training.metric.hint"))
+        self.result_layout.addRow(text("training.metric.label"), self.error_metric_combo)
 
         self.result_start_mse = QLineEdit()
         self.result_start_mse.setReadOnly(True)
@@ -926,20 +941,20 @@ class TrainingDialog(QDialog):
             self.result_mse_container
         )
 
-        self.result_layout.addRow(
-            text("training.result.epochs"),
-            self.result_epochs
-        )
+        epoch_time = QWidget()
+        epoch_time_layout = QHBoxLayout(epoch_time)
+        epoch_time_layout.setContentsMargins(0, 0, 0, 0)
+        epoch_time_layout.setSpacing(6)
+        epoch_time_layout.addWidget(self.result_epochs, 1)
+        epoch_time_layout.addWidget(QLabel(text("training.result.elapsed")))
+        epoch_time_layout.addWidget(self.result_elapsed_time, 1)
+        self.result_layout.addRow(text("training.result.epochs"), epoch_time)
 
         self.result_layout.addRow(
             text("training.result.maximum_error"),
             self.result_max_error_container
         )
 
-        self.result_layout.addRow(
-            text("training.result.elapsed"),
-            self.result_elapsed_time
-        )
 
         self.result_layout.addRow(
             text("training.result.status"),
@@ -1012,6 +1027,13 @@ class TrainingDialog(QDialog):
         )
 
         self.error_chart_controls_layout = QHBoxLayout()
+        self.comparison_button = QPushButton(text("training.comparison.button"))
+        comparison_font = QFont(self.font())
+        comparison_font.setBold(False)
+        self.comparison_button.setFont(comparison_font)
+        self.comparison_button.setToolTip(text("training.comparison.hint"))
+        self.comparison_button.clicked.connect(self.show_comparison_runs)
+        self.error_chart_controls_layout.addWidget(self.comparison_button)
         self.error_chart_controls_layout.addStretch(
             1
         )
@@ -1087,6 +1109,15 @@ class TrainingDialog(QDialog):
         )
         self.error_chart_layout.setStretch(0, 0)
         self.error_chart_layout.setStretch(1, 1)
+        self.comparison_legend = QLabel(self.error_chart_group)
+        self.comparison_legend.setWordWrap(False)
+        self.comparison_legend.setFont(comparison_font)
+        self.comparison_legend.setTextFormat(Qt.TextFormat.RichText)
+        self.comparison_legend.setTextInteractionFlags(Qt.TextInteractionFlag.LinksAccessibleByMouse)
+        self.comparison_legend.linkActivated.connect(self.hide_comparison_run)
+        self.comparison_legend.hide()
+        self.error_metric_combo.currentIndexChanged.connect(self.update_error_metric)
+        self.error_chart_controls_layout.insertWidget(1, self.comparison_legend)
 
         self.error_chart_start = QLabel(
             text("training.chart.start_error", value="–"),
@@ -2294,6 +2325,8 @@ class TrainingDialog(QDialog):
     def update_training_run_label(self):
         """Zeigt Nummer und ursprünglichen Startzeitpunkt des aktuellen Laufs."""
 
+        if hasattr(self, "comparison_legend"):
+            self.refresh_comparison_runs()
         if self.current_run_id is None or not self.current_run_timestamp:
             self.training_run_label.setText(
                 self.language.text("training.run.not_started")
@@ -2796,6 +2829,11 @@ class TrainingDialog(QDialog):
             )
 
         self.history_curve_points = [list(point) for point in curve_points]
+        self.maximum_error_curve_points = [list(point) for point in normalized_curve(
+            history_entry.get("maximum_error_curve_points")
+        )]
+        for epoch, error in self.maximum_error_curve_points:
+            self.error_chart.add_maximum_point(epoch, error)
         try:
             self.current_run_id = int(history_entry.get("run_id"))
         except (TypeError, ValueError):
@@ -2910,6 +2948,7 @@ class TrainingDialog(QDialog):
         self.error_chart_start_value = None
         self.error_chart_current_value = None
         self.history_curve_points = []
+        self.maximum_error_curve_points = []
         self.error_chart.clear(self.error_limit.value())
         self.reset_plateau_detection()
 
@@ -2927,6 +2966,84 @@ class TrainingDialog(QDialog):
         self.update_error_chart_summary()
         self.update_training_run_label()
         self.set_training_controls_enabled(True)
+
+    def refresh_comparison_runs(self):
+        """Liest passende Historienkurven, ohne einen früheren Netzstand zu laden."""
+
+        parent = self.parent()
+        history = getattr(parent, "training_history", [])
+        matches = getattr(parent, "training_run_matches_active_data", None)
+        self.comparison_runs = [
+            run for run in reversed(history)
+            if isinstance(run, dict)
+            and isinstance(run.get("run_id"), int)
+            and run["run_id"] != self.current_run_id
+            and (not callable(matches) or matches(run))
+            and normalized_curve(run.get("curve_points"))
+        ]
+        self.comparison_run_ids.intersection_update(run["run_id"] for run in self.comparison_runs)
+        self.apply_comparison_selection(self.comparison_run_ids)
+        if self.comparison_popup is not None:
+            self.comparison_popup.error_metric = self.error_chart.error_metric
+            self.comparison_popup.set_runs(self.comparison_runs, self.comparison_run_ids)
+
+    def show_comparison_runs(self):
+        if self.comparison_popup is None:
+            self.comparison_popup = TrainingComparisonPopup(self.language, self)
+            self.comparison_popup.selection_changed.connect(self.apply_comparison_selection)
+        self.refresh_comparison_runs()
+        popup = self.comparison_popup
+        position = self.comparison_button.mapToGlobal(self.comparison_button.rect().bottomLeft())
+        screen = self.comparison_button.screen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            position.setX(max(available.left(), min(position.x(), available.right() - popup.width() + 1)))
+            position.setY(max(available.top(), min(position.y(), available.bottom() - popup.height() + 1)))
+        popup.move(position)
+        popup.show()
+
+    def apply_comparison_selection(self, selected_ids):
+        selected = [run for run in self.comparison_runs if run["run_id"] in selected_ids][:MAX_COMPARISON_RUNS]
+        self.comparison_run_ids = {run["run_id"] for run in selected}
+        self.error_chart.set_comparison_runs(selected)
+        parts = [f'<span style="color:#2271a5">{self.language.text("training.comparison.current")}</span>']
+        for run in selected:
+            run_id = run["run_id"]
+            label = self.language.text("training.comparison.legend_run", run=run_id)
+            if self.error_chart.error_metric == "maximum" and not run.get("maximum_error_curve_points"):
+                label += " –"
+            parts.append(f'<a href="{run_id}" style="color:{comparison_color(run_id)}">{label} ×</a>')
+        self.comparison_legend.setText(" &nbsp; ".join(parts))
+        legend_tip = self.language.text("training.comparison.legend_tip")
+        if self.error_chart.error_metric == "maximum" and any(
+            not run.get("maximum_error_curve_points") for run in selected
+        ):
+            legend_tip += "\n–: " + self.language.text("training.metric.unavailable")
+        self.comparison_legend.setToolTip(legend_tip)
+        self.comparison_legend.setVisible(bool(selected))
+
+    def hide_comparison_run(self, run_id):
+        self.apply_comparison_selection(self.comparison_run_ids - {int(run_id)})
+        if self.comparison_popup is not None:
+            self.comparison_popup.error_metric = self.error_chart.error_metric
+            self.comparison_popup.set_runs(self.comparison_runs, self.comparison_run_ids)
+
+    def update_error_metric(self, index=None):
+        self.error_chart.error_metric = self.error_metric_combo.currentData() or "mse"
+        self.refresh_comparison_runs()
+        self.error_chart.update()
+
+    def record_maximum_error(self, epoch, error_value, force=False):
+        # Nur den bereits berechneten Wert aufzeichnen, niemals neu berechnen.
+        interval = 1 if epoch <= 500 else 10 ** max(1, len(str(epoch - 1)) - 3)
+        if not force and self.maximum_error_curve_points and epoch % interval:
+            return
+        point = [int(epoch), float(error_value)]
+        if self.maximum_error_curve_points and self.maximum_error_curve_points[-1][0] == epoch:
+            self.maximum_error_curve_points[-1] = point
+        else:
+            self.maximum_error_curve_points.append(point)
+        self.error_chart.add_maximum_point(epoch, error_value)
 
     def update_error_chart_scale(self, index=None):
         """Übernimmt die gewählte lineare oder logarithmische Y-Achse."""
@@ -4578,6 +4695,7 @@ class TrainingDialog(QDialog):
             self.error_chart_start_value = None
             self.error_chart_current_value = None
             self.history_curve_points = []
+            self.maximum_error_curve_points = []
             self.reset_plateau_detection()
             self.update_error_chart_summary()
         else:
@@ -4715,6 +4833,8 @@ class TrainingDialog(QDialog):
                 self.maximum_error_details = metrics.get(
                     "maximum_error_details"
                 )
+
+                self.record_maximum_error(current_epoch, maximum_absolute_error)
 
                 completed_epochs = current_epoch
                 self.update_plateau_detection(
@@ -4913,6 +5033,7 @@ class TrainingDialog(QDialog):
                 format_number(maximum_absolute_error)
             )
 
+        self.record_maximum_error(completed_epochs, maximum_absolute_error, force=True)
         final_curve_point_recorded = self.add_history_curve_point(
             completed_epochs,
             mean_squared_error,
@@ -4976,6 +5097,9 @@ class TrainingDialog(QDialog):
                 ),
                 "requested_epochs": int(self.current_run_requested_epochs),
                 "stop_at_error_limit": bool(stop_at_error_limit),
+                "maximum_error_curve_points": self.compress_history_curve(
+                    self.maximum_error_curve_points
+                ),
                 "curve_points": self.compress_history_curve(
                     self.history_curve_points
                 ),

@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: graphicalexperimentdialog.py
 # Zweck: Stellt ein frei gestaltbares grafisches Bedienpult für Netzwerkexperimente bereit.
-# Letzte Änderung: 02.09.2026
+# Letzte Änderung: 08.09.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -5232,19 +5232,25 @@ class GraphicalExperimentDialog(QDialog):
         self.finish_history_action()
 
     def show_empty_context_menu(self, global_position, scene_position):
-        """Bietet auf freier Fläche ausschließlich zulässiges Einfügen an."""
+        """Bietet auf freier Fläche Gestaltung und zulässiges Einfügen an."""
 
         if not self.edit_mode:
             return
         self.update_selection_actions()
-        if not self.paste_clipboard_action.isEnabled():
-            return
         menu = QMenu(self)
-        paste_action = menu.addAction(self.paste_clipboard_action.text())
-        paste_action.setIcon(ToolbarIcons.icon("paste"))
-        paste_action.setShortcut(QKeySequence.StandardKey.Paste)
+        menu.addAction(self.background_color_action)
+        menu.addAction(self.grid_visible_action)
+        menu.addAction(self.grid_spacing_action)
+        menu.addSeparator()
+        menu.addAction(self.default_layout_action)
+        paste_action = None
+        if self.paste_clipboard_action.isEnabled():
+            menu.addSeparator()
+            paste_action = menu.addAction(self.paste_clipboard_action.text())
+            paste_action.setIcon(ToolbarIcons.icon("paste"))
+            paste_action.setShortcut(QKeySequence.StandardKey.Paste)
         selected = menu.exec(global_position)
-        if selected == paste_action:
+        if paste_action is not None and selected == paste_action:
             self.paste_clipboard_content(scene_position)
 
     def show_canvas_context_menu(self, global_position, scene_position):

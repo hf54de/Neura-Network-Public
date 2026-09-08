@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: gxworks2export.py
 # Zweck: Erzeugt GX-Works2-Deklarationen und Structured Text aus einem trainierten Netzwerk.
-# Letzte Änderung: 02.09.2026
+# Letzte Änderung: 05.09.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 from neurontype import NeuronType
+from plcfileexport import st_comment_text
 from trainingdataio import TrainingDataIO
 
 
@@ -393,7 +394,7 @@ class GxWorks2ExportGenerator:
         ))
 
     def generate_code(self):
-        project = Path(self.project_name).stem
+        project = st_comment_text(Path(self.project_name).stem)
         architecture = "-".join(
             str(len(layer)) for layer in self.network.get_topological_layers()
         )
@@ -409,7 +410,7 @@ class GxWorks2ExportGenerator:
             "    Zielsystem: Mitsubishi GX Works2",
             f"    {self.text('Exportdatum', 'Export date')}: {datetime.now().astimezone().isoformat(timespec='seconds')}",
             f"    NeuronNetz: {self.application_version or '-'}",
-            f"    {self.text('Modellversion', 'Model version')}: {self.model_version}",
+            f"    {self.text('Modellversion', 'Model version')}: {st_comment_text(self.model_version)}",
             f"    {self.text('Modellkennung', 'Model signature')}: {self.model_signature()}",
             f"    {self.text('Netzarchitektur', 'Network architecture')}: {architecture}",
             f"    {self.text('Aktivierungen', 'Activations')}: {', '.join(activations)}",
@@ -494,7 +495,7 @@ class GxWorks2ExportGenerator:
         ])
         for neuron in self.network.get_input_neurons():
             mapping = input_by_id[neuron.id]
-            lines.append(f"(* {mapping.get('column_name') or neuron.name} *)")
+            lines.append(f"(* {st_comment_text(mapping.get('column_name') or neuron.name)} *)")
             lines.extend(self.scaling_lines(
                 self.neuron_output_labels[neuron.id],
                 self.input_labels[neuron.id],
@@ -522,7 +523,7 @@ class GxWorks2ExportGenerator:
             for neuron in layer:
                 sum_label = self.neuron_sum_labels[neuron.id]
                 incoming = sorted(neuron.incoming_connections, key=lambda item: item.id)
-                lines.append(f"(* {neuron.name} *)")
+                lines.append(f"(* {st_comment_text(neuron.name)} *)")
                 lines.append(f"{sum_label} :=")
                 for index, connection in enumerate(incoming):
                     operator = "      " if index == 0 else "    + "
@@ -550,10 +551,10 @@ class GxWorks2ExportGenerator:
             mapping = output_by_id[neuron.id]
             external = self.output_labels[neuron.id]
             internal = self.neuron_output_labels[neuron.id]
-            lines.append(f"(* {mapping.get('column_name') or neuron.name} *)")
+            lines.append(f"(* {st_comment_text(mapping.get('column_name') or neuron.name)} *)")
             if mapping.get("data_type") == "binary":
                 lines.extend([
-                    f"IF {internal} >= 0.5 THEN",
+                    f"IF {internal} > 0.5 THEN",
                     f"    {external} := TRUE;",
                     "ELSE",
                     f"    {external} := FALSE;",

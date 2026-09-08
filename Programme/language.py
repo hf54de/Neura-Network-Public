@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: language.py
 # Zweck: Verwaltet Übersetzungen und sprachabhängige Programmtexte.
-# Letzte Änderung: 24.08.2026
+# Letzte Änderung: 05.09.2026
 # Copyright © 2026 Helwig Fülling
 # -------------------------------------------------------------------------------------------------
 import json
@@ -323,7 +323,7 @@ class LanguageManager:
         "settings.editor.project_default": "Use the default project folder",
         "settings.editor.project_choose": "Choose...",
         "settings.editor.project_choose_title": "Choose Project Folder",
-        "startup.slogan": "Understand, design, and explore neural networks",
+        "startup.slogan": "Understand, train and automate neural networks",
         "startup.version": "Version {version}",
         "startup.status.interface": "Preparing the program interface…",
         "startup.status.project": "Opening the last project…",
@@ -929,6 +929,25 @@ class LanguageManager:
         "training.chart.y_axis": "Y-axis:",
         "training.chart.linear": "Linear",
         "training.chart.logarithmic": "Logarithmic",
+        "training.comparison.button": "Compare runs…",
+        "training.comparison.title": "Comparison runs",
+        "training.comparison.run": "Run",
+        "training.comparison.date": "Date",
+        "training.comparison.epochs": "Epochs",
+        "training.comparison.max_error": "Max. error",
+        "training.comparison.max_error_tip": "Maximum individual error at the saved end of this run",
+        "training.comparison.empty": "No earlier runs with matching data and a saved curve.",
+        "training.comparison.hint": "Show earlier runs without stopping training. Comparison requires unchanged training data and scaling. Curves are limited to the current epoch.",
+        "training.comparison.limit": "A maximum of three comparison runs can be shown. Uncheck a run first to select another.",
+        "training.metric.label": "Chart metric:",
+        "training.metric.mse": "Mean epoch error (MSE)",
+        "training.metric.maximum": "Maximum individual error",
+        "training.metric.maximum_log": "Maximum individual error (logarithmic)",
+        "training.metric.hint": "Changes the chart only. The training error limit still applies to MSE. Maximum-error curves are available only for recorded epochs; older runs may have no curve.",
+        "training.metric.unavailable": "No curve available",
+        "training.comparison.current": "Current",
+        "training.comparison.legend_run": "Run {run}",
+        "training.comparison.legend_tip": "Click a run to hide its curve. Select it again using Compare runs…",
         "training.chart.title": "Mean Epoch Error (MSE)",
         "training.chart.title_logarithmic": "Mean Epoch Error (MSE, logarithmic)",
         "training.chart.no_data": "No training data yet",
@@ -1637,8 +1656,8 @@ class LanguageManager:
         "history.csv.status": "Status",
         "history.csv.mode": "Mode",
         "about.title": "About {program}",
-        "about.subtitle": "Graphical Editor for Neural Networks",
-        "about.description": "NeuronNetz provides graphical creation, editing, training and testing of small neural networks.",
+        "about.subtitle": "Development and learning environment for neural networks",
+        "about.description": "NeuronNetz supports the graphical creation, training, analysis and testing of neural networks as well as export for PLC systems.",
         "about.development_version": "Development Version",
         "about.technical": "<b>Program version:</b> {program_version}<br><b>Python:</b> {python_version}<br><b>PySide6:</b> {pyside_version}<br><b>Development:</b> {developer}",
         "help.title": "NeuronNetz – Documentation",

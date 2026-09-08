@@ -171,7 +171,7 @@ Das Trainingsfenster zeigt Projekt, Datensatzanzahl, Netzstruktur, Parameterzahl
 
 # 19. Trainingsparameter
 
-Für einen neuen Lauf können Gewichte und Bias neu initialisiert werden. **Xavier/Glorot** für Gewichte und **Bias = 0** sind die empfohlenen Startwerte.
+Für einen neuen Lauf können Gewichte und Bias neu initialisiert werden. Empfohlen sind **Automatisch nach Aktivierungsfunktion** für Gewichte und **Bias = 0**. Im Automatikmodus wird für ReLU **He**, für Sigmoid, Tanh und Linear **Xavier/Glorot** verwendet. Alternativ können Xavier/Glorot oder He für alle Gewichte gewählt werden; **Alle Gewichte = 0** ist ausschließlich für Testzwecke vorgesehen.
 
 - **Lernrate:** Größe der Parameteränderungen.
 - **Momentum:** Anteil der vorherigen Parameteränderung, der in den nächsten Lernschritt übernommen wird. `0` schaltet Momentum aus; hohe Werte können beschleunigen, aber auch Überschwingen verursachen.
@@ -195,6 +195,10 @@ Trainingsziele sind **1 Epoche**, eine feste **Anzahl** oder **Bis Fehlergrenze*
 - **Trainingshistorie:** frühere Läufe vergleichen oder wiederherstellen.
 
 Die Y-Achse der Fehlerkurve kann linear oder logarithmisch dargestellt werden. Voll-, Kompakt- und Minimalansicht verändern nur die Anzeige, nicht den Trainingszustand.
+
+**Kurvenanzeige** oben im Ergebnisrahmen wechselt zwischen mittlerem Epochenfehler (MSE) und maximalem Einzelfehler in internen Netzwerten. Beide Verläufe werden beim Training aufgezeichnet und mit dem Lauf gespeichert; lange Verläufe werden wie bisher verdichtet. Das Umschalten ist während des Trainings möglich und verändert weder die Trainingsrechnung noch die MSE-Fehlergrenze. Epochen und Laufzeit teilen sich eine Zeile, sodass die Fenster- und Diagrammhöhe erhalten bleiben. Auch in der Trainingshistorie lässt sich die Fehlergröße wählen. Vergleichsläufe ohne den gewählten Verlauf bleiben ausgewählt, werden aber nicht gezeichnet und mit einem Strich sowie dem Hinweis „Kein Verlauf vorhanden“ gekennzeichnet. Bei fortgesetzten alten Läufen beginnt die Maximalfehlerkurve erst mit den neu trainierten Epochen.
+
+**Vergleichsläufe…** im Bereich **Fehlerverlauf** öffnet eine kompakte Auswahl früherer Läufe mit Laufnummer, Datum, Epochenzahl und maximalem Einzelfehler am gespeicherten Laufende. Häkchen blenden bis zu drei Vergleichskurven ein oder aus, während das Training weiterläuft. Bei drei ausgewählten Läufen muss zunächst einer abgewählt werden. Die farbige Legende steht platzsparend in der oberen Zeile zwischen Vergleichsauswahl und Y-Achse. Der aktuelle Lauf bleibt kräftig blau; Vergleichskurven erscheinen dünner in anderen Farben und reichen höchstens bis zur aktuellen Epoche. Ein Klick auf den Lauf in der Legende blendet ihn aus. Für einen aussagekräftigen Vergleich müssen Trainingsdaten und Skalierung unverändert sein; die Zuordnung erfolgt anhand der in der Historie gespeicherten Trainingsdatei. Die Trainingshistorie dient weiterhin zum Verwalten und Wiederherstellen der Läufe.
 
 # 21. Test und Analyse
 
@@ -346,6 +350,12 @@ Beim Training wird aus Sollwert und Ausgabe ein Fehler bestimmt. Backpropagation
 Sigmoid liefert Werte zwischen 0 und 1, Tanh zwischen −1 und 1, ReLU setzt negative Summen auf 0 und Linear gibt die Summe unverändert weiter.
 
 # 33. Trainingshistorie
+
+Beim Löschen von Ein- oder Ausgängen erscheint nur die ausführliche Warnung mit **Löschen und Trainingsdaten anpassen…**, **Nur löschen** und **Abbrechen**. Die zusätzliche allgemeine Löschbestätigung entfällt hier. Beim Bearbeiten löst nur ein Typwechsel zwischen Input, Hidden und Output diese Datenstrukturwarnung aus; Namens- und Aktivierungsänderungen lösen sie nicht aus. Beim Typwechsel bleiben die Schaltflächen mit **Ändern** beschriftet.
+
+Beim Löschen von Ein- oder Ausgängen erscheint nur die ausführliche Warnung mit **Löschen und Trainingsdaten anpassen…**, **Nur löschen** und **Abbrechen**. Die zusätzliche allgemeine Löschbestätigung entfällt hier. Beim Bearbeiten löst nur ein Typwechsel zwischen Input, Hidden und Output diese Datenstrukturwarnung aus; Namens- und Aktivierungsänderungen lösen sie nicht aus. Beim Typwechsel bleiben die Schaltflächen mit **Ändern** beschriftet.
+
+Beim Löschen, Hinzufügen durch Kopieren oder Typwechsel von Ein- und Ausgängen erscheint vor der Änderung eine Warnung: Alle Trainingsläufe werden gelöscht und die Trainingsdatenstruktur muss angepasst werden. **Ändern und Trainingsdaten anpassen…** öffnet nach der Änderung die vorhandene Datenanpassung; **Nur ändern** verschiebt die Datenanpassung auf später. **Abbrechen** erhält Struktur und Historie. Ein späterer Abbruch der Datenanpassung nimmt die bereits bestätigte Änderung nicht zurück. Reine Umbenennungen erhalten die Historie. Gegebenenfalls müssen auch Testdaten angepasst werden.
 
 Die Trainingshistorie speichert Läufe projektbezogen mit Parametern, Ergebniswerten und kompakter Fehlerkurve. Läufe können verglichen, als CSV exportiert, gelöscht oder – bei kompatibler Netzstruktur – wiederhergestellt werden.
 

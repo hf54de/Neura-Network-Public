@@ -173,7 +173,7 @@ The training window shows project, record count, network structure, parameter co
 
 # 19. Training Parameters
 
-Weights and biases can be initialized before a new run. **Xavier/Glorot** for weights and **Bias = 0** are the recommended starting values.
+Weights and biases can be initialized before a new run. **Automatic by activation function** for weights and **Bias = 0** are recommended. Automatic initialization uses **He** for ReLU and **Xavier/Glorot** for Sigmoid, Tanh, and Linear. Alternatively, Xavier/Glorot or He can be selected for all weights; **All weights = 0** is intended for testing only.
 
 - **Learning rate:** size of parameter changes.
 - **Momentum:** portion of the preceding parameter change carried into the next learning step. `0` disables momentum; high values may accelerate learning but can also cause overshooting.
@@ -197,6 +197,10 @@ Training targets are **1 Epoch**, a fixed **Count**, or **Until Error Limit**.
 - **Training History:** compare or restore previous runs.
 
 The error curve's Y axis can be linear or logarithmic. Full, compact, and minimized views change only the display, not the training state.
+
+**Chart metric** at the top of Results switches between mean epoch error (MSE) and maximum individual error in internal network values. Both curves are recorded during training and saved with the run; long curves are compressed as before. Switching is possible during training and changes neither training calculations nor the MSE stopping threshold. Epochs and elapsed time share a row to preserve window and chart height. Training History offers the same metric selection. Comparison runs without the selected curve remain selected but are not drawn; a dash and the tooltip “No curve available” identify them. When continuing an older run, its maximum-error curve begins with the newly trained epochs.
+
+**Compare runs…** in **Error Curve** opens a compact selection of earlier runs with run number, date, epoch count, and maximum individual error at the saved end of the run. Checkboxes show or hide up to three comparison curves while training continues. When three runs are selected, uncheck one before choosing another. The color legend is placed in the top row between the comparison button and the Y-axis controls to preserve chart height. The current run remains bold blue; reference curves use thinner lines in other colors and extend only to the current epoch. Click a run in the legend to hide it. Meaningful comparisons require unchanged training data and scaling; runs are matched using the training file recorded in history. Training History remains available for managing and restoring runs.
 
 The minimized view leaves the canvas visible and acts as a small training controller. It shows the run number, current epoch, elapsed time, selected target, and the **Live** setting. It also contains **New**, **Continue**, **Stop**, **Full View**, and **Compact View**. These controls operate the same training run as the full window.
 
@@ -367,9 +371,13 @@ Sigmoid returns values from 0 to 1, Tanh from −1 to 1, ReLU maps negative sums
 
 # 33. Training History
 
+Deleting inputs or outputs displays only the detailed warning, with **Delete and adjust training data…**, **Delete only** and **Cancel**. No additional general deletion confirmation appears in this case. While editing a neuron, only changing its type between Input, Hidden and Output triggers this data-structure warning; name and activation changes do not. Type changes retain the **Change** button labels.
+
+Deleting, pasting or changing the type of input/output neurons first displays a warning: all training runs will be deleted and the training data structure needs adjustment. **Change and adjust training data…** opens the existing data adjustment after the change; **Change only** postpones data adjustment. **Cancel** preserves the structure and history. Cancelling the subsequent data adjustment does not undo the confirmed change. Name-only changes preserve history. Test data may also need adjustment.
+
 Training history is saved per project with initialization, mode, learning rate, momentum, epoch count, error after the first epoch, final error, maximum individual error, duration, and a compact error curve. Several runs can be selected and compared with a linear or logarithmic Y axis.
 
-The **Initialization** column distinguishes a new Xavier/Glorot start, a continued run, and a run repeated with stored starting conditions. Repeating with the same starting conditions restores weights, biases, and training-record order. If learning rate and momentum also remain unchanged, the curves should lie exactly on top of each other. Changing either parameter deliberately produces a comparable run from the same starting point.
+The **Initialization** column distinguishes a newly initialized run, a continued run, and a run repeated with stored starting conditions. Repeating with the same starting conditions restores weights, biases, and training-record order. If learning rate and momentum also remain unchanged, the curves should lie exactly on top of each other. Changing either parameter deliberately produces a comparable run from the same starting point.
 
 Runs can be exported to CSV, deleted, or restored when compatible with the current network structure.
 

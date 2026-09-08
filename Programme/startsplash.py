@@ -1,11 +1,14 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: startsplash.py
-# Zweck: Zeigt das animierte Intro beim Start von NeuronNetz an.
-# Letzte Änderung: 03.08.2026
+# Zweck: Zeigt das Startbild während des Ladens von NeuronNetz an.
+# Letzte Änderung: 04.09.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+import sys
+from pathlib import Path
+
+from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -15,6 +18,16 @@ from PySide6.QtGui import (
     QPixmap,
 )
 from PySide6.QtWidgets import QApplication, QSplashScreen
+
+
+SPLASH_IMAGE_NAME = "startup_neural_automation.png"
+
+
+def splash_image_path():
+    """Ermittelt das Startbild im Quellbaum und in der PyInstaller-EXE."""
+
+    base_directory = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base_directory / "assets" / SPLASH_IMAGE_NAME
 
 
 class StartSplash(QSplashScreen):
@@ -27,13 +40,8 @@ class StartSplash(QSplashScreen):
         self.language = language_manager
         self.program_version = program_version
         self.status_text = ""
-        self.animation_step = 0
         pixmap = self.create_pixmap(program_version)
         super().__init__(pixmap, Qt.WindowType.WindowStaysOnTopHint)
-        self.animation_timer = QTimer(self)
-        self.animation_timer.setInterval(360)
-        self.animation_timer.timeout.connect(self.advance_animation)
-        self.animation_timer.start()
 
     def create_pixmap(self, program_version):
         pixmap = QPixmap(self.WIDTH, self.HEIGHT)
@@ -74,7 +82,7 @@ class StartSplash(QSplashScreen):
             self.language.text("startup.slogan"),
         )
 
-        self.draw_network(painter)
+        self.draw_startup_illustration(painter)
 
         copyright_font = QFont(painter.font())
         copyright_font.setPointSize(10)
@@ -104,7 +112,31 @@ class StartSplash(QSplashScreen):
         return pixmap
 
     @staticmethod
-    def draw_network(painter):
+    def draw_startup_illustration(painter):
+        """Zeichnet das eingebettete Motiv; bei fehlender Ressource den Ersatz."""
+
+        illustration = QPixmap(str(splash_image_path()))
+        if illustration.isNull():
+            StartSplash.draw_network_fallback(painter)
+            return
+
+        target = QRectF(82, 137, 516, 145)
+        scaled = illustration.scaled(
+            int(target.width()),
+            int(target.height()),
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        source_x = max(0, (scaled.width() - int(target.width())) // 2)
+        source_y = max(0, (scaled.height() - int(target.height())) // 2)
+        painter.drawPixmap(
+            target,
+            scaled,
+            QRectF(source_x, source_y, target.width(), target.height()),
+        )
+
+    @staticmethod
+    def draw_network_fallback(painter):
         layers = (
             ((205, 186), (205, 246)),
             ((340, 163), (340, 216), (340, 269)),
@@ -124,51 +156,10 @@ class StartSplash(QSplashScreen):
                 painter.setPen(QPen(color, 4.0))
                 painter.drawEllipse(QPointF(x, y), 11, 11)
 
-    @staticmethod
-    def draw_network_animation(painter, animation_step):
-        layers = (
-            ((205, 186), (205, 246)),
-            ((340, 163), (340, 216), (340, 269)),
-            ((475, 186), (475, 246)),
-        )
-        routes = (
-            (0, 0, 0),
-            (1, 2, 1),
-            (0, 1, 1),
-            (1, 1, 0),
-            (0, 2, 0),
-            (1, 0, 1),
-        )
-        route = routes[(animation_step // 4) % len(routes)]
-        phase = animation_step % 4
-        input_point = layers[0][route[0]]
-        hidden_point = layers[1][route[1]]
-        output_point = layers[2][route[2]]
-        active_color = QColor("#df8b3a")
-
-        if phase >= 1:
-            painter.setPen(QPen(active_color, 3.0))
-            painter.drawLine(QPointF(*input_point), QPointF(*hidden_point))
-        if phase >= 2:
-            painter.setPen(QPen(active_color, 3.0))
-            painter.drawLine(QPointF(*hidden_point), QPointF(*output_point))
-
-        active_points = {input_point}
-        if phase >= 1:
-            active_points.add(hidden_point)
-        if phase >= 2:
-            active_points.add(output_point)
-
-        for x, y in active_points:
-            painter.setBrush(QColor("#fff2cf"))
-            painter.setPen(QPen(active_color, 4.0))
-            painter.drawEllipse(QPointF(x, y), 11, 11)
-
     def drawContents(self, painter):
         """Zeichnet nur die veränderlichen Inhalte über das feste Grundbild."""
 
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        self.draw_network_animation(painter, self.animation_step)
 
         status_font = QFont(painter.font())
         status_font.setPointSize(9)
@@ -183,7 +174,3 @@ class StartSplash(QSplashScreen):
     def show_status(self, message_key):
         self.status_text = self.language.text(message_key)
         self.update(10, self.HEIGHT - 34, self.WIDTH - 20, 26)
-
-    def advance_animation(self):
-        self.animation_step = (self.animation_step + 1) % 24
-        self.update(188, 145, 300, 140)

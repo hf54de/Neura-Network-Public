@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Confirm input/output structure changes before clearing training history; offer immediate training-data adjustment or cancellation. Preserve history for name-only changes. Add German and English warnings.
+
+## 0.10.0-beta.04 – 05.09.2026
+
+- Add error curve for maximum single error.
+
 ## 0.10.0-beta.03 – 03.09.2026
 
 - add SPS export

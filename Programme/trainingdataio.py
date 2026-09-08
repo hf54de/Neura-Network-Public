@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: trainingdataio.py
 # Zweck: Liest, schreibt und validiert Trainings- und Testdatendateien.
-# Letzte Änderung: 03.08.2026
+# Letzte Änderung: 05.09.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -9,6 +9,8 @@ import copy
 import json
 import math
 from pathlib import Path
+
+from atomicjson import write_json_atomic
 
 
 class TrainingDataIO:
@@ -368,18 +370,7 @@ class TrainingDataIO:
     def save(cls, file_path, document, translator=None):
         cls.validate(document, translator)
 
-        path = Path(file_path)
-
-        with path.open(
-            mode="w",
-            encoding="utf-8"
-        ) as data_file:
-            json.dump(
-                document,
-                data_file,
-                ensure_ascii=False,
-                indent=4
-            )
+        write_json_atomic(file_path, document)
 
     @classmethod
     def load(cls, file_path, translator=None):
