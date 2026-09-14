@@ -45,6 +45,12 @@ folders next to the EXE so that examples and documentation can be found.
 
 ### System Requirements
 
+Development and source execution were tested with **Python 3.14.7 (64-bit)**,
+**PySide6 6.11.1**, and **PyInstaller 6.21.0** (14 September 2026).
+This describes the tested environment, not a minimum Python version.
+The About dialog automatically displays the Python runtime actually in use;
+an existing EXE retains its bundled runtime until it is rebuilt.
+
 - 64-bit Windows
 - A display resolution of at least 1366 × 768 is recommended
 - Sufficient memory and processing time for the selected network size
@@ -212,6 +218,12 @@ sollten neben der EXE erhalten bleiben, damit Beispiele und Dokumentation
 gefunden werden.
 
 ### Systemanforderungen
+
+Entwicklung und Ausführung aus dem Quellcode wurden mit **Python 3.14.7 (64-Bit)**,
+**PySide6 6.11.1** und **PyInstaller 6.21.0** getestet (14. September 2026).
+Dies beschreibt die getestete Umgebung, keine Python-Mindestversion.
+Das „Über“-Fenster zeigt automatisch die tatsächlich verwendete Python-Laufzeit;
+eine bestehende EXE behält ihre eingebettete Laufzeit bis zum nächsten Neubau.
 
 - 64-Bit-Windows
 - Eine Bildschirmauflösung von mindestens 1366 × 768 wird empfohlen
