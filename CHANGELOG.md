@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Update the tested development runtime to Python 3.14.7 (64-bit), retaining PySide6 6.11.1 and PyInstaller 6.21.0. Document the environment in both README languages. The About dialog already reads the active Python runtime dynamically; existing executables retain their bundled runtime until rebuilt.
+
+- Add optional automatic pruning to PLC exports (GX Works2, GX Works3 and IEC XML). The configurable absolute threshold defaults to 0.001; pruning is disabled by default. Omitted connections and weight constants affect only the export, and the preview shows the number removed. Nonzero thresholds may change model results.
 - Confirm input/output structure changes before clearing training history; offer immediate training-data adjustment or cancellation. Preserve history for name-only changes. Add German and English warnings.
 
 ## 0.10.0-beta.04 – 05.09.2026

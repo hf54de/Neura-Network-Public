@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: trainingdatadialog.py
 # Zweck: Erfasst, importiert, prüft und skaliert Trainings- und Testdaten.
-# Letzte Änderung: 24.08.2026
+# Letzte Änderung: 09.09.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -4214,9 +4214,11 @@ class TrainingDataDialog(QDialog):
 
         self.document = document
         self.current_file_path = file_path
+        mapping_repaired = self.reconcile_document_mappings()
+        names_synchronized = self.synchronize_document_neuron_names()
         self.load_document_into_table()
         self.set_modified(
-            False
+            mapping_repaired or names_synchronized
         )
         self.reset_edit_history()
 

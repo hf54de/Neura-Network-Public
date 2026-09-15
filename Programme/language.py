@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: language.py
 # Zweck: Verwaltet Übersetzungen und sprachabhängige Programmtexte.
-# Letzte Änderung: 05.09.2026
+# Letzte Änderung: 09.09.2026
 # Copyright © 2026 Helwig Fülling
 # -------------------------------------------------------------------------------------------------
 import json
@@ -924,6 +924,8 @@ class LanguageManager:
         "analysis.technical.values": "Internally scaled values over {count} output values:\nMSE (squared training error): {mse}\nMean absolute error (MAE): {mae}\nMaximum absolute error: {maximum}\n\nShare of the calibrated value range over {percent_count} bounded output values:\nMean: {mae_percent}   |   Maximum: {maximum_percent}\nDistribution: ≤ 1 %: {very_small}   |   > 1 to 5 %: {small}   |   > 5 to 10 %: {medium}   |   > 10 %: {large}",
         "analysis.unit.percentage_points": "percentage points",
         "training.result.elapsed": "Time since start:",
+        "training.result.epoch_time": "Avg. time/epoch: {value}",
+        "training.result.epoch_time_label": "Time/epoch:",
         "training.result.status": "Status:",
         "training.chart.group": "Error History",
         "training.chart.y_axis": "Y-axis:",

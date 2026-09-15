@@ -6968,6 +6968,10 @@ class MainWindow(QMainWindow):
                 if self.current_project_path
                 else "NeuronNetz"
             )
+            from plcquality import PruningQualitySnapshot
+            quality_snapshot = PruningQualitySnapshot(
+                self.scene.network, _records, input_mappings, output_mappings
+            )
             def build_export(export_options=None, model_version=""):
                 if iec_xml:
                     selected_generator = generator_class or Iec61131ExportGenerator
@@ -6985,6 +6989,7 @@ class MainWindow(QMainWindow):
                     export_options=export_options,
                 ).generate()
                 data["regenerate_export"] = build_export
+                data["quality_snapshot"] = quality_snapshot
                 data["export_options"] = dict(export_options or {})
                 return data
 

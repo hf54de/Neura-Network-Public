@@ -35,6 +35,7 @@ from plcfileexport import GxWorks2AscExporter, Iec61131XmlExporter, variable_sum
 from fbpreview import FunctionBlockPreviewPanel
 from graphicalexperimentdialog import show_yellow_information_dialog
 from plcexportsettings import PlcExportSettingsPanel
+from plcquality import PruningQualityPanel, ExportCopyGuard
 
 
 class StructuredTextHighlighter(QSyntaxHighlighter):
@@ -155,13 +156,18 @@ class SpsExportDialog(QDialog):
         )
 
         self.variable_info_label = QLabel(self)
-        main_layout.addWidget(self.variable_info_label)
+        self.variable_info_label.hide()
         summary = dict(export_data.get("operation_summary", {}) or {})
-        main_layout.addWidget(QLabel(self.tr_text(
-            "Aufwand: {mul} MUL · {add} ADD · {exp} EXP",
-            "Effort: {mul} MUL · {add} ADD · {exp} EXP",
-        ).format(mul=summary.get("multiplications", 0),
-                 add=summary.get("additions", 0), exp=summary.get("exp_calls", 0)), self))
+        self.operation_summary = summary
+        self.operation_info_label = QLabel(self.settings_panel.operation_text(summary), self)
+        self.operation_info_label.setWordWrap(True)
+        main_layout.addWidget(self.operation_info_label)
+        self.quality_panel = PruningQualityPanel(
+            export_data.get("quality_snapshot"), self.german, self
+        )
+        main_layout.addWidget(self.quality_panel)
+        self.quality_panel.refresh(self.settings_panel.export_options())
+        self.quality_panel.connect_auto_prune(self.settings_panel)
 
         explanation = QLabel(self.tr_text(
             "Schritt 1: Deklarationen in die erste freie Local-Label-Zeile einfügen. "
@@ -232,6 +238,13 @@ class SpsExportDialog(QDialog):
         close_button.clicked.connect(self.accept)
         bottom.addWidget(close_button)
         main_layout.addLayout(bottom)
+        self.fb_name_edit.textChanged.connect(self.update_operation_information)
+        self.update_operation_information()
+
+        self.quality_panel.previewChanged.connect(self.update_pruning_preview)
+        self.update_pruning_preview()
+        self.copy_guards = [ExportCopyGuard(self.code_editor, self.copy_code, self.settings_panel.pruning.isChecked),
+                            ExportCopyGuard(self.declaration_table, self.copy_declarations, self.settings_panel.pruning.isChecked)]
 
     def tr_text(self, german, english):
         return german if self.german else english
@@ -255,7 +268,46 @@ class SpsExportDialog(QDialog):
                 self.declaration_table.setItem(row_index, column_index, QTableWidgetItem(str(value)))
         self.code_editor.setPlainText(str(data.get("code", "")))
         self._last_export_options = dict(options)
+        self.operation_summary = dict(data.get("operation_summary", {}))
+        self.quality_panel.refresh(options)
+        self.update_operation_information()
         self.update_variable_summary()
+
+    def base_code(self):
+        return re.sub(r"\A\(\*\r?\nPruning:.*?\*\)\r?\n", "",
+                      self.code_editor.toPlainText(), count=1, flags=re.DOTALL)
+
+    def update_pruning_preview(self):
+        text = self.quality_panel.export_comment(self.settings_panel, preview=True) + self.base_code()
+        scroll = self.code_editor.verticalScrollBar().value()
+        self.code_editor.setPlainText(text)
+        self.code_editor.verticalScrollBar().setValue(scroll)
+        self.update_operation_information()
+
+    def update_operation_information(self):
+        exporter = (Iec61131XmlExporter if self.complete_export_format == "iec61131_10_xml"
+                    else GxWorks2AscExporter)
+        name = self.fb_name_edit.text().strip()
+        if not self.fb_name_edit.hasAcceptableInput():
+            return
+        current_text = exporter.build(name, self.declaration_headers,
+                                      self.declaration_rows(), self.code_editor.toPlainText())
+        baseline = None
+        baseline_text = ""
+        if self.settings_panel.pruning.isChecked() and callable(self.regenerate_callback):
+            baseline = self.regenerate_callback(
+                {**self.settings_panel.export_options(), "pruning_enabled": False},
+                self.model_version_edit.text(),
+            )
+            baseline_text = exporter.build(
+                name, baseline["headers"], baseline["declarations"],
+                baseline["code"].replace("\r\n", "\n").replace("\r", "\n"),
+            )
+        self.operation_info_label.setText(self.settings_panel.compact_information(
+            variable_summary(self.declaration_headers, self.declaration_rows()),
+            self.operation_summary, current_text, baseline, baseline_text,
+            "XML" if self.complete_export_format == "iec61131_10_xml" else "ASC",
+        ))
 
     def update_variable_summary(self):
         if not hasattr(self, "declaration_table"):
@@ -302,6 +354,8 @@ class SpsExportDialog(QDialog):
                     if item is not None:
                         item.setText("'" + value.replace("'", "''")[:48] + "'")
                     break
+
+        self.update_operation_information()
 
     def show_safety_notice(self):
         show_yellow_information_dialog(
@@ -426,6 +480,8 @@ class SpsExportDialog(QDialog):
         QTimer.singleShot(1400, lambda: button.setText(normal_text))
 
     def copy_declarations(self):
+        if self.quality_panel.export_comment(self.settings_panel) is None:
+            return
         declaration_text = self.declarations_text()
         if self.declaration_clipboard_format == "html_table":
             mime_data = QMimeData()
@@ -442,11 +498,17 @@ class SpsExportDialog(QDialog):
         self.show_copied_state(self.copy_declaration_button, normal)
 
     def copy_code(self):
-        QApplication.clipboard().setText(self.code_editor.toPlainText())
+        comment = self.quality_panel.export_comment(self.settings_panel)
+        if comment is None:
+            return
+        QApplication.clipboard().setText(comment + self.base_code())
         normal = self.tr_text("ST-Code kopieren", "Copy ST code")
         self.show_copied_state(self.copy_code_button, normal)
 
     def save_complete_file(self):
+        comment = self.quality_panel.export_comment(self.settings_panel)
+        if comment is None:
+            return
         fb_name = self.fb_name_edit.text().strip()
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,31}", fb_name):
             QMessageBox.warning(
@@ -482,7 +544,7 @@ class SpsExportDialog(QDialog):
                 fb_name,
                 self.declaration_headers,
                 self.declaration_rows(),
-                self.code_editor.toPlainText(),
+                comment + self.base_code(),
             )
         except (TypeError, ValueError) as error:
             QMessageBox.critical(

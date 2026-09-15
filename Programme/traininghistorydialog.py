@@ -10,7 +10,7 @@ import math
 from copy import deepcopy
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -624,6 +624,9 @@ class TrainingHistoryDialog(QDialog):
         self.close_button = QPushButton(self.t("common.close"))
         self.export_button.clicked.connect(self.export_csv)
         self.delete_button.clicked.connect(self.delete_selected_runs)
+        self.delete_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Delete), self.table)
+        self.delete_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.delete_shortcut.activated.connect(self.delete_selected_runs)
         self.restore_button.clicked.connect(
             self.request_restore_selected_run
         )
@@ -730,6 +733,7 @@ class TrainingHistoryDialog(QDialog):
         )
 
     def populate_table(self):
+        signals_blocked = self.table.blockSignals(True)
         self.table.setRowCount(0)
 
         repeated_from = {}
@@ -789,6 +793,7 @@ class TrainingHistoryDialog(QDialog):
         self.delete_button.setEnabled(has_entries)
         self.restore_button.setEnabled(False)
 
+        self.table.blockSignals(signals_blocked)
         if has_entries:
             self.table.selectRow(0)
         else:

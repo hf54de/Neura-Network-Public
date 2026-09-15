@@ -27,6 +27,7 @@ class SollIstPlot(QWidget):
         self.binary = False
         self.unit = ""
         self.tolerance = 0.0
+        self.tolerance_percent = False
         self.show_tolerance = False
         self.highlighted_record = None
         self.hovered_record = None
@@ -54,10 +55,14 @@ class SollIstPlot(QWidget):
         )
         self.update()
 
-    def set_tolerance(self, value, visible=False):
+    def set_tolerance(self, value, visible=False, percent=False):
         self.tolerance = max(0.0, float(value or 0.0))
+        self.tolerance_percent = bool(percent)
         self.show_tolerance = bool(visible) and not self.binary
         self.update()
+
+    def tolerance_at(self, target):
+        return abs(float(target)) * self.tolerance / 100 if self.tolerance_percent else self.tolerance
 
     def plot_rect(self):
         return QRectF(62, 28, max(80, self.width() - 92), max(80, self.height() - 82))
@@ -162,31 +167,20 @@ class SollIstPlot(QWidget):
         if self.show_tolerance and self.tolerance > 0.0:
             painter.save()
             painter.setClipRect(rect)
-            upper_start = self.map_point(
-                x_minimum, x_minimum + self.tolerance, rect,
-                x_minimum, x_maximum, y_minimum, y_maximum
-            )
-            upper_end = self.map_point(
-                x_maximum, x_maximum + self.tolerance, rect,
-                x_minimum, x_maximum, y_minimum, y_maximum
-            )
-            lower_start = self.map_point(
-                x_minimum, x_minimum - self.tolerance, rect,
-                x_minimum, x_maximum, y_minimum, y_maximum
-            )
-            lower_end = self.map_point(
-                x_maximum, x_maximum - self.tolerance, rect,
-                x_minimum, x_maximum, y_minimum, y_maximum
-            )
+            xs = [x_minimum, x_maximum]
+            if x_minimum < 0 < x_maximum:
+                xs.insert(1, 0.0)
+            def boundary(sign):
+                return [self.map_point(x, x + sign * self.tolerance_at(x), rect,
+                                       x_minimum, x_maximum, y_minimum, y_maximum) for x in xs]
+            upper, lower = boundary(1), boundary(-1)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor(67, 160, 105, 38))
-            painter.drawPolygon(
-                QPolygonF([upper_start, upper_end, lower_end, lower_start])
-            )
+            painter.drawPolygon(QPolygonF(upper + list(reversed(lower))))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.setPen(QPen(QColor(67, 145, 96, 150), 1))
-            painter.drawLine(upper_start, upper_end)
-            painter.drawLine(lower_start, lower_end)
+            painter.drawPolyline(QPolygonF(upper))
+            painter.drawPolyline(QPolygonF(lower))
             painter.restore()
 
         painter.save()
@@ -293,7 +287,7 @@ class SollIstPlot(QWidget):
                 self.show_tolerance
                 and not self.binary
                 and abs(float(row["actual"]) - float(row["target"]))
-                > self.tolerance
+                > self.tolerance_at(row["target"])
             )
             if outside_tolerance or row.get("binary_error"):
                 color = QColor("#d02020")

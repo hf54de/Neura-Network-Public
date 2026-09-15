@@ -30,6 +30,7 @@ from toolbaricons import ToolbarIcons
 from fbpreview import FunctionBlockPreviewPanel
 from graphicalexperimentdialog import show_yellow_information_dialog
 from plcexportsettings import PlcExportSettingsPanel
+from plcquality import PruningQualityPanel, ExportCopyGuard
 
 
 class XmlHighlighter(QSyntaxHighlighter):
@@ -74,6 +75,7 @@ class XmlExportDialog(QDialog):
         self.declaration_headers = tuple(export_data.get("headers", ()))
         self.declaration_rows = [list(row) for row in export_data.get("declarations", [])]
         self.st_code = str(export_data.get("code", ""))
+        self.operation_summary = dict(export_data.get("operation_summary", {}))
 
         self.setWindowTitle(self.tr_text(
             "SPS-Export – Mitsubishi GX Works3 XML"
@@ -120,11 +122,7 @@ class XmlExportDialog(QDialog):
 
         variables = variable_summary(self.declaration_headers, self.declaration_rows)
         operations = dict(export_data.get("operation_summary", {}) or {})
-        self.operation_info_text = self.tr_text(
-            "Aufwand: {mul} MUL · {add} ADD · {exp} EXP",
-            "Effort: {mul} MUL · {add} ADD · {exp} EXP",
-        ).format(mul=operations.get("multiplications", 0),
-                 add=operations.get("additions", 0), exp=operations.get("exp_calls", 0))
+        self.operation_info_text = self.settings_panel.operation_text(operations)
 
         technical_frame = QFrame(self)
         technical_frame.setObjectName("technicalFrame")
@@ -132,11 +130,18 @@ class XmlExportDialog(QDialog):
             "QFrame#technicalFrame { border: 1px solid #333333; border-radius: 5px; "
             "background: #f7f8fa; }"
         )
-        technical_layout = QHBoxLayout(technical_frame)
+        technical_layout = QVBoxLayout(technical_frame)
         technical_layout.setContentsMargins(9, 5, 9, 5)
         self.technical_info_label = QLabel(technical_frame)
         self.technical_info_label.setWordWrap(True)
         technical_layout.addWidget(self.technical_info_label, 1)
+        technical_layout.setSpacing(0)
+        self.quality_panel = PruningQualityPanel(
+            export_data.get("quality_snapshot"), self.german, self
+        )
+        technical_layout.addWidget(self.quality_panel)
+        self.quality_panel.refresh(self.settings_panel.export_options())
+        self.quality_panel.connect_auto_prune(self.settings_panel)
         layout.addWidget(technical_frame)
         self.update_technical_information(variables)
 
@@ -217,8 +222,10 @@ class XmlExportDialog(QDialog):
         close_button.clicked.connect(self.accept)
         button_row.addWidget(close_button)
         layout.addWidget(button_frame)
+        self.quality_panel.previewChanged.connect(self.regenerate_xml)
         self.regenerate_xml()
         self.settings_panel.optionsChanged.connect(self.export_options_changed)
+        self.copy_guard = ExportCopyGuard(self.xml_editor, self.copy_xml, self.settings_panel.pruning.isChecked)
 
     def tr_text(self, german, english):
         return german if self.german else english
@@ -229,21 +236,7 @@ class XmlExportDialog(QDialog):
         ))
 
     def update_technical_information(self, variables):
-        first_line = self.tr_text(
-            "Variablen: {total} · Anschlüsse: {io} · Skalierung: {scaling} Werte "
-            "für {scaling_inputs} Eingänge und {scaling_outputs} Ausgänge",
-            "Variables: {total} · Connections: {io} · Scaling: {scaling} values "
-            "for {scaling_inputs} inputs and {scaling_outputs} outputs",
-        ).format(**variables)
-        second_line = self.tr_text(
-            "Netz: {weights} Gewichte · {biases} Bias · {neurons} Neuronen · "
-            "{helpers} Hilfswerte",
-            "Network: {weights} weights · {biases} biases · {neurons} neurons · "
-            "{helpers} helpers",
-        ).format(**variables)
-        self.technical_info_label.setText(
-            first_line + "\n" + second_line + "    |    " + self.operation_info_text
-        )
+        self.technical_info_label.setText(self.operation_info_text)
 
     def export_options_changed(self, options):
         if not callable(self.regenerate_callback):
@@ -261,6 +254,11 @@ class XmlExportDialog(QDialog):
         self.declaration_rows[:] = [list(row) for row in data.get("declarations", [])]
         self.st_code = str(data.get("code", ""))
         self._last_export_options = dict(options)
+        self.operation_summary = dict(data.get("operation_summary", {}))
+        self.quality_panel.refresh(options)
+        self.operation_info_text = self.settings_panel.operation_text(
+            data.get("operation_summary", {})
+        )
         variables = variable_summary(self.declaration_headers, self.declaration_rows)
         self.update_technical_information(variables)
         self.fb_preview_panel.refresh_declarations()
@@ -274,9 +272,29 @@ class XmlExportDialog(QDialog):
             self.fb_name_edit.text().strip(),
             self.declaration_headers,
             self.declaration_rows,
-            self.st_code,
+            self.quality_panel.export_comment(self.settings_panel, preview=True) + self.st_code,
         )
         self.xml_editor.setPlainText(xml_text)
+        baseline = None
+        baseline_text = ""
+        if self.settings_panel.pruning.isChecked() and callable(self.regenerate_callback):
+            baseline = self.regenerate_callback(
+                {**self.settings_panel.export_options(), "pruning_enabled": False},
+                self.model_version_edit.text(),
+            )
+            baseline_text = exporter.build(
+                self.fb_name_edit.text().strip(), baseline["headers"],
+                baseline["declarations"], baseline["code"],
+            )
+            # QPlainTextEdit normalizes line endings; measure exactly what save_xml writes.
+            baseline_text = baseline_text.replace("\r\n", "\n").replace("\r", "\n")
+        self.operation_info_text = self.settings_panel.compact_information(
+            variable_summary(self.declaration_headers, self.declaration_rows),
+            self.operation_summary, self.xml_editor.toPlainText(), baseline, baseline_text,
+        )
+        self.update_technical_information(
+            variable_summary(self.declaration_headers, self.declaration_rows)
+        )
 
     def fb_name_changed(self):
         self.regenerate_xml()
@@ -300,13 +318,29 @@ class XmlExportDialog(QDialog):
                     break
         self.regenerate_xml()
 
+    def checked_export_xml(self):
+        comment = self.quality_panel.export_comment(self.settings_panel)
+        if comment is None:
+            return None
+        if not comment:
+            return self.xml_editor.toPlainText()
+        exporter = GxWorks3XmlExporter if self.gxworks3_profile else Iec61131XmlExporter
+        return exporter.build(self.fb_name_edit.text().strip(), self.declaration_headers,
+                              self.declaration_rows, comment + self.st_code)
+
     def copy_xml(self):
-        QApplication.clipboard().setText(self.xml_editor.toPlainText())
+        content = self.checked_export_xml()
+        if content is None:
+            return
+        QApplication.clipboard().setText(content)
         normal = self.tr_text("XML kopieren", "Copy XML")
         self.copy_button.setText(self.tr_text("Kopiert ✓", "Copied ✓"))
         QTimer.singleShot(1400, lambda: self.copy_button.setText(normal))
 
     def save_xml(self):
+        content = self.checked_export_xml()
+        if content is None:
+            return
         if not self.valid_fb_name():
             QMessageBox.warning(
                 self,
@@ -338,7 +372,7 @@ class XmlExportDialog(QDialog):
             file_path += ".xml"
         try:
             Path(file_path).write_text(
-                self.xml_editor.toPlainText(), encoding="utf-8", newline=""
+                content, encoding="utf-8", newline=""
             )
         except OSError as error:
             QMessageBox.critical(self, self.tr_text("Export fehlgeschlagen", "Export failed"), str(error))

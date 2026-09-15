@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: trainingdialog.py
 # Zweck: Steuert Trainingsläufe, Parameter, Status und Bedienung des Trainingsfensters.
-# Letzte Änderung: 05.09.2026
+# Letzte Änderung: 09.09.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -948,6 +948,16 @@ class TrainingDialog(QDialog):
         epoch_time_layout.addWidget(self.result_epochs, 1)
         epoch_time_layout.addWidget(QLabel(text("training.result.elapsed")))
         epoch_time_layout.addWidget(self.result_elapsed_time, 1)
+        self.result_epoch_time = QLineEdit()
+        self.result_epoch_time.setReadOnly(True)
+        self.result_epoch_time.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.result_epoch_time.setFont(self.result_elapsed_time.font())
+        self.result_epochs.setMinimumWidth(0)
+        self.result_elapsed_time.setMinimumWidth(0)
+        self.result_epoch_time.setMinimumWidth(0)
+        epoch_time_layout.addWidget(QLabel(text("training.result.epoch_time_label")))
+        epoch_time_layout.addWidget(self.result_epoch_time, 1)
+        self.update_epoch_time_display()
         self.result_layout.addRow(text("training.result.epochs"), epoch_time)
 
         self.result_layout.addRow(
@@ -2905,6 +2915,7 @@ class TrainingDialog(QDialog):
         self.result_start_mse.setText(format_number(start_error))
         self.result_mse.setText(format_number(end_error))
         self.result_epochs.setText(str(completed_epochs))
+        self.update_epoch_time_display()
         self.result_max_error.setText(format_number(maximum_error))
         self.result_elapsed_time.setText(f"{elapsed_seconds:.1f} s")
         self.result_status.setText(str(history_entry.get("status_text", "")))
@@ -2957,6 +2968,7 @@ class TrainingDialog(QDialog):
         self.result_start_mse.setText("–")
         self.result_mse.setText("–")
         self.result_epochs.setText("–")
+        self.update_epoch_time_display()
         self.result_max_error.setText("–")
         self.result_elapsed_time.setText("0.0 s")
         self.result_status.setText(
@@ -3276,6 +3288,12 @@ class TrainingDialog(QDialog):
             self.error_limit.setValue(
                 0.0000000001
             )
+
+    def update_epoch_time_display(self, seconds=None):
+        """Dauer der letzten vollständigen Epoche einschließlich Fehlerauswertung."""
+        self.result_epoch_time.setText(
+            f"{max(0.0, seconds):.1f} s" if seconds is not None else "–"
+        )
 
     def update_elapsed_time_display(
         self,
@@ -4054,6 +4072,8 @@ class TrainingDialog(QDialog):
         über alle Datensätze berechnet.
         """
 
+        epoch_started = time.monotonic()
+        completed_records = 0
         fast = self.fast_mode.isChecked()
         record_count = len(
             self.records
@@ -4098,6 +4118,7 @@ class TrainingDialog(QDialog):
             self.network.train_step(
                 target_values
             )
+            completed_records += 1
             self.processed_training_records += 1
             if not fast:
                 self.update_external_output_values(record)
@@ -4105,7 +4126,10 @@ class TrainingDialog(QDialog):
             if self.stop_requested:
                 break
 
-        return self.calculate_dataset_metrics(update_display=not fast)
+        metrics = self.calculate_dataset_metrics(update_display=not fast)
+        if record_count > 0 and completed_records == record_count:
+            self.update_epoch_time_display(time.monotonic() - epoch_started)
+        return metrics
 
     def calculate_dataset_metrics(self, update_display=True):
         """
@@ -4680,6 +4704,7 @@ class TrainingDialog(QDialog):
             )
         else:
             self.current_run_requested_epochs = maximum_epochs
+        self.update_epoch_time_display()
         self.training_start_time = time.monotonic()
         self._last_elapsed_display_update = 0.0
         self.reset_total_workload()

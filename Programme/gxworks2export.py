@@ -63,9 +63,17 @@ class GxWorks2ExportGenerator:
             "invalid_input_number": True,
             "fallback": True,
             "hold_last_output": True,
+            "pruning_enabled": False,
+            "pruning_threshold": 0.001,
         }
         defaults.update(dict(export_options or {}))
         self.export_options = defaults
+        self.pruning_threshold = float(defaults["pruning_threshold"])
+        if not math.isfinite(self.pruning_threshold) or self.pruning_threshold < 0:
+            raise ValueError(self.text(
+                "Der Pruning-Schwellwert muss endlich und nicht negativ sein.",
+                "The pruning threshold must be finite and non-negative.",
+            ))
         self.used_labels = set()
         self.rows = []
         self.input_labels = {}
@@ -81,6 +89,15 @@ class GxWorks2ExportGenerator:
     @property
     def german(self):
         return self.language_code == "de"
+
+    def exported_connections(self):
+        connections = self.network.get_connections()
+        # Validate even omitted weights; pruning must not hide invalid parameters.
+        for connection in connections:
+            self.float_literal(connection.weight)
+        if not self.export_options["pruning_enabled"]:
+            return connections
+        return [c for c in connections if abs(float(c.weight)) > self.pruning_threshold]
 
     def text(self, german, english):
         return german if self.german else english
@@ -278,7 +295,7 @@ class GxWorks2ExportGenerator:
                 self.text(f"Bias von {neuron.name}", f"Bias of {neuron.name}"),
             )
 
-        for connection in self.network.get_connections():
+        for connection in self.exported_connections():
             source_id = self.identifier_text(connection.source_neuron.id, "Quelle")
             target_id = self.identifier_text(connection.target_neuron.id, "Ziel")
             label = self.unique_label(f"W_{source_id}_{target_id}", "Gewicht")
@@ -522,7 +539,10 @@ class GxWorks2ExportGenerator:
             ])
             for neuron in layer:
                 sum_label = self.neuron_sum_labels[neuron.id]
-                incoming = sorted(neuron.incoming_connections, key=lambda item: item.id)
+                incoming = sorted(
+                    (c for c in neuron.incoming_connections if c.id in self.weight_labels),
+                    key=lambda item: item.id,
+                )
                 lines.append(f"(* {st_comment_text(neuron.name)} *)")
                 lines.append(f"{sum_label} :=")
                 for index, connection in enumerate(incoming):
@@ -530,7 +550,8 @@ class GxWorks2ExportGenerator:
                     source = self.neuron_output_labels[connection.source_neuron.id]
                     weight = self.weight_labels[connection.id]
                     lines.append(f"{operator}{source} * {weight}")
-                lines.append(f"    + {self.bias_labels[neuron.id]};")
+                bias_prefix = "    + " if incoming else "      "
+                lines.append(f"{bias_prefix}{self.bias_labels[neuron.id]};")
                 lines.append("")
                 lines.extend(self.activation_lines(
                     neuron.activation_function,
@@ -592,7 +613,7 @@ class GxWorks2ExportGenerator:
             "neurons": [(n.id, n.bias, n.activation_function) for n in self.network.get_neurons()],
             "connections": [
                 (c.id, c.source_neuron.id, c.target_neuron.id, c.weight)
-                for c in self.network.get_connections()
+                for c in self.exported_connections()
             ],
             "inputs": [mapping.get("calibration") for mapping in self.input_mappings],
             "outputs": [mapping.get("calibration") for mapping in self.output_mappings],
@@ -606,12 +627,13 @@ class GxWorks2ExportGenerator:
             neuron for neuron in self.network.get_neurons()
             if neuron.neuron_type != NeuronType.INPUT
         ]
-        connections = len(self.network.get_connections())
+        connections = len(self.exported_connections())
         exp_calls = sum(
             neuron.activation_function in ("Sigmoid", "Tanh")
             for neuron in calculated
         )
         return {
+            "pruned_connections": len(self.network.get_connections()) - connections,
             "multiplications": connections,
             "additions": connections + len(calculated),
             "exp_calls": exp_calls,
@@ -632,6 +654,7 @@ class GxWorks2ExportGenerator:
             "model_version": self.model_version,
             "model_signature": self.model_signature(),
             "operation_summary": self.operation_summary(),
+            "export_options": dict(self.export_options),
             "complete_export_format": "gxworks2_asc",
             "complete_export_label_de": "Vollständige ASC-Datei speichern…",
             "complete_export_label_en": "Save complete ASC file…",

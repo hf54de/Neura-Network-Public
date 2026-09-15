@@ -63,6 +63,7 @@ class ResultAnalysisDialog(QDialog):
         self.network = network
         self.sources = list(sources)
         self.tolerances = tolerances if isinstance(tolerances, dict) else {}
+        self.plot_percent_values = {}
         self.report_context = report_context if isinstance(report_context, dict) else {}
         self.current_result = None
         self.results_by_source = {}
@@ -209,6 +210,23 @@ class ResultAnalysisDialog(QDialog):
             self.plot_tolerance_changed
         )
         plot_tolerance_controls.addWidget(self.plot_tolerance_spin)
+        self.plot_tolerance_mode = QComboBox()
+        german = self.language.current_language == "de"
+        self.plot_tolerance_mode.addItem("Absoluter Wert" if german else "Absolute value", "absolute")
+        self.plot_tolerance_mode.addItem("Prozent vom Sollwert" if german else "Percent of target", "percent")
+        self.plot_tolerance_mode.addItem("Prozent der Sollwert-Spannweite" if german else "Percent of target range", "range_percent")
+        self.plot_tolerance_mode.setToolTip(
+            "Prozent vom Sollwert: |Sollwert| × Prozent / 100. Bei Sollwert 0 ist die Toleranz 0.\n"
+            "Prozent der Sollwert-Spannweite: (größter − kleinster Sollwert) × Prozent / 100, "
+            "bezogen auf die ausgewerteten Daten. Bei gleichen Sollwerten ist die Toleranz 0."
+            if german else
+            "Percent of target: |target| × percent / 100. At target 0, the tolerance is 0.\n"
+            "Percent of target range: (maximum − minimum target) × percent / 100, "
+            "based on the evaluated data. For identical targets, the tolerance is 0."
+        )
+        self.plot_tolerance_mode.currentIndexChanged.connect(self.plot_tolerance_mode_changed)
+        plot_tolerance_controls.addWidget(self.plot_tolerance_mode)
+
         plot_tolerance_controls.addStretch(1)
         self.plot_show_all_button = QPushButton(
             self.t("analysis.plot.show_all")
@@ -940,6 +958,7 @@ class ResultAnalysisDialog(QDialog):
         )
         self.show_tolerance_checkbox.setEnabled(not binary)
         self.plot_tolerance_spin.setEnabled(not binary)
+        self.plot_tolerance_mode.setEnabled(not binary)
         key = self.tolerance_key(mapping)
         if key not in self.tolerances:
             legacy_values = [
@@ -976,21 +995,45 @@ class ResultAnalysisDialog(QDialog):
     def tolerance_key(self, mapping):
         return ("output", int(mapping["neuron"].id))
 
+    def plot_tolerance_mode_changed(self, _index=None):
+        rows, mapping = self.rows_for_selected_output()
+        if mapping is None:
+            return
+        percent = self.plot_tolerance_mode.currentData() in ("percent", "range_percent")
+        key = self.tolerance_key(mapping)
+        self.plot_tolerance_spin.blockSignals(True)
+        self.plot_tolerance_spin.setSuffix(" %" if percent else (" " + mapping.get("unit", "") if mapping.get("unit") else ""))
+        self.plot_tolerance_spin.setValue(self.plot_percent_values.get(key, 5.0) if percent else self.tolerances.get(key, 0.0))
+        self.plot_tolerance_spin.blockSignals(False)
+        self.update_plot_tolerance()
+
     def update_plot_tolerance(self, _checked=None):
         rows, mapping = self.rows_for_selected_output()
         if mapping is None:
             self.plot.set_tolerance(0.0, False)
             return
         binary = mapping.get("data_type") == "binary"
-        tolerance = float(self.tolerances.get(self.tolerance_key(mapping), 0.0))
+        mode = self.plot_tolerance_mode.currentData()
+        percent = mode in ("percent", "range_percent")
+        tolerance = (self.plot_percent_values.get(self.tolerance_key(mapping), 5.0) if percent
+                     else float(self.tolerances.get(self.tolerance_key(mapping), 0.0)))
+        if mode == "range_percent":
+            targets = [row["target"] for row in rows]
+            span = max(targets) - min(targets) if targets else 0.0
+            tolerance = span * tolerance / 100
         self.plot.set_tolerance(
             tolerance,
             self.show_tolerance_checkbox.isChecked() and not binary,
+            percent=mode == "percent",
         )
 
     def plot_tolerance_changed(self, value):
         rows, mapping = self.rows_for_selected_output()
         if mapping is None or mapping.get("data_type") == "binary":
+            return
+        if self.plot_tolerance_mode.currentData() in ("percent", "range_percent"):
+            self.plot_percent_values[self.tolerance_key(mapping)] = float(value)
+            self.update_plot_tolerance()
             return
         self.tolerances[self.tolerance_key(mapping)] = float(value)
         self.tolerance_spin.blockSignals(True)
@@ -1058,7 +1101,7 @@ class ResultAnalysisDialog(QDialog):
         self.tolerance_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.ResizeToContents
         )
-        self.update_plot_tolerance()
+        self.plot_tolerance_mode_changed()
 
     def select_record(self, record):
         row_index = max(0, int(record) - 1)

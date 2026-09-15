@@ -5,14 +5,83 @@
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
-from PySide6.QtCore import QRegularExpression, Signal, Qt
-from PySide6.QtGui import QRegularExpressionValidator
+import re
+
+from PySide6.QtCore import QRegularExpression, Signal, Qt, QTimer, QSignalBlocker
+from PySide6.QtGui import QRegularExpressionValidator, QValidator
 from PySide6.QtWidgets import (
-    QCheckBox, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
+    QCheckBox, QDoubleSpinBox, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QToolButton, QVBoxLayout, QWidget,
 )
 
 from graphicalexperimentdialog import show_yellow_information_dialog
+
+
+class PruningThresholdSpinBox(QDoubleSpinBox):
+    """Keep input precision while omitting insignificant trailing zeroes."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.input_timer = QTimer(self)
+        self.input_timer.setSingleShot(True)
+        self.input_timer.setInterval(300)
+        self.input_timer.timeout.connect(self.update_preview)
+        self.lineEdit().textEdited.connect(lambda: self.input_timer.start())
+
+    def commit_input(self):
+        self.input_timer.stop()
+        if self.hasAcceptableInput():
+            self.interpretText()
+
+    def validate(self, text, position):
+        # Treat both separators as decimal separators, never as grouping marks.
+        if text in ("", ".", ","):
+            return QValidator.State.Intermediate, text, position
+        if not re.fullmatch(r"[0-9]+(?:[.,][0-9]*)?|[.,][0-9]+", text):
+            return QValidator.State.Invalid, text, position
+        fractional = re.split(r"[.,]", text)
+        if len(fractional) == 2 and len(fractional[1]) > self.decimals():
+            return QValidator.State.Invalid, text, position
+        value = self.valueFromText(text)
+        state = (QValidator.State.Acceptable if self.minimum() <= value <= self.maximum()
+                 else QValidator.State.Invalid)
+        return state, text, position
+
+    def valueFromText(self, text):
+        return float(text.replace(",", "."))
+
+    def update_preview(self):
+        editor = self.lineEdit()
+        text = editor.text()
+        # A trailing separator is an unfinished edit, even though Enter can commit it.
+        if text.endswith((",", ".")) or not self.hasAcceptableInput():
+            return
+        value = self.valueFromText(text)
+        if value == self.value():
+            return
+        cursor = editor.cursorPosition()
+        selection_start = editor.selectionStart()
+        selection_length = len(editor.selectedText())
+        with QSignalBlocker(self), QSignalBlocker(editor):
+            self.setValue(value)
+            editor.setText(text)
+            editor.setCursorPosition(cursor)
+            if selection_start >= 0:
+                anchor = selection_start if cursor != selection_start else selection_start + selection_length
+                editor.setSelection(anchor, cursor - anchor)
+        self.valueChanged.emit(self.value())
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.commit_input()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+    def textFromValue(self, value):
+        text = self.locale().toString(value, "f", self.decimals())
+        text = text.replace(self.locale().groupSeparator(), "")
+        return text.rstrip("0").rstrip(self.locale().decimalPoint()) if self.decimals() else text
 
 
 class PlcExportSettingsPanel(QGroupBox):
@@ -30,6 +99,8 @@ class PlcExportSettingsPanel(QGroupBox):
         "invalid_input_number": True,
         "fallback": True,
         "hold_last_output": True,
+        "pruning_enabled": False,
+        "pruning_threshold": 0.001,
     }
 
     def __init__(self, fb_name, model_version, german=True, parent=None, target_system=""):
@@ -156,6 +227,47 @@ class PlcExportSettingsPanel(QGroupBox):
         options.setColumnStretch(1, 1)
         options.setColumnStretch(3, 1)
         outer.addWidget(self.options_widget)
+        pruning_row = QHBoxLayout()
+        pruning_row.setContentsMargins(15, 0, 0, 0)
+        self.pruning = self._check(
+            "Automatisches Pruning" if german else "Automatic pruning", "pruning_enabled"
+        )
+        pruning_row.addWidget(self.pruning)
+        pruning_row.addWidget(QLabel("Schwellwert |Gewicht| ≤" if german else "Threshold |weight| ≤", self))
+        self.pruning_threshold = PruningThresholdSpinBox(self)
+        self.pruning_threshold.setToolTip(
+            "Gewichte mit einem Betrag bis einschließlich dieses Wertes werden im Export entfernt. "
+            "Bei 0 werden nur exakt nullwertige Gewichte entfernt."
+            if german else
+            "Weights with an absolute value up to and including this threshold are removed from the export. "
+            "At 0, only exactly zero weights are removed."
+        )
+        self.pruning_threshold.setDecimals(9)
+        self.pruning_threshold.setRange(0.0, 1000000.0)
+        self.pruning_threshold.setSingleStep(0.001)
+        self.pruning_threshold.setValue(self.DEFAULTS["pruning_threshold"])
+        self.pruning_threshold.setKeyboardTracking(False)
+        self.pruning_threshold.valueChanged.connect(self._apply_dependencies)
+        pruning_row.addWidget(self.pruning_threshold)
+        self.auto_prune_button = QPushButton("Auto-Prune…", self)
+        self.auto_prune_button.setAutoDefault(False)
+        self.auto_prune_button.setEnabled(False)
+        self.auto_prune_button.setToolTip(
+            "Schwellwert anhand der Trainingsdaten automatisch suchen"
+            if german else "Find a threshold automatically using training data"
+        )
+        pruning_row.addWidget(self.auto_prune_button)
+        pruning_row.addStretch(1)
+        outer.addLayout(pruning_row)
+        pruning_hint = QLabel(
+            "Entfernt kleine Gewichte nur im Export. Kann Ergebnisse verändern; "
+            "das gespeicherte Netz bleibt unverändert."
+            if german else
+            "Removes small weights only from the export. May change results; "
+            "the saved network remains unchanged.", self
+        )
+        pruning_hint.setWordWrap(True)
+        outer.addWidget(pruning_hint)
         self.options_widget.setVisible(True)
         self._apply_dependencies(emit=False)
 
@@ -169,6 +281,8 @@ class PlcExportSettingsPanel(QGroupBox):
     def export_options(self):
         trigger = self.enable.isChecked() or self.range_check.isChecked()
         return {
+            "pruning_enabled": self.pruning.isChecked(),
+            "pruning_threshold": self.pruning_threshold.value(),
             "enable": self.enable.isChecked(),
             "network_active": trigger and self.network_active.isChecked(),
             "range_check": self.range_check.isChecked(),
@@ -188,12 +302,17 @@ class PlcExportSettingsPanel(QGroupBox):
             (self.range_check, "range_check"), (self.range_tolerance, "range_tolerance_input"),
             (self.range_error, "range_error"), (self.invalid_number, "invalid_input_number"),
             (self.fallback, "fallback"), (self.hold_last, "hold_last_output"),
+            (self.pruning, "pruning_enabled"),
         ):
             widget.setChecked(bool(values[key]))
+        self.pruning_threshold.setValue(float(values["pruning_threshold"]))
         self._updating = False
         self._apply_dependencies(emit=False)
 
     def _apply_dependencies(self, _checked=False, emit=True):
+        if self._updating:
+            return
+        self.pruning_threshold.setEnabled(self.pruning.isChecked())
         trigger = self.enable.isChecked() or self.range_check.isChecked()
         self.network_active.setEnabled(trigger)
         self.range_tolerance.setEnabled(self.range_check.isChecked())
@@ -206,7 +325,8 @@ class PlcExportSettingsPanel(QGroupBox):
             self.optionsChanged.emit(self.export_options())
 
     def _update_options_caption(self):
-        selected = sum(bool(value) for value in self.export_options().values())
+        selected = sum(bool(value) for key, value in self.export_options().items()
+                       if not key.startswith("pruning_"))
         self.options_toggle.setText(
             (f"Zusatzanschlüsse ({selected} von 8 ausgewählt)" if self.german else
              f"Additional connections ({selected} of 8 selected)")
@@ -217,6 +337,58 @@ class PlcExportSettingsPanel(QGroupBox):
         self.options_toggle.setArrowType(
             Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
         )
+
+    def operation_text(self, summary):
+        return (
+            "Aufwand: {multiplications} MUL · {additions} ADD · {exp_calls} EXP · "
+            "Pruning: {pruned_connections} Verbindungen entfernt"
+            if self.german else
+            "Effort: {multiplications} MUL · {additions} ADD · {exp_calls} EXP · "
+            "Pruning: {pruned_connections} connections removed"
+        ).format(**{**dict.fromkeys(("multiplications", "additions", "exp_calls",
+                                   "pruned_connections"), 0), **summary})
+
+    def compact_information(self, variables, operations, current_text="", baseline=None,
+                            baseline_text="", format_name="XML"):
+        from plcfileexport import variable_summary
+        def number(value):
+            return f"{value:.1f}".replace(".", ",") if self.german else f"{value:.1f}"
+        first = (
+            "Anschlüsse: {io} · Skalierung: {scaling} · Bias: {biases} · Neuronen: {neurons}"
+            if self.german else
+            "Connections: {io} · Scaling: {scaling} · Biases: {biases} · Neurons: {neurons}"
+        ).format(**variables)
+        size = number(len(current_text.encode("utf-8")) / 1000)
+        if baseline is not None:
+            old = variable_summary(baseline["headers"], baseline["declarations"])
+            before = baseline["operation_summary"]
+            old_bytes = len(baseline_text.encode("utf-8"))
+            new_bytes = len(current_text.encode("utf-8"))
+            saving = number(100 * (old_bytes - new_bytes) / old_bytes if old_bytes else 0)
+            second = (
+                f"Vor → Nach: Variablen {old['total']} → {variables['total']} · "
+                f"Gewichte {old['weights']} → {variables['weights']}"
+                if self.german else
+                f"Before → After: Variables {old['total']} → {variables['total']} · "
+                f"Weights {old['weights']} → {variables['weights']}"
+            )
+            third = (f"MUL {before['multiplications']} → {operations['multiplications']} · "
+                     f"ADD {before['additions']} → {operations['additions']} · "
+                     f"{operations['exp_calls']} EXP · {format_name}: "
+                     f"{number(old_bytes / 1000)} → {size} kB (−{saving} %)")
+            if not operations.get("pruned_connections", 0):
+                second += " · Keine Einsparung" if self.german else " · No savings"
+        else:
+            second = (
+                f"Variablen: {variables['total']} · Gewichte: {variables['weights']} · Pruning: aus"
+                if self.german else
+                f"Variables: {variables['total']} · Weights: {variables['weights']} · Pruning: off"
+            )
+            third = (f"{operations.get('multiplications', 0)} MUL · "
+                     f"{operations.get('additions', 0)} ADD · {operations.get('exp_calls', 0)} EXP · "
+                     f"{format_name}: {size} kB")
+            third = ("Aufwand: " if self.german else "Effort: ") + third
+        return "\n".join((first, second, third))
 
     def show_settings_help(self):
         if self.german:
