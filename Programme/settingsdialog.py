@@ -5,6 +5,7 @@
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
+from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -28,6 +30,7 @@ from PySide6.QtWidgets import (
     QWidget
 )
 from colorpalette import choose_color
+from settingsprofile import SettingsProfile
 
 
 class ColorButton(QPushButton):
@@ -240,6 +243,90 @@ class SettingsDialog(QDialog):
         )
         self.category_list.setCurrentRow(initial_index)
         self.loading = False
+        self.profile_name = ""
+        self.profile_dirty = False
+        self.profile_baseline = SettingsProfile.build(self.project_settings(), self.ui_settings())
+        profile_row = QHBoxLayout()
+        self.profile_label = QLabel()
+        profile_row.addWidget(self.profile_label, 1)
+        for title, handler in ((self.profile_text("Profil laden …", "Load profile …"), self.load_profile),
+                               (self.profile_text("Profil speichern …", "Save profile …"), self.save_profile)):
+            button = QPushButton(title)
+            button.setAutoDefault(False)
+            button.clicked.connect(handler)
+            profile_row.addWidget(button)
+        main_layout.insertLayout(1, profile_row)
+        self.update_profile_label()
+
+    def profile_text(self, german, english):
+        return german if self.language_manager.current_language == "de" else english
+
+    def update_profile_label(self):
+        changed = self.profile_dirty or SettingsProfile.build(self.project_settings(), self.ui_settings()) != self.profile_baseline
+        self.profile_label.setText(self.profile_text("Vorlage: ", "Template: ") +
+            (self.profile_name or self.profile_text("Aktuelle Einstellungen", "Current settings")) +
+            (self.profile_text(" (geändert)", " (modified)") if changed else ""))
+        self.profile_label.setToolTip(self.profile_label.text())
+
+    def profile_directory(self):
+        directory = SettingsProfile.directory()
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            QMessageBox.warning(self, self.profile_text("Profilordner", "Profile folder"),
+                self.profile_text("Der Profilordner ist nicht beschreibbar. Bitte einen anderen Speicherort wählen.\n", "Cannot create the profile folder. Please choose another location.\n") + str(error))
+            return str(Path.home())
+        return str(directory)
+
+    def load_profile(self):
+        path, _ = QFileDialog.getOpenFileName(self, self.profile_text("Profil laden", "Load profile"), self.profile_directory(), "NeuronNetz (*.json)")
+        if not path:
+            return
+        try:
+            data = SettingsProfile.read(path)
+        except (OSError, ValueError, TypeError, KeyError) as error:
+            QMessageBox.warning(self, self.profile_text("Profil konnte nicht geladen werden", "Could not load profile"), str(error))
+            return
+        self.loading = True
+        for key, checkbox in self.display_checks.items():
+            checkbox.setChecked(data["display"][key])
+        for key, button in self.color_buttons.items():
+            button.set_color(data["display"]["colors"][key], emit_signal=False)
+        ui = dict(self.base_ui_settings, **data["ui"])
+        self.base_ui_settings = ui
+        for key, value in ui.items():
+            widget = getattr(self, "editor_zoom_step" if key == "editor_zoom_step_percent" else key, None)
+            if isinstance(widget, QCheckBox):
+                widget.setChecked(value)
+            elif isinstance(widget, QSpinBox):
+                widget.setValue(value)
+        self.language_combo.setCurrentIndex(self.language_combo.findData(ui["language"]))
+        self.update_toolbar_dimension_controls()
+        self.loading = False
+        self.profile_name = Path(path).stem
+        self.profile_dirty = False
+        self.profile_baseline = SettingsProfile.build(self.project_settings(), self.ui_settings())
+        self.emit_preview()
+
+    def save_profile(self):
+        path, _ = QFileDialog.getSaveFileName(self, self.profile_text("Profil speichern", "Save profile"),
+            str(Path(self.profile_directory()) / ((self.profile_name or "Standard") + ".json")), "NeuronNetz (*.json)")
+        if not path:
+            return
+        if not Path(path).suffix:
+            path += ".json"
+            if Path(path).exists() and QMessageBox.question(self, self.profile_text("Überschreiben?", "Overwrite?"), path) != QMessageBox.StandardButton.Yes:
+                return
+        data = SettingsProfile.build(self.project_settings(), self.ui_settings())
+        try:
+            SettingsProfile.write(path, data)
+        except (OSError, ValueError, TypeError) as error:
+            QMessageBox.warning(self, self.profile_text("Profil konnte nicht gespeichert werden", "Could not save profile"), str(error))
+            return
+        self.profile_name = Path(path).stem
+        self.profile_dirty = False
+        self.profile_baseline = data
+        self.update_profile_label()
 
     @staticmethod
     def create_page(title, scope_text):
@@ -766,6 +853,9 @@ class SettingsDialog(QDialog):
     def emit_preview(self, _value=None):
         if self.loading:
             return
+
+        if hasattr(self, "profile_label"):
+            self.update_profile_label()
 
         self.preview_changed.emit(
             self.project_settings(),

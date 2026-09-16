@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.0-beta.05 – 16.09.2026
+
+- add profile storage
+
 ## Unreleased
 
 - Update the tested development runtime to Python 3.14.7 (64-bit), retaining PySide6 6.11.1 and PyInstaller 6.21.0. Document the environment in both README languages. The About dialog already reads the active Python runtime dynamically; existing executables retain their bundled runtime until rebuilt.

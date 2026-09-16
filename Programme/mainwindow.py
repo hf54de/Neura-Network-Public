@@ -2574,9 +2574,7 @@ class MainWindow(QMainWindow):
             mark_as_modified
             and visible != previous_value
         ):
-            self.set_project_modified(
-                True
-            )
+            self.set_project_modified(True)
 
     def apply_display_settings(
         self,
@@ -2633,9 +2631,7 @@ class MainWindow(QMainWindow):
             mark_as_modified
             and self.display_settings != previous_settings
         ):
-            self.set_project_modified(
-                True
-            )
+            self.set_project_modified(True)
 
     def apply_ui_settings(self, ui_settings):
         """Wendet persönliche Programm- und Editoroptionen an."""
@@ -2751,14 +2747,10 @@ class MainWindow(QMainWindow):
             final_ui_settings
         )
 
-        if final_project_settings != previous_project_settings:
-            self.set_project_modified(
-                True
-            )
-
         try:
             Settings.save_ui_settings(final_ui_settings)
         except OSError as error:
+            self.preview_settings(previous_project_settings, previous_ui_settings)
             QMessageBox.warning(
                 self,
                 self.language.text("dialog.settings_save_error.title"),
@@ -2768,6 +2760,9 @@ class MainWindow(QMainWindow):
                 )
             )
             return
+
+        if final_project_settings != previous_project_settings:
+            self.set_project_modified(True)
 
         if (
             final_ui_settings.get("project_directory", "")
@@ -2815,9 +2810,7 @@ class MainWindow(QMainWindow):
             mark_as_modified
             and enabled != previous_value
         ):
-            self.set_project_modified(
-                True
-            )
+            self.set_project_modified(True)
 
     def open_about_dialog(
         self
@@ -10533,9 +10526,7 @@ class MainWindow(QMainWindow):
         self.reset_project()
 
         self.apply_display_settings(
-            project_data[
-                "display_settings"
-            ],
+            project_data["display_settings"],
             mark_as_modified=False
         )
 
