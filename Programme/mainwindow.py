@@ -142,6 +142,7 @@ class MainWindow(QMainWindow):
 
         self.current_object = None
         self.current_project_path = None
+        self.plc_export_options = ProjectIO.normalize_plc_export_options()
         self.project_modified = False
         self.project_description = ""
         self.is_example_project = False
@@ -636,7 +637,7 @@ class MainWindow(QMainWindow):
         )
 
         self.action_graphical_experiment = netzwerk_menu.addAction(
-            text("forward.button.graphical_experiment")
+            text("menu.network.apply")
         )
         self.action_graphical_experiment.triggered.connect(
             self.open_graphical_experiment
@@ -2216,7 +2217,7 @@ class MainWindow(QMainWindow):
                 self.action_graphical_experiment,
                 "graphical_experiment",
                 (
-                    "Anwendungs-\nansicht"
+                    "Anwenden"
                     if self.language.current_language == "de"
                     else "Application\nView"
                 ),
@@ -6737,6 +6738,7 @@ class MainWindow(QMainWindow):
                     parent=self,
                     language_manager=self.language,
                     color_settings=self.display_settings.get("colors", {}),
+                    uncertainty_settings=self.display_settings.get("binary_uncertainty"),
                 )
                 dialog.calculation_updated.connect(
                     lambda: self.show_neuron_properties(
@@ -6870,6 +6872,7 @@ class MainWindow(QMainWindow):
                 input_array=self.training_data_manager.document.get("input_array"),
                 color_settings=self.display_settings.get("colors", {}),
                 initial_input_values=initial_values,
+                uncertainty_settings=self.display_settings.get("binary_uncertainty"),
                 language_manager=self.language,
                 parent=self,
             )
@@ -6966,6 +6969,8 @@ class MainWindow(QMainWindow):
                 self.scene.network, _records, input_mappings, output_mappings
             )
             def build_export(export_options=None, model_version=""):
+                limits = self.display_settings.get("binary_uncertainty", {"lower": 0.3, "upper": 0.7})
+                export_options = dict(export_options or {}, uncertainty_lower=limits["lower"], uncertainty_upper=limits["upper"])
                 if iec_xml:
                     selected_generator = generator_class or Iec61131ExportGenerator
                 else:
@@ -6986,15 +6991,26 @@ class MainWindow(QMainWindow):
                 data["export_options"] = dict(export_options or {})
                 return data
 
-            export_data = build_export()
+            export_data = build_export(self.plc_export_options)
             dialog_class = XmlExportDialog if iec_xml else SpsExportDialog
-            dialog_class(
+            dialog = dialog_class(
                 export_data,
+                compact_open=self.ui_settings.get("export_window_compact", True),
                 language_code=self.language.current_language,
                 parent=self,
-            ).exec()
+            )
+            dialog.settings_panel.optionsChanged.connect(
+                lambda _options: self.update_plc_export_options(dialog.settings_panel.export_options())
+            )
+            dialog.exec()
         except (KeyError, TypeError, ValueError) as error:
             QMessageBox.warning(self, title, str(error))
+
+    def update_plc_export_options(self, options):
+        normalized = ProjectIO.normalize_plc_export_options(options)
+        if normalized != self.plc_export_options:
+            self.plc_export_options = normalized
+            self.set_project_modified(True)
 
     def confirm_sps_export_responsibility(self):
         """Zeigt den Verantwortungshinweis einmalig vor dem ersten SPS-Export."""
@@ -8729,6 +8745,7 @@ class MainWindow(QMainWindow):
                 self.training_history
             ),
             "active_training_run_id": self.active_training_run_id,
+            "plc_export_options": dict(self.plc_export_options),
             "analysis_tolerances": deepcopy(self.analysis_tolerances),
             "display_settings": deepcopy(
                 self.display_settings
@@ -8778,6 +8795,7 @@ class MainWindow(QMainWindow):
         try:
             self.scene.clearSelection()
             self.scene.clear_project()
+            self.plc_export_options = ProjectIO.normalize_plc_export_options(snapshot.get("plc_export_options"))
 
             self.apply_display_settings(
                 snapshot.get(
@@ -9428,6 +9446,7 @@ class MainWindow(QMainWindow):
         self.training_history = []
         self.active_training_run_id = None
         self.analysis_tolerances = {}
+        self.plc_export_options = ProjectIO.normalize_plc_export_options()
         self.project_description = ""
         self.is_example_project = False
         self.example_difficulty = None
@@ -10525,6 +10544,7 @@ class MainWindow(QMainWindow):
 
         self.reset_project()
 
+        self.plc_export_options = ProjectIO.normalize_plc_export_options(project_data.get("plc_export_options"))
         self.apply_display_settings(
             project_data["display_settings"],
             mark_as_modified=False
@@ -11138,6 +11158,7 @@ class MainWindow(QMainWindow):
                 ),
                 training_settings=self.training_settings,
                 display_settings=self.display_settings,
+                plc_export_options=self.plc_export_options,
                 training_history=self.training_history,
                 active_training_run_id=self.active_training_run_id,
                 momentum_state=self.scene.network.get_momentum_state(),

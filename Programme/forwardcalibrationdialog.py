@@ -62,12 +62,17 @@ class CompactDoubleSpinBox(QDoubleSpinBox):
         return text
 
 
+from binarystatecolors import state_palette
+from binaryuncertainty import normalize_limits, is_uncertain, warning_style, warning_text
+
+
 class BinaryToggleButton(QPushButton):
     """Ruhiger, eindeutig beschrifteter Ein-/Aus-Schalter."""
 
-    def __init__(self, language, checked=False, parent=None):
+    def __init__(self, language, checked=False, parent=None, color_settings=None):
         super().__init__(parent)
         self.language = language
+        self.color_settings = dict(color_settings or {})
         self.setCheckable(True)
         self.setFixedHeight(20)
         self.setSizePolicy(
@@ -87,11 +92,11 @@ class BinaryToggleButton(QPushButton):
             "QPushButton { padding: 2px 10px; border-radius: 5px; "
             "border: 1px solid %s; background: %s; color: %s; "
             "font-weight: 600; } QPushButton:hover { border-color: #4f788f; }"
-            % (
+            % state_palette(self.color_settings, checked, (
                 "#31834a" if checked else "#8c969f",
                 "#dff3e4" if checked else "#eef1f3",
                 "#185f30" if checked else "#46515a"
-            )
+            ))
         )
 
     def numeric_value(self):
@@ -101,9 +106,10 @@ class BinaryToggleButton(QPushButton):
 class BinaryStateLabel(QLabel):
     """Nicht bedienbare binäre Ergebnisanzeige."""
 
-    def __init__(self, language, parent=None):
+    def __init__(self, language, parent=None, color_settings=None):
         super().__init__(parent)
         self.language = language
+        self.color_settings = dict(color_settings or {})
         self.setMinimumWidth(105)
         self.setFixedHeight(18)
         self.setSizePolicy(
@@ -113,7 +119,7 @@ class BinaryStateLabel(QLabel):
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.set_state(False)
 
-    def set_state(self, state):
+    def set_state(self, state, uncertain=False, tooltip=""):
         state = bool(state)
         self.setText(
             ("● " if state else "○ ")
@@ -123,12 +129,17 @@ class BinaryStateLabel(QLabel):
             "QLabel { padding: 1px 6px; border-radius: 4px; "
             "border: 1px solid %s; background: %s; color: %s; "
             "font-weight: 600; }"
-            % (
+            % state_palette(self.color_settings, state, (
                 "#31834a" if state else "#8c969f",
                 "#dff3e4" if state else "#eef1f3",
                 "#185f30" if state else "#46515a"
-            )
+            ))
         )
+        self.setToolTip(tooltip if uncertain else "")
+        if uncertain:
+            self.setText("⚠ " + self.language.text("binary.on" if state else "binary.off") +
+                         (" · Unklar" if self.language.current_language == "de" else " · Uncertain"))
+            self.setStyleSheet(warning_style(self.color_settings))
 
 
 class BinaryArrayPaintController(QObject):
@@ -263,11 +274,13 @@ class ForwardCalibrationDialog(QDialog):
         parent=None,
         language_manager=None,
         color_settings=None,
+        uncertainty_settings=None,
     ):
         super().__init__(parent)
 
         self.language = language_manager or LanguageManager()
         self.color_settings = dict(color_settings or {})
+        self.uncertainty_settings = normalize_limits(uncertainty_settings)
         self.network = network
         self.input_columns = input_columns
         self.output_columns = output_columns
@@ -380,7 +393,7 @@ class ForwardCalibrationDialog(QDialog):
 
             if is_binary:
                 input_widget = BinaryToggleButton(
-                    self.language, raw_value > 0.5
+                    self.language, raw_value > 0.5, color_settings=self.color_settings
                 )
                 minimum, maximum = 0.0, 1.0
                 experimental_widget = CompactDoubleSpinBox()
@@ -554,7 +567,7 @@ class ForwardCalibrationDialog(QDialog):
             calibration_label = QLabel(
                 self.format_calibration(mapping["calibration"])
             )
-            state_label = BinaryStateLabel(self.language) if is_binary else None
+            state_label = BinaryStateLabel(self.language, color_settings=self.color_settings) if is_binary else None
             output_bar = AnalogOutputBar(
                 self.language, minimum, maximum
             )
@@ -1314,6 +1327,7 @@ class ForwardCalibrationDialog(QDialog):
             input_array=self.input_array,
             color_settings=self.color_settings,
             initial_input_values=initial_values,
+            uncertainty_settings=self.uncertainty_settings,
             language_manager=self.language,
             parent=self,
         )
@@ -1489,17 +1503,21 @@ class ForwardCalibrationDialog(QDialog):
                     )
                 )
                 if widget_data["is_binary"]:
+                    uncertain = is_uncertain(internal_value, self.uncertainty_settings)
+                    tooltip = warning_text(self.uncertainty_settings, self.language.current_language == "de")
                     widget_data["state_label"].set_state(
-                        internal_value > 0.5
+                        internal_value > 0.5, uncertain, tooltip
                     )
-                    active = internal_value >= 0.5
-                    widget_data["quality_led"].setStyleSheet(
-                        "QLabel { background:%s; border:1px solid %s; "
-                        "border-radius:7px; }" % (
-                            "#00c853" if active else "#d91e18",
-                            "#008c3a" if active else "#9f1612",
-                        )
-                    )
+                    active = internal_value > 0.5
+                    border, background, _ = state_palette(self.color_settings, active,
+                        ("#008c3a", "#00c853", "") if active else ("#9f1612", "#d91e18", ""))
+                    widget_data["quality_led"].setStyleSheet(f"background:{background}; border:1px solid {border}; border-radius:7px;")
+                    for label in (widget_data["internal_label"], widget_data["raw_label"]):
+                        label.setStyleSheet(warning_style(self.color_settings) if uncertain else "")
+                        label.setToolTip(tooltip if uncertain else "")
+                    if uncertain:
+                        widget_data["quality_led"].setStyleSheet(warning_style(self.color_settings))
+                    widget_data["quality_led"].setToolTip(tooltip if uncertain else "")
                 widget_data["output_bar"].set_result(raw_value)
                 mapping["neuron"].set_external_output_values(
                     actual_value=raw_value,

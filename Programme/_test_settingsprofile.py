@@ -119,6 +119,7 @@ class ProfileTests(unittest.TestCase):
         display["colors"]["canvas_background"] = "#123456"
         display["colors"]["negative_weight"] = "#abcdef"
         display["show_ports"] = False
+        display["binary_uncertainty"] = {"lower": .4, "upper": .6}
         profile = self.root / "Test.json"
         SettingsProfile.write(profile, SettingsProfile.build(display, Settings.default_ui_settings()))
         def load(dialog):
@@ -153,6 +154,43 @@ class ProfileTests(unittest.TestCase):
         restarted = MainWindow()
         self.assertEqual(restarted.display_settings, ProjectIO.default_display_settings())
         restarted.deleteLater()
+        window.deleteLater()
+
+    def test_project_export_options_roundtrip(self):
+        from mainwindow import MainWindow
+        from plcexportsettings import PlcExportSettingsPanel
+        window = MainWindow()
+        project = Path(__file__).parent / "dist" / "Projects_en" / "AND 01" / "AND 01.nnproj"
+        self.assertTrue(window.open_project(str(project)))
+        defaults = ProjectIO.normalize_plc_export_options()
+        self.assertEqual(window.plc_export_options, defaults)
+        before = window.capture_editor_snapshot()
+        selected = dict(defaults, enable=True, enable_out=True, binary_uncertainty=True,
+                        network_active=False, pruning_enabled=True, pruning_threshold=0.025)
+        window.update_plc_export_options(selected)
+        self.assertTrue(window.project_modified)
+        after = window.capture_editor_snapshot()
+        window.restore_editor_snapshot(before)
+        self.assertEqual(window.plc_export_options, defaults)
+        window.restore_editor_snapshot(after)
+        self.assertEqual(window.plc_export_options, selected)
+        saved = self.root / "ExportOptions.nnproj"
+        self.assertTrue(window.write_project_file(str(saved), data_file_paths={
+            "training": window.training_data_manager.file_path, "test": window.test_data_manager.file_path}))
+        self.assertEqual(ProjectIO.load_project(saved)["plc_export_options"], selected)
+        window.reset_project()
+        self.assertEqual(window.plc_export_options, defaults)
+        self.assertTrue(window.open_project(str(saved)))
+        self.assertEqual(window.plc_export_options, selected)
+        panel = PlcExportSettingsPanel("FB_Test", "1")
+        panel.set_export_options(window.plc_export_options)
+        self.assertTrue(panel.enable_out.isChecked())
+        self.assertTrue(panel.binary_uncertainty.isChecked())
+        self.assertFalse(panel.network_active.isChecked())
+        self.assertEqual(panel.pruning_threshold.value(), 0.025)
+        self.assertTrue(window.open_project(str(project)))
+        self.assertEqual(window.plc_export_options, defaults)
+        self.assertNotIn("plc_export_options", SettingsProfile.build(window.display_settings, window.ui_settings))
         window.deleteLater()
 
     @unittest.skipUnless(os.name == "nt", "Windows release batch")

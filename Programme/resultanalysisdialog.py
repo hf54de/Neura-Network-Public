@@ -84,7 +84,8 @@ class ResultAnalysisDialog(QDialog):
         for source in self.sources:
             self.source_combo.addItem(source["label"], source)
         selector_layout.addWidget(self.source_combo, 1)
-        selector_layout.addWidget(QLabel(self.t("analysis.output_selector")))
+        self.output_selector_label = QLabel(self.t("analysis.output_selector"))
+        selector_layout.addWidget(self.output_selector_label)
         self.output_combo = QComboBox()
         selector_layout.addWidget(self.output_combo, 1)
         layout.addLayout(selector_layout)
@@ -98,7 +99,13 @@ class ResultAnalysisDialog(QDialog):
         layout.addWidget(self.source_note)
 
         information_layout = QHBoxLayout()
-        information_layout.addStretch(1)
+        self.output_legend = QLabel()
+        self.output_legend.setWordWrap(True)
+        legend_policy = self.output_legend.sizePolicy()
+        legend_policy.setRetainSizeWhenHidden(True)
+        self.output_legend.setSizePolicy(legend_policy)
+        self.output_legend.hide()
+        information_layout.addWidget(self.output_legend, 1)
         self.info_button = QPushButton("i", self)
         self.info_button.setFixedSize(26, 24)
         self.info_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -200,9 +207,8 @@ class ResultAnalysisDialog(QDialog):
             self.update_plot_tolerance
         )
         plot_tolerance_controls.addWidget(self.show_tolerance_checkbox)
-        plot_tolerance_controls.addWidget(
-            QLabel(self.t("analysis.plot.tolerance_label"))
-        )
+        self.plot_tolerance_label = QLabel(self.t("analysis.plot.tolerance_label"))
+        plot_tolerance_controls.addWidget(self.plot_tolerance_label)
         self.plot_tolerance_spin = QDoubleSpinBox()
         self.plot_tolerance_spin.setDecimals(6)
         self.plot_tolerance_spin.setRange(0.0, 1_000_000_000.0)
@@ -240,12 +246,18 @@ class ResultAnalysisDialog(QDialog):
         self.plot_show_all_button.clicked.connect(self.plot.reset_view)
         self.plot.recordActivated.connect(self.open_plot_record)
         plot_layout.addWidget(self.plot, 1)
+        for widget in (self.plot_tolerance_label, self.plot_tolerance_spin,
+                       self.plot_tolerance_mode, self.show_tolerance_checkbox):
+            policy = widget.sizePolicy()
+            policy.setRetainSizeWhenHidden(True)
+            widget.setSizePolicy(policy)
         self.tabs.addTab(self.plot_tab, self.t("analysis.tab.plot"))
 
         self.tolerance_tab = QWidget()
         tolerance_layout = QVBoxLayout(self.tolerance_tab)
         tolerance_controls = QHBoxLayout()
-        tolerance_controls.addWidget(QLabel(self.t("analysis.tolerance.label")))
+        self.tolerance_controls_label = QLabel(self.t("analysis.tolerance.label"))
+        tolerance_controls.addWidget(self.tolerance_controls_label)
         self.tolerance_spin = QDoubleSpinBox()
         self.tolerance_spin.setDecimals(6)
         self.tolerance_spin.setRange(0.0, 1_000_000_000.0)
@@ -359,7 +371,10 @@ class ResultAnalysisDialog(QDialog):
         )
 
     def current_source(self):
-        return self.source_combo.currentData()
+        # QVariant may return a fresh dict on every access; use the stable source
+        # object so cached analyses survive output and tab changes.
+        index = self.source_combo.currentIndex()
+        return self.sources[index] if 0 <= index < len(self.sources) else None
 
     def selected_output_mapping(self):
         neuron_id = self.output_combo.currentData()
@@ -386,21 +401,30 @@ class ResultAnalysisDialog(QDialog):
         index = self.output_combo.findData(previous)
         self.output_combo.setCurrentIndex(index if index >= 0 else 0)
         self.output_combo.blockSignals(False)
+        self.update_output_selection_options()
+
+    def update_output_selection_options(self):
+        tab = self.tabs.currentIndex()
+        self.output_combo.setVisible(tab != 0)
+        self.output_selector_label.setVisible(tab != 0)
+        if self.output_combo.count():
+            specific = tab in (3, 4)
+            self.output_combo.model().item(0).setEnabled(not specific)
+            self.output_combo.view().setRowHidden(0, specific)
+            if specific:
+                self.ensure_specific_output()
 
     def ensure_specific_output(self):
         if self.output_combo.currentData() is None and self.output_combo.count() > 1:
             self.output_combo.setCurrentIndex(1)
 
     def tab_changed(self, index):
-        if index in (2, 3, 4):
-            self.ensure_specific_output()
+        self.update_output_selection_options()
         self.refresh_plot_and_tolerance()
         if index == 4:
             self.refresh_sensitivity()
 
     def output_changed(self, index=None):
-        if self.tabs.currentIndex() in (2, 3, 4):
-            self.ensure_specific_output()
         self.refresh_overview_tables()
         self.refresh_plot_and_tolerance()
         self.refresh_sensitivity()
@@ -558,11 +582,9 @@ class ResultAnalysisDialog(QDialog):
         source = self.current_source()
         if not source:
             return
-        self.populate_output_combo()
         self.current_result = self.calculate(source)
+        self.populate_output_combo()
         self.results_by_source[id(source)] = self.current_result
-        if self.tabs.currentIndex() in (2, 3, 4):
-            self.ensure_specific_output()
         self.tabs.setTabText(
             0,
             self.t(
@@ -582,23 +604,32 @@ class ResultAnalysisDialog(QDialog):
             return
         source = self.current_source()
         mapping = self.selected_output_mapping()
-        if source is None or mapping is None:
+        if source is None:
             self.sensitivity_plot.set_values([])
             return
-        cache_key = (id(source), int(mapping["neuron"].id))
+        if mapping is None:
+            self.sensitivity_plot.set_values([])
+            return
+        cache_key = (id(source), int(mapping['neuron'].id))
         if cache_key not in self.sensitivity_cache:
-            self.sensitivity_cache[cache_key] = self.calculate_sensitivity(
-                source, mapping
-            )
-        self.sensitivity_plot.set_values(self.sensitivity_cache[cache_key])
+            values = self.calculate_all_sensitivities(source)
+            for neuron_id, result in values.items():
+                self.sensitivity_cache[(id(source), neuron_id)] = result
+        values = self.sensitivity_cache[cache_key]
+        self.sensitivity_plot.set_values(sorted(values, key=lambda item: item[1], reverse=True))
 
     def calculate_sensitivity(self, source, output_mapping):
+        values = self.calculate_all_sensitivities(source)[int(output_mapping['neuron'].id)]
+        return sorted(values, key=lambda item: item[1], reverse=True)
+
+    def calculate_all_sensitivities(self, source):
         """Schätzt den mittleren lokalen Einfluss jedes Inputs per Vorwärtslauf."""
         snapshots = {
             neuron: self.neuron_runtime_snapshot(neuron)
             for neuron in self.network.get_neurons()
         }
-        effects = []
+        outputs = source['outputs']
+        effects = {int(m['neuron'].id): [] for m in outputs}
         try:
             for input_mapping in source["inputs"]:
                 values = [
@@ -613,7 +644,7 @@ class ResultAnalysisDialog(QDialog):
                     calibration["source_max"] - calibration["source_min"]
                 )
                 step = max(observed_range, configured_range, 1.0) * 0.01
-                total_effect = 0.0
+                total_effect = {int(m['neuron'].id): 0.0 for m in outputs}
                 for record in source["records"]:
                     self.network.reset_runtime_values()
                     for current in source["inputs"]:
@@ -622,11 +653,9 @@ class ResultAnalysisDialog(QDialog):
                             raw_value, current["calibration"], translator=self.t
                         )
                     self.network.forward_pass()
-                    baseline = TrainingDataIO.unscale_value(
-                        output_mapping["neuron"].output_value,
-                        output_mapping["calibration"],
-                        translator=self.t,
-                    )
+                    baseline = {int(m['neuron'].id): TrainingDataIO.unscale_value(
+                        m['neuron'].output_value, m['calibration'], translator=self.t)
+                        for m in outputs}
                     raw_value = float(record[input_mapping["column_index"]])
                     if input_mapping.get("data_type") == "binary":
                         changed_value = 0.0 if raw_value > 0.5 else 1.0
@@ -638,27 +667,22 @@ class ResultAnalysisDialog(QDialog):
                         translator=self.t,
                     )
                     self.network.forward_pass()
-                    changed = TrainingDataIO.unscale_value(
-                        output_mapping["neuron"].output_value,
-                        output_mapping["calibration"],
-                        translator=self.t,
-                    )
-                    total_effect += abs(changed - baseline)
-                effects.append((
-                    input_mapping["column_name"],
-                    total_effect / max(1, len(source["records"])),
-                ))
+                    for m in outputs:
+                        neuron_id = int(m['neuron'].id)
+                        changed = TrainingDataIO.unscale_value(m['neuron'].output_value, m['calibration'], translator=self.t)
+                        total_effect[neuron_id] += abs(changed - baseline[neuron_id])
+                for neuron_id in effects:
+                    effects[neuron_id].append((input_mapping['column_name'], total_effect[neuron_id] / max(1, len(source['records']))))
         finally:
             for neuron, values in snapshots.items():
                 for name, value in values.items():
                     setattr(neuron, name, value)
                 neuron.update()
-        total = sum(value for _name, value in effects)
-        normalized = [
-            (name, value / total * 100.0 if total else 0.0)
-            for name, value in effects
-        ]
-        return sorted(normalized, key=lambda item: item[1], reverse=True)
+        normalized = {}
+        for neuron_id, values in effects.items():
+            total = sum(value for _name, value in values)
+            normalized[neuron_id] = [(name, value / total * 100.0 if total else 0.0) for name, value in values]
+        return normalized
 
     def refresh_overview_tables(self):
         source = self.source_combo.currentData()
@@ -920,6 +944,28 @@ class ResultAnalysisDialog(QDialog):
             )
         )
 
+    def refresh_combined_plot(self):
+        source = self.current_source()
+        outputs = source['outputs'] if source else []
+        colors = {m['neuron'].id: QColor.fromHsv((i * 137) % 360, 190, 185).name()
+                  for i, m in enumerate(outputs)}
+        legend = []
+        for m in outputs:
+            unit = str(m.get('unit') or '')
+            title = m['column_name'] + (f' (in {unit})' if unit else '')
+            legend.append(f'<span style="color:{colors[m["neuron"].id]}">●</span> {escape(title)}')
+        self.output_legend.setText(' &nbsp; &nbsp; '.join(legend))
+        rows = [dict(row, plot_color=colors[row['neuron_id']],
+                     source_kind=source.get('kind', 'data'), source_label=source.get('label', ''))
+                for row in (self.current_result or {}).get('rows', [])]
+        self.plot.set_rows(rows)
+        self.plot.set_tolerance(0, False)
+        german = self.language.current_language == 'de'
+        self.plot_explanation.setText(
+            'Alle Ausgänge in einem Diagramm. Die Farben kennzeichnen die Ausgänge; Einheiten stehen in der Legende. Ein Klick auf einen Punkt öffnet den Datensatz.'
+            if german else
+            'All outputs in one plot. Colors identify outputs; units are shown in the legend. Click a point to open its record.')
+
     def rows_for_selected_output(self):
         mapping = self.selected_output_mapping()
         if mapping is None or not self.current_result:
@@ -933,6 +979,14 @@ class ResultAnalysisDialog(QDialog):
         )
 
     def refresh_plot_and_tolerance(self):
+        all_outputs = self.output_combo.currentData() is None
+        self.output_legend.setVisible(all_outputs and self.tabs.currentIndex() == 2)
+        for widget in (self.plot_tolerance_label, self.plot_tolerance_spin,
+                       self.plot_tolerance_mode, self.show_tolerance_checkbox):
+            widget.setVisible(not all_outputs)
+        if all_outputs:
+            self.refresh_combined_plot()
+            return
         rows, mapping = self.rows_for_selected_output()
         if mapping is None:
             self.plot.set_rows([])
@@ -1002,7 +1056,12 @@ class ResultAnalysisDialog(QDialog):
         percent = self.plot_tolerance_mode.currentData() in ("percent", "range_percent")
         key = self.tolerance_key(mapping)
         self.plot_tolerance_spin.blockSignals(True)
-        self.plot_tolerance_spin.setSuffix(" %" if percent else (" " + mapping.get("unit", "") if mapping.get("unit") else ""))
+        unit = str(mapping.get("unit") or "").strip()
+        name = mapping["column_name"]
+        context = f"{name} in {unit}" if unit else name
+        label = self.t("analysis.plot.tolerance_label").rstrip().rstrip(":")
+        self.plot_tolerance_label.setText(f"{label} ({context}):")
+        self.plot_tolerance_spin.setSuffix(" %" if percent else "")
         self.plot_tolerance_spin.setValue(self.plot_percent_values.get(key, 5.0) if percent else self.tolerances.get(key, 0.0))
         self.plot_tolerance_spin.blockSignals(False)
         self.update_plot_tolerance()

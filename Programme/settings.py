@@ -557,6 +557,7 @@ class Settings:
             "show_project_menu_previews": True,
             "show_project_assistant": True,
             "show_sps_export": True,
+            "export_window_compact": True,
             "project_directory": "",
             "editor_scene_margin": 100,
             "editor_zoom_step_percent": 15
@@ -665,6 +666,9 @@ class Settings:
         show_sps_export = ui_settings.get("show_sps_export")
         if isinstance(show_sps_export, bool):
             normalized["show_sps_export"] = show_sps_export
+
+        if isinstance(ui_settings.get("export_window_compact"), bool):
+            normalized["export_window_compact"] = ui_settings["export_window_compact"]
 
         project_directory = ui_settings.get("project_directory")
         if isinstance(project_directory, str):

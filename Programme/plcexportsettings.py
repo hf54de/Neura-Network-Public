@@ -91,14 +91,19 @@ class PlcExportSettingsPanel(QGroupBox):
     connectionHelpRequested = Signal()
 
     DEFAULTS = {
-        "enable": True,
-        "network_active": True,
-        "range_check": True,
-        "range_tolerance_input": True,
-        "range_error": True,
-        "invalid_input_number": True,
-        "fallback": True,
-        "hold_last_output": True,
+        "enable": False,
+        "enable_out": False,
+        "binary_uncertainty": False,
+        "uncertain_output_number": False,
+        "uncertainty_lower": 0.3,
+        "uncertainty_upper": 0.7,
+        "network_active": False,
+        "range_check": False,
+        "range_tolerance_input": False,
+        "range_error": False,
+        "invalid_input_number": False,
+        "fallback": False,
+        "hold_last_output": False,
         "pruning_enabled": False,
         "pruning_threshold": 0.001,
     }
@@ -109,7 +114,7 @@ class PlcExportSettingsPanel(QGroupBox):
         self._updating = False
         outer = QVBoxLayout(self)
         outer.setContentsMargins(7, 5, 7, 5)
-        outer.setSpacing(2)
+        outer.setSpacing(7)
         fields = QGridLayout()
         fields.setContentsMargins(0, 0, 0, 0)
         fields.setHorizontalSpacing(6)
@@ -179,19 +184,25 @@ class PlcExportSettingsPanel(QGroupBox):
             "QPushButton:hover { background: #f0f2f4; }"
         )
         self.connections_info_button.setToolTip(
-            "Zusatzanschlüsse und FB-Darstellung erklären" if german else
-            "Explain additional connections and FB representation"
+            "Optionen und FB-Darstellung erklären" if german else
+            "Explain options and FB representation"
         )
         self.connections_info_button.clicked.connect(self.connectionHelpRequested.emit)
         options_header.addWidget(self.connections_info_button)
         outer.addLayout(options_header)
 
-        self.options_widget = QWidget(self)
+        self.options_content = QWidget(self)
+        option_body = QVBoxLayout(self.options_content)
+        option_body.setContentsMargins(0, 0, 0, 0)
+        option_body.setSpacing(1)
+        outer.addWidget(self.options_content)
+        self.options_widget = QWidget(self.options_content)
         options = QGridLayout(self.options_widget)
-        options.setContentsMargins(15, 0, 0, 0)
+        options.setContentsMargins(15, 0, 15, 0)
         options.setHorizontalSpacing(12)
-        options.setVerticalSpacing(5)
+        options.setVerticalSpacing(1)
         self.enable = self._check("Enable", "enable")
+        self.enable_out = self._check("Enable_Out", "enable_out")
         self.network_active = self._check("Network_Active", "network_active")
         self.range_check = self._check("Enable_Range_Check", "range_check")
         self.range_tolerance = self._check("Range_Tolerance_Percent", "range_tolerance_input")
@@ -199,34 +210,69 @@ class PlcExportSettingsPanel(QGroupBox):
         self.invalid_number = self._check("Invalid_Input_Number", "invalid_input_number")
         self.fallback = self._check("Fallback_<Ausgang>" if german else "Fallback_<output>", "fallback")
         self.hold_last = self._check("Hold_Last_Output", "hold_last_output")
+        for widget, name, explanation in (
+            (self.enable, "Enable", "Gibt die Netzberechnung frei."),
+            (self.enable_out, "Enable_Out", "Gibt die Freigabe unverändert weiter."),
+            (self.network_active, "Network_Active", "Optionaler Informationsausgang: TRUE bei ausgeführter Berechnung. Unabhängig von der Unklarheitsprüfung wählbar. Das Häkchen fügt den Anschluss hinzu, setzt aber nicht seinen SPS-Wert."),
+            (self.range_check, "Enable_Range_Check", "Schaltet die Prüfung der Eingangsbereiche frei."),
+            (self.range_tolerance, "Range_Tolerance_Percent", "Zusätzlicher Eingang für die zulässige Toleranz in Prozent."),
+            (self.range_error, "Input_Range_Error", "Meldet eine Überschreitung des zulässigen Eingangsbereichs."),
+            (self.invalid_number, "Invalid_Input_Number", "Gibt die Nummer des ersten ungültigen Eingangs aus."),
+            (self.fallback, "Fallback_<Ausgang>", "Zusätzliche Eingänge für Ersatzwerte der Ausgänge."),
+            (self.hold_last, "Hold_Last_Output", "Hält bei gesperrter Berechnung die zuletzt ausgegebenen Werte."),
+        ):
+            widget.setToolTip(f"{name}: {explanation}" if german else name)
+        if not german:
+            self.network_active.setToolTip("Network_Active: Optional calculation status output, independent of uncertainty checking. Selecting this option adds the output; it does not set its PLC value.")
         input_title = QLabel("Eingangsoptionen" if german else "Input options", self.options_widget)
         output_title = QLabel("Ausgangsoptionen" if german else "Output options", self.options_widget)
         title_style = "font-weight: 600; color: #394b59;"
         input_title.setStyleSheet(title_style)
         output_title.setStyleSheet(title_style)
-        options.addWidget(input_title, 0, 0, 1, 2)
-        options.addWidget(output_title, 0, 3)
-
-        options.addWidget(self.enable, 1, 0)
-        options.addWidget(self.hold_last, 1, 1)
-        options.addWidget(self.range_check, 2, 0)
-        options.addWidget(self.fallback, 2, 1)
-        options.addWidget(self.range_tolerance, 3, 0)
-
-        separator = QFrame(self.options_widget)
-        separator.setFrameShape(QFrame.Shape.VLine)
-        separator.setFrameShadow(QFrame.Shadow.Sunken)
-        separator.setStyleSheet("color: #c7cdd3;")
-        options.addWidget(separator, 0, 2, 4, 1)
-        options.setColumnMinimumWidth(2, 55)
-
-        options.addWidget(self.network_active, 1, 3)
-        options.addWidget(self.range_error, 2, 3)
-        options.addWidget(self.invalid_number, 3, 3)
-        options.setColumnStretch(0, 1)
-        options.setColumnStretch(1, 1)
-        options.setColumnStretch(3, 1)
-        outer.addWidget(self.options_widget)
+        inputs = QGridLayout()
+        outputs = QGridLayout()
+        for grid in (inputs, outputs):
+            grid.setContentsMargins(0, 0, 0, 0)
+            grid.setHorizontalSpacing(12)
+            grid.setVerticalSpacing(1)
+            grid.setColumnStretch(0, 1)
+            grid.setColumnStretch(1, 1)
+        inputs.addWidget(input_title, 0, 0, 1, 2)
+        outputs.addWidget(output_title, 0, 0, 1, 2)
+        inputs.addWidget(self.enable, 1, 0)
+        inputs.addWidget(self.hold_last, 1, 1)
+        inputs.addWidget(self.range_check, 2, 0)
+        inputs.addWidget(self.fallback, 2, 1)
+        inputs.addWidget(self.range_tolerance, 3, 0)
+        outputs.addWidget(self.network_active, 1, 0)
+        outputs.addWidget(self.range_error, 2, 0)
+        outputs.addWidget(self.invalid_number, 3, 0)
+        outputs.addWidget(self.enable_out, 1, 1)
+        self.uncertainty_lower = 0.3
+        self.uncertainty_upper = 0.7
+        self.binary_uncertainty = self._check("Binary_Output_Uncertain", "binary_uncertainty")
+        self.binary_uncertainty.setToolTip(
+            "Prüft binäre Ausgänge auf Unklarheit. TRUE meldet mindestens einen Ausgang innerhalb der Projektgrenzen unter Einstellungen → SPS-Export → Binäre Ausgänge."
+            if german else "Checks binary outputs for uncertainty. TRUE indicates at least one output within the project uncertainty limits in Settings → PLC Export → Binary outputs.")
+        self.uncertain_output_number = self._check("Uncertain_Output_Number", "uncertain_output_number")
+        self.uncertain_output_number.setToolTip(
+            "Uncertain_Output_Number: Nummer des ersten unklaren Ausgangs; 0 bedeutet keiner."
+            if german else "Uncertain_Output_Number: Number of the first uncertain output; 0 means none.")
+        inputs.addWidget(self.binary_uncertainty, 4, 0, 1, 2)
+        outputs.addWidget(self.uncertain_output_number, 2, 1)
+        self.separator = QFrame(self.options_widget)
+        self.separator.setFrameShape(QFrame.Shape.VLine)
+        self.separator.setFrameShadow(QFrame.Shadow.Sunken)
+        self.separator.setStyleSheet("color: #c7cdd3;")
+        options.addLayout(inputs, 0, 0)
+        options.addWidget(self.separator, 0, 1)
+        options.addLayout(outputs, 0, 2)
+        # Equal minima and stretch keep the divider centred at every width.
+        half_width = max(inputs.minimumSize().width(), outputs.minimumSize().width())
+        for column in (0, 2):
+            options.setColumnMinimumWidth(column, half_width)
+            options.setColumnStretch(column, 1)
+        option_body.addWidget(self.options_widget)
         pruning_row = QHBoxLayout()
         pruning_row.setContentsMargins(15, 0, 0, 0)
         self.pruning = self._check(
@@ -258,7 +304,19 @@ class PlcExportSettingsPanel(QGroupBox):
         )
         pruning_row.addWidget(self.auto_prune_button)
         pruning_row.addStretch(1)
-        outer.addLayout(pruning_row)
+        row_height = max(self.pruning_threshold.sizeHint().height(), self.auto_prune_button.sizeHint().height(), self.enable.sizeHint().height())
+        for grid in (inputs, outputs):
+            for row in range(1, 5):
+                grid.setRowMinimumHeight(row, row_height)
+        output_last_row = QWidget(self.options_widget)
+        output_last_row.setFixedHeight(row_height)
+        outputs.addWidget(output_last_row, 4, 0, 1, 2)
+        for checkbox in (self.enable, self.enable_out, self.network_active,
+                         self.range_check, self.range_tolerance, self.range_error,
+                         self.invalid_number, self.fallback, self.hold_last,
+                         self.binary_uncertainty, self.uncertain_output_number, self.pruning):
+            checkbox.setFixedHeight(row_height)
+        option_body.addLayout(pruning_row)
         pruning_hint = QLabel(
             "Entfernt kleine Gewichte nur im Export. Kann Ergebnisse verändern; "
             "das gespeicherte Netz bleibt unverändert."
@@ -267,7 +325,7 @@ class PlcExportSettingsPanel(QGroupBox):
             "the saved network remains unchanged.", self
         )
         pruning_hint.setWordWrap(True)
-        outer.addWidget(pruning_hint)
+        option_body.addWidget(pruning_hint)
         self.options_widget.setVisible(True)
         self._apply_dependencies(emit=False)
 
@@ -284,7 +342,12 @@ class PlcExportSettingsPanel(QGroupBox):
             "pruning_enabled": self.pruning.isChecked(),
             "pruning_threshold": self.pruning_threshold.value(),
             "enable": self.enable.isChecked(),
-            "network_active": trigger and self.network_active.isChecked(),
+            "enable_out": self.enable.isChecked() and self.enable_out.isChecked(),
+            "binary_uncertainty": self.binary_uncertainty.isChecked(),
+            "uncertain_output_number": self.binary_uncertainty.isChecked() and self.uncertain_output_number.isChecked(),
+            "uncertainty_lower": self.uncertainty_lower,
+            "uncertainty_upper": self.uncertainty_upper,
+            "network_active": self.network_active.isChecked(),
             "range_check": self.range_check.isChecked(),
             "range_tolerance_input": self.range_check.isChecked() and self.range_tolerance.isChecked(),
             "range_error": self.range_check.isChecked() and self.range_error.isChecked(),
@@ -299,6 +362,9 @@ class PlcExportSettingsPanel(QGroupBox):
         self._updating = True
         for widget, key in (
             (self.enable, "enable"), (self.network_active, "network_active"),
+            (self.enable_out, "enable_out"),
+            (self.binary_uncertainty, "binary_uncertainty"),
+            (self.uncertain_output_number, "uncertain_output_number"),
             (self.range_check, "range_check"), (self.range_tolerance, "range_tolerance_input"),
             (self.range_error, "range_error"), (self.invalid_number, "invalid_input_number"),
             (self.fallback, "fallback"), (self.hold_last, "hold_last_output"),
@@ -306,6 +372,8 @@ class PlcExportSettingsPanel(QGroupBox):
         ):
             widget.setChecked(bool(values[key]))
         self.pruning_threshold.setValue(float(values["pruning_threshold"]))
+        self.uncertainty_lower = values["uncertainty_lower"]
+        self.uncertainty_upper = values["uncertainty_upper"]
         self._updating = False
         self._apply_dependencies(emit=False)
 
@@ -314,7 +382,9 @@ class PlcExportSettingsPanel(QGroupBox):
             return
         self.pruning_threshold.setEnabled(self.pruning.isChecked())
         trigger = self.enable.isChecked() or self.range_check.isChecked()
-        self.network_active.setEnabled(trigger)
+        self.network_active.setEnabled(True)
+        self.uncertain_output_number.setEnabled(self.binary_uncertainty.isChecked())
+        self.enable_out.setEnabled(self.enable.isChecked())
         self.range_tolerance.setEnabled(self.range_check.isChecked())
         self.range_error.setEnabled(self.range_check.isChecked())
         self.invalid_number.setEnabled(self.range_check.isChecked() and self.range_error.isChecked())
@@ -325,15 +395,11 @@ class PlcExportSettingsPanel(QGroupBox):
             self.optionsChanged.emit(self.export_options())
 
     def _update_options_caption(self):
-        selected = sum(bool(value) for key, value in self.export_options().items()
-                       if not key.startswith("pruning_"))
-        self.options_toggle.setText(
-            (f"Zusatzanschlüsse ({selected} von 8 ausgewählt)" if self.german else
-             f"Additional connections ({selected} of 8 selected)")
-        )
+        self.options_toggle.setText("Optionen" if self.german else "Options")
 
     def set_options_expanded(self, expanded):
-        self.options_widget.setVisible(expanded)
+        self.options_toggle.setChecked(expanded)
+        self.options_content.setVisible(expanded)
         self.options_toggle.setArrowType(
             Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
         )

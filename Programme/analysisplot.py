@@ -289,7 +289,9 @@ class SollIstPlot(QWidget):
                 and abs(float(row["actual"]) - float(row["target"]))
                 > self.tolerance_at(row["target"])
             )
-            if outside_tolerance or row.get("binary_error"):
+            if row.get("plot_color"):
+                color = QColor(row["plot_color"])
+            elif outside_tolerance or row.get("binary_error"):
                 color = QColor("#d02020")
             elif row.get("source_kind") == "test":
                 color = QColor("#e07a16")
@@ -306,7 +308,7 @@ class SollIstPlot(QWidget):
             if rect.adjusted(-11, -11, 11, 11).contains(point):
                 self.screen_points.append((point, row))
                 row_key = (str(row.get("source_kind") or ""), int(row["record"]))
-                if row_key == self.hovered_record:
+                if row_key + (row.get('neuron_id'),) == self.hovered_record:
                     hovered_point = point
                     hovered_row = row
         painter.restore()
@@ -325,7 +327,8 @@ class SollIstPlot(QWidget):
             )
             painter.restore()
 
-            suffix = f" {self.unit}" if self.unit else ""
+            unit = hovered_row.get('unit', self.unit)
+            suffix = f" {unit}" if unit else ""
             x_text = f"{hovered_row['target']:.6g}{suffix}"
             y_text = f"{hovered_row['actual']:.6g}{suffix}"
             painter.setPen(QPen(QColor("#4f788f"), 1))
@@ -398,18 +401,20 @@ class SollIstPlot(QWidget):
                 else Qt.CursorShape.ArrowCursor
             )
             return
-        row_key = (str(row.get("source_kind") or ""), int(row["record"]))
+        row_key = (str(row.get("source_kind") or ""), int(row["record"]), row.get('neuron_id'))
         if row_key != self.hovered_record:
             self.hovered_record = row_key
             self.update()
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        suffix = f" {self.unit}" if self.unit else ""
+        unit = row.get('unit', self.unit)
+        suffix = f" {unit}" if unit else ""
         QToolTip.showText(
             event.globalPosition().toPoint(),
             self.t(
                 "analysis.plot.tooltip",
                 record=row["record"],
-                source=row.get("source_label", ""),
+                source=(row.get("source_label", "") + ' · ' + str(row.get('output', ''))
+                        if row.get('plot_color') else row.get("source_label", "")),
                 target=f"{row['target']:.6g}{suffix}",
                 actual=f"{row['actual']:.6g}{suffix}",
             ),
@@ -518,6 +523,7 @@ class FeatureImportancePlot(QWidget):
         self.language = language_manager or LanguageManager()
         self.t = self.language.text
         self.values = []
+        self.compact = False
         self.setMinimumHeight(300)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -528,7 +534,9 @@ class FeatureImportancePlot(QWidget):
                 self.fontMetrics().horizontalAdvance(str(name))
                 for name, _value in self.values
             )
-            self.setMinimumWidth(max(360, longest_name + 300))
+            self.setMinimumWidth(260 if self.compact else max(360, longest_name + 300))
+        if self.compact:
+            self.setMinimumHeight(40 + len(self.values) * 36)
         self.update()
 
     def paintEvent(self, event):
@@ -544,23 +552,31 @@ class FeatureImportancePlot(QWidget):
             self.fontMetrics().horizontalAdvance(str(name))
             for name, _value in self.values
         )
-        left = float(max(78, longest_name + 24))
+        left = 8.0 if self.compact else float(max(78, longest_name + 24))
         top = 14.0
         bottom = 20.0
-        row_height = max(28.0, min(46.0, (self.height() - top - bottom) / len(self.values)))
+        row_height = 36.0 if self.compact else max(28.0, min(46.0, (self.height() - top - bottom) / len(self.values)))
         chart_width = max(100.0, self.width() - left - 76.0)
-        maximum = max((value for _name, value in self.values), default=1.0) or 1.0
+        maximum = 100.0 if self.compact else (max((value for _name, value in self.values), default=1.0) or 1.0)
+        if self.compact:
+            painter.setPen(QColor("#5b6570"))
+            painter.drawText(QRectF(left, self.height() - 20, chart_width, 20),
+                             Qt.AlignmentFlag.AlignRight, "0–100 %")
         for index, (name, value) in enumerate(self.values):
             y = top + index * row_height
             painter.setPen(QColor("#263746"))
-            painter.drawText(QRectF(6, y, left - 16, row_height),
-                             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                             str(name))
-            bar_rect = QRectF(left, y + 6, chart_width * value / maximum,
-                              max(10.0, row_height - 12))
+            if self.compact:
+                painter.drawText(QRectF(left, y, self.width() - 16, 18),
+                                 Qt.AlignmentFlag.AlignLeft,
+                                 self.fontMetrics().elidedText(str(name), Qt.TextElideMode.ElideRight, self.width() - 16))
+            else:
+                painter.drawText(QRectF(6, y, left - 16, row_height),
+                                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, str(name))
+            bar_rect = QRectF(left, y + (21 if self.compact else (row_height - 10) / 2), chart_width * value / maximum,
+                              8.0 if self.compact else 10.0)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(QColor("#2f83b8"))
-            painter.drawRoundedRect(bar_rect, 3, 3)
+            painter.drawRoundedRect(bar_rect, 5, 5)
             painter.setPen(QColor("#263746"))
             painter.drawText(QRectF(left + chart_width + 8, y, 62, row_height),
                              Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,

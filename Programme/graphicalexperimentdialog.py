@@ -95,7 +95,7 @@ class ToolbarIcons(SharedToolbarIcons):
         )
 
 
-def show_yellow_information_dialog(parent, title, text, close_text):
+def show_yellow_information_dialog(parent, title, text, close_text, scrollable=False, rich_text=False):
     """Zeigt einen einheitlichen, gut lesbaren Informationsdialog an."""
 
     dialog = QDialog(parent)
@@ -107,13 +107,21 @@ def show_yellow_information_dialog(parent, title, text, close_text):
     layout.setContentsMargins(12, 12, 12, 12)
     layout.setSpacing(10)
 
-    information = QLabel(str(text), dialog)
-    information.setWordWrap(True)
+    if scrollable:
+        information = QTextEdit(dialog)
+        information.setReadOnly(True)
+        if rich_text:
+            information.setHtml(str(text))
+        else:
+            information.setPlainText(str(text))
+    else:
+        information = QLabel(str(text), dialog)
+        information.setWordWrap(True)
     information.setTextInteractionFlags(
         Qt.TextInteractionFlag.TextSelectableByMouse
     )
     information.setStyleSheet(
-        "QLabel {"
+        "QLabel, QTextEdit {"
         " background-color: #fff8d8;"
         " color: #202020;"
         " border: 1px solid #d8b34f;"
@@ -131,7 +139,14 @@ def show_yellow_information_dialog(parent, title, text, close_text):
     layout.addLayout(button_row)
 
     dialog.adjustSize()
+    if scrollable:
+        available = dialog.screen().availableGeometry()
+        dialog.resize(min(620, available.width() - 40), min(720, available.height() - 80))
     dialog.exec()
+
+
+from binarystatecolors import state_palette
+from binaryuncertainty import normalize_limits, is_uncertain, warning_style, warning_text
 
 
 class ForwardCalculationBridge(QObject):
@@ -3699,6 +3714,7 @@ class GraphicalExperimentDialog(QDialog):
         initial_input_values=None,
         language_manager=None,
         parent=None,
+        uncertainty_settings=None,
     ):
         super().__init__(parent)
         self.network = network
@@ -3709,6 +3725,7 @@ class GraphicalExperimentDialog(QDialog):
         self.input_array = input_array if isinstance(input_array, dict) else None
         self.color_settings = dict(color_settings or {})
         self.initial_input_values = dict(initial_input_values or {})
+        self.uncertainty_settings = normalize_limits(uncertainty_settings)
         self.language = language_manager
         self.input_cards = []
         self.output_cards = []
@@ -5457,8 +5474,14 @@ class GraphicalExperimentDialog(QDialog):
                 )
         controls = self.output_controls_for_proxy(proxy)
         if controls is not None and controls.get("binary"):
+            intermediate_targets = [
+                item for item in color_targets
+                if (self.output_controls_for_proxy(item) or {}).get("binary")
+            ]
             menu.addSeparator()
             binary_intermediate_action = menu.addAction(
+                self.tr("Zwischenwerte anzeigen", "Show intermediate values")
+                if len(intermediate_targets) > 1 else
                 self.tr("Zwischenwert anzeigen", "Show intermediate value")
             )
             binary_intermediate_action.setIcon(
@@ -5466,7 +5489,8 @@ class GraphicalExperimentDialog(QDialog):
             )
             binary_intermediate_action.setCheckable(True)
             binary_intermediate_action.setChecked(
-                bool(controls["card"].binary_intermediate_enabled)
+                all(self.output_controls_for_proxy(item)["card"].binary_intermediate_enabled
+                    for item in intermediate_targets)
             )
         elif controls is not None and controls.get("display_mode") != "binary":
             menu.addSeparator()
@@ -5543,10 +5567,12 @@ class GraphicalExperimentDialog(QDialog):
             binary_intermediate_action is not None
             and selected == binary_intermediate_action
         ):
-            self.set_binary_output_intermediate_value(
-                proxy,
-                binary_intermediate_action.isChecked(),
-            )
+            self.begin_history_action()
+            for item in intermediate_targets:
+                self.set_binary_output_intermediate_value(
+                    item, binary_intermediate_action.isChecked(), record_history=False,
+                )
+            self.finish_history_action()
         elif bar_action is not None and selected in (bar_action, pointer_action):
             self.begin_history_action()
             self.set_output_display_mode(
@@ -5911,7 +5937,15 @@ class GraphicalExperimentDialog(QDialog):
         )
         if is_binary:
             editor = QCheckBox(self.tr("Ein", "On"), card)
+            def update_binary_input_color(state, widget=editor):
+                border, background, foreground = state_palette(self.color_settings, state, ("", "", ""))
+                widget.setStyleSheet(
+                    f"QCheckBox {{ background:{background}; color:{foreground}; border:1px solid {border}; border-radius:4px; }}"
+                    if background else ""
+                )
+            editor.toggled.connect(update_binary_input_color)
             editor.setChecked(initial_value > 0.5)
+            update_binary_input_color(editor.isChecked())
             editor.toggled.connect(self.input_state_changed)
         else:
             editor = CompactInputSpinBox(card)
@@ -6479,22 +6513,28 @@ class GraphicalExperimentDialog(QDialog):
                     controls["gauge"].set_value(raw_value)
                 color = "#00c853" if active else "#d91e18"
                 border = "#008c3a" if active else "#9f1612"
+                if binary:
+                    border, color, _ = state_palette(self.color_settings, active, (border, color, ""))
                 controls["led"].setStyleSheet(
                     f"background:{color}; border:1px solid {border}; border-radius:7px;"
                 )
                 if controls["state_label"] is not None:
-                    if active:
-                        controls["state_label"].setText(self.tr("● Ein", "● On"))
-                        controls["state_label"].setStyleSheet(
-                            "background:#e6f7eb; color:#0b6b2c; "
-                            "border:1px solid #39a85a; border-radius:4px;"
-                        )
-                    else:
-                        controls["state_label"].setText(self.tr("○ Aus", "○ Off"))
-                        controls["state_label"].setStyleSheet(
-                            "background:#f3f5f6; color:#4f5963; "
-                            "border:1px solid #9aa5ad; border-radius:4px;"
-                        )
+                    controls["state_label"].setText(self.tr("● Ein", "● On") if active else self.tr("○ Aus", "○ Off"))
+                    border, background, foreground = state_palette(self.color_settings, active,
+                        ("#39a85a", "#e6f7eb", "#0b6b2c") if active else ("#9aa5ad", "#f3f5f6", "#4f5963"))
+                    controls["state_label"].setStyleSheet(
+                        f"background:{background}; color:{foreground}; border:1px solid {border}; border-radius:4px;"
+                    )
+                if binary:
+                    uncertain = is_uncertain(mapping["neuron"].output_value, self.uncertainty_settings)
+                    tooltip = warning_text(self.uncertainty_settings, self.language.current_language == "de")
+                    controls["value"].setStyleSheet(warning_style(self.color_settings) if uncertain else "")
+                    for widget in (controls["value"], controls["led"], controls["state_label"], controls["binary_bar"]):
+                        widget.setToolTip(tooltip if uncertain else "")
+                    if uncertain:
+                        controls["state_label"].setText(self.tr("⚠ Ein · Unklar", "⚠ On · Uncertain") if active else self.tr("⚠ Aus · Unklar", "⚠ Off · Uncertain"))
+                        controls["state_label"].setStyleSheet(warning_style(self.color_settings))
+                        controls["led"].setStyleSheet(warning_style(self.color_settings))
             if self.network_view_card is not None:
                 self.network_view_card.widget().update_network_state()
             self.status_label.setText(self.project_status_text())

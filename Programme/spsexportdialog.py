@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 from toolbaricons import ToolbarIcons
 from plcfileexport import GxWorks2AscExporter, Iec61131XmlExporter, variable_summary
 from fbpreview import FunctionBlockPreviewPanel
+from plcexportlayout import ExportCodeSection, configure_export_layout
 from graphicalexperimentdialog import show_yellow_information_dialog
 from plcexportsettings import PlcExportSettingsPanel
 from plcquality import PruningQualityPanel, ExportCopyGuard
@@ -100,7 +101,7 @@ class SpsExportDialog(QDialog):
     HEADERS_DE = ("Class", "Label Name", "Data Type", "Constant", "Comment")
     HEADERS_EN = HEADERS_DE
 
-    def __init__(self, export_data, language_code="de", parent=None):
+    def __init__(self, export_data, language_code="de", parent=None, compact_open=True):
         super().__init__(parent)
         self.german = str(language_code).lower() == "de"
         self.regenerate_callback = export_data.get("regenerate_export")
@@ -224,7 +225,8 @@ class SpsExportDialog(QDialog):
         splitter.addWidget(self.create_declaration_area(self.initial_declaration_rows))
         splitter.addWidget(self.create_code_area(str(export_data.get("code", ""))))
         splitter.setSizes([330, 430])
-        main_layout.addWidget(splitter, 1)
+        self.code_section = ExportCodeSection(splitter, self)
+        main_layout.addWidget(self.code_section, 1)
         self.model_version_edit.textChanged.connect(self.model_version_changed)
         self.settings_panel.optionsChanged.connect(self.export_options_changed)
         bottom = QHBoxLayout()
@@ -245,6 +247,7 @@ class SpsExportDialog(QDialog):
         self.update_pruning_preview()
         self.copy_guards = [ExportCopyGuard(self.code_editor, self.copy_code, self.settings_panel.pruning.isChecked),
                             ExportCopyGuard(self.declaration_table, self.copy_declarations, self.settings_panel.pruning.isChecked)]
+        configure_export_layout(self, compact_open)
 
     def tr_text(self, german, english):
         return german if self.german else english

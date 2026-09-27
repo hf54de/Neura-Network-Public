@@ -46,6 +46,7 @@ class ProjectIO:
         analysis_tolerances=None,
         is_example_project=False,
         example_difficulty=None,
+        plc_export_options=None,
     ):
         """
         Speichert alle Neuronen, Verbindungen und
@@ -184,6 +185,7 @@ class ProjectIO:
             "project_description": project_description,
             "analysis_tolerances": normalized_analysis_tolerances,
             "display_settings": normalized_display_settings,
+            "plc_export_options": cls.normalize_plc_export_options(plc_export_options),
             "view": {
                 "zoom": float(zoom),
                 "center_x": float(center_x),
@@ -261,6 +263,23 @@ class ProjectIO:
         }
 
     @staticmethod
+    def normalize_plc_export_options(values=None):
+        defaults = dict.fromkeys(("enable", "enable_out", "network_active", "range_check",
+            "range_tolerance_input", "range_error", "invalid_input_number", "fallback",
+            "hold_last_output", "binary_uncertainty", "uncertain_output_number", "pruning_enabled"), False)
+        defaults["pruning_threshold"] = 0.001
+        if not isinstance(values, dict):
+            return defaults
+        for key in defaults:
+            value = values.get(key)
+            if key == "pruning_threshold":
+                if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and 0 <= value <= 1000000:
+                    defaults[key] = float(value)
+            elif isinstance(value, bool):
+                defaults[key] = value
+        return defaults
+
+    @staticmethod
     def default_display_settings():
         """
         Liefert die Standardwerte der Netzwerkdarstellung.
@@ -268,6 +287,7 @@ class ProjectIO:
 
         return {
             "show_weights": True,
+            "binary_uncertainty": {"lower": 0.3, "upper": 0.7},
             "visualize_weights": True,
             "show_neuron_values": True,
             "show_activation_charts": True,
@@ -294,6 +314,9 @@ class ProjectIO:
             "comment_background": "#fff8b4",
             "canvas_background": "#ffffff",
             "binary_array_on": "#242424",
+            "binary_state_on": "#00c853",
+            "binary_state_uncertain": "#ffd966",
+            "binary_state_off": "#d91e18",
             "binary_array_off": "#ffffff"
         }
 
@@ -356,6 +379,8 @@ class ProjectIO:
             ):
                 normalized["colors"]["selection"] = "#d00000"
 
+        from binaryuncertainty import normalize_limits
+        normalized["binary_uncertainty"] = normalize_limits(normalized.get("binary_uncertainty"))
         return normalized
 
     @classmethod
@@ -604,6 +629,8 @@ class ProjectIO:
                 )
             )
         )
+
+        project_data["plc_export_options"] = cls.normalize_plc_export_options(project_data.get("plc_export_options"))
 
         project_data["display_settings"] = (
             cls.normalize_display_settings(

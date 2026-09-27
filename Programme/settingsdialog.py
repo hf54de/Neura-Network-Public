@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -122,7 +123,10 @@ class SettingsDialog(QDialog):
         ("comment_background", "settings.color.comment_background"),
         ("canvas_background", "settings.color.canvas_background"),
         ("binary_array_on", "settings.color.binary_array_on"),
-        ("binary_array_off", "settings.color.binary_array_off")
+        ("binary_array_off", "settings.color.binary_array_off"),
+        ("binary_state_on", "settings.color.binary_state_on"),
+        ("binary_state_uncertain", "settings.color.binary_state_uncertain"),
+        ("binary_state_off", "settings.color.binary_state_off")
     )
 
     PAGE_KEYS = (
@@ -202,7 +206,6 @@ class SettingsDialog(QDialog):
         self.create_editor_page(ui_settings)
         self.create_language_page(ui_settings)
         self.create_experimental_page(ui_settings)
-
         self.button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel
@@ -290,6 +293,8 @@ class SettingsDialog(QDialog):
         self.loading = True
         for key, checkbox in self.display_checks.items():
             checkbox.setChecked(data["display"][key])
+        self.uncertainty_lower.setValue(data["display"]["binary_uncertainty"]["lower"])
+        self.uncertainty_upper.setValue(data["display"]["binary_uncertainty"]["upper"])
         for key, button in self.color_buttons.items():
             button.set_color(data["display"]["colors"][key], emit_signal=False)
         ui = dict(self.base_ui_settings, **data["ui"])
@@ -700,7 +705,8 @@ class SettingsDialog(QDialog):
     def create_experimental_page(self, settings):
         page, layout = self.create_page(
             self.language_manager.text("settings.experimental.title"),
-            self.language_manager.text("settings.experimental.scope")
+            self.profile_text("Programmeinstellungen für den Export und projektbezogene Grenzen für binäre Ausgänge.",
+                              "Program export settings and project-specific limits for binary outputs.")
         )
         group = QGroupBox(
             self.language_manager.text("settings.experimental.group")
@@ -714,6 +720,12 @@ class SettingsDialog(QDialog):
         )
         self.show_sps_export.toggled.connect(self.emit_preview)
         group_layout.addWidget(self.show_sps_export)
+        self.export_window_compact = QCheckBox(
+            self.language_manager.text("settings.export.compact")
+        )
+        self.export_window_compact.setChecked(settings.get("export_window_compact", True))
+        self.export_window_compact.toggled.connect(self.emit_preview)
+        group_layout.addWidget(self.export_window_compact)
         hint = QLabel(
             self.language_manager.text("settings.experimental.sps_export_hint")
         )
@@ -721,11 +733,32 @@ class SettingsDialog(QDialog):
         hint.setStyleSheet("color: #666666; padding-left: 22px;")
         group_layout.addWidget(hint)
         layout.addWidget(group)
+        binary_group = QGroupBox(self.profile_text("Binäre Ausgänge – Unklarheitsbereich", "Binary outputs – uncertainty range"))
+        binary_layout = QVBoxLayout(binary_group)
+        hint = QLabel(self.profile_text(
+            "Projektbezogene Grenzen für Erproben, Anwendungsfenster und SPS-Export. Die BOOL-Schwelle bleibt 0,5. Die Bereichsgrenzen selbst gelten nicht als unklar.",
+            "Project limits for testing, application view and PLC export. The BOOL threshold remains 0.5. The boundary values themselves are not uncertain."))
+        hint.setWordWrap(True)
+        binary_layout.addWidget(hint)
+        form = QFormLayout()
+        self.uncertainty_lower = QDoubleSpinBox()
+        self.uncertainty_upper = QDoubleSpinBox()
+        for widget, key, minimum, maximum in ((self.uncertainty_lower, "lower", 0.0, 0.499), (self.uncertainty_upper, "upper", 0.501, 1.0)):
+            widget.setDecimals(3)
+            widget.setRange(minimum, maximum)
+            widget.setSingleStep(0.01)
+            widget.setValue(self.base_project_settings.get("binary_uncertainty", {}).get(key, 0.3 if key == "lower" else 0.7))
+            widget.valueChanged.connect(self.emit_preview)
+        form.addRow(self.profile_text("Untere Grenze:", "Lower limit:"), self.uncertainty_lower)
+        form.addRow(self.profile_text("Obere Grenze:", "Upper limit:"), self.uncertainty_upper)
+        binary_layout.addLayout(form)
+        layout.addWidget(binary_group)
         layout.addStretch()
         self.pages.addWidget(page)
 
     def project_settings(self):
         settings = dict(self.base_project_settings)
+        settings["binary_uncertainty"] = {"lower": self.uncertainty_lower.value(), "upper": self.uncertainty_upper.value()}
 
         for key, checkbox in self.display_checks.items():
             settings[key] = checkbox.isChecked()
@@ -765,6 +798,7 @@ class SettingsDialog(QDialog):
                     self.show_project_assistant.isChecked()
                 ),
                 "show_sps_export": self.show_sps_export.isChecked(),
+                "export_window_compact": self.export_window_compact.isChecked(),
                 "editor_scene_margin": self.editor_scene_margin.value(),
                 "editor_zoom_step_percent": self.editor_zoom_step.value(),
                 "simplify_large_moves": self.simplify_large_moves.isChecked()
@@ -846,6 +880,9 @@ class SettingsDialog(QDialog):
             self.show_sps_export.setChecked(
                 self.ui_defaults["show_sps_export"]
             )
+            self.export_window_compact.setChecked(self.ui_defaults["export_window_compact"])
+            self.uncertainty_lower.setValue(0.3)
+            self.uncertainty_upper.setValue(0.7)
 
         self.loading = False
         self.emit_preview()

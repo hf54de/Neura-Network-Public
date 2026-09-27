@@ -55,19 +55,26 @@ class GxWorks2ExportGenerator:
             if self.training_entry.get("run_id") is not None else "1.0"
         )
         defaults = {
-            "enable": True,
-            "network_active": True,
-            "range_check": True,
-            "range_tolerance_input": True,
-            "range_error": True,
-            "invalid_input_number": True,
-            "fallback": True,
-            "hold_last_output": True,
+            "enable": False,
+            "network_active": False,
+            "enable_out": False,
+            "binary_uncertainty": False,
+            "uncertain_output_number": False,
+            "uncertainty_lower": 0.3,
+            "uncertainty_upper": 0.7,
+            "range_check": False,
+            "range_tolerance_input": False,
+            "range_error": False,
+            "invalid_input_number": False,
+            "fallback": False,
+            "hold_last_output": False,
             "pruning_enabled": False,
             "pruning_threshold": 0.001,
         }
         defaults.update(dict(export_options or {}))
         self.export_options = defaults
+        from binaryuncertainty import normalize_limits
+        self.uncertainty_limits = normalize_limits({"lower": defaults["uncertainty_lower"], "upper": defaults["uncertainty_upper"]})
         self.pruning_threshold = float(defaults["pruning_threshold"])
         if not math.isfinite(self.pruning_threshold) or self.pruning_threshold < 0:
             raise ValueError(self.text(
@@ -194,8 +201,9 @@ class GxWorks2ExportGenerator:
 
         self.used_labels.update(name.casefold() for name in (
             "Enable", "Enable_Range_Check", "Range_Tolerance_Percent", "Hold_Last_Output",
-            "Network_Active", "Input_Range_Error", "Invalid_Input_Number", "Model_Version", "Model_Signature",
+            "Network_Active", "Enable_Out", "Input_Range_Error", "Invalid_Input_Number", "Model_Version", "Model_Signature",
             "Input_Range_Error_Internal",
+            "Binary_Output_Uncertain", "Uncertain_Output_Number",
         ))
         options = self.export_options
         trigger_available = options["enable"] or options["range_check"]
@@ -216,10 +224,23 @@ class GxWorks2ExportGenerator:
             self.add_row("VAR_INPUT", "Hold_Last_Output", "BOOL", "FALSE", self.text(
             "Letzten Ausgang bei Sperre oder Fehler halten", "Hold last output when disabled or invalid",
             ))
-        if options["network_active"] and trigger_available:
+        if options["enable"] and options["enable_out"]:
+            self.add_row("VAR_OUTPUT", "Enable_Out", "BOOL", "", self.text(
+                "Enable unverändert weitergeben, auch bei Eingangsfehlern",
+                "Pass Enable through unchanged, including on input errors",
+            ))
+        if options["network_active"]:
             self.add_row("VAR_OUTPUT", "Network_Active", "BOOL", "", self.text(
             "Netzberechnung aktiv", "Network calculation active",
             ))
+        if options["binary_uncertainty"]:
+            self.add_row("VAR_OUTPUT", "Binary_Output_Uncertain", "BOOL", "", self.text(
+                "Mindestens ein binärer Ausgang im Unklarheitsbereich; ohne Berechnung FALSE",
+                "At least one binary output is uncertain; FALSE without calculation"))
+            if options["uncertain_output_number"]:
+                self.add_row("VAR_OUTPUT", "Uncertain_Output_Number", "INT", "", self.text(
+                    "Erster unklarer Ausgang, 1-basiert über alle Netzausgänge; 0 = keiner",
+                    "First uncertain output, 1-based across all network outputs; 0 = none"))
         if options["range_check"] and options["range_error"]:
             self.add_row("VAR_OUTPUT", "Input_Range_Error", "BOOL", "", self.text(
             "Eingang außerhalb des zulässigen Bereichs", "Input outside the permitted range",
@@ -460,6 +481,13 @@ class GxWorks2ExportGenerator:
         ]
         options = self.export_options
         error_label = "Input_Range_Error" if options["range_error"] else "Input_Range_Error_Internal"
+        if options["enable"] and options["enable_out"]:
+            lines.extend(["Enable_Out := Enable;", ""])
+        if options["binary_uncertainty"]:
+            lines.append("Binary_Output_Uncertain := FALSE;")
+            if options["uncertain_output_number"]:
+                lines.append("Uncertain_Output_Number := 0;")
+            lines.append("")
         input_by_id = {mapping["neuron"].id: mapping for mapping in self.input_mappings}
         guarded_input_count = 0
         if options["range_check"]:
@@ -502,7 +530,7 @@ class GxWorks2ExportGenerator:
             conditions.append(f"NOT {error_label}")
         if conditions:
             lines.append(f"IF {' AND '.join(conditions)} THEN")
-        if options["network_active"] and conditions:
+        if options["network_active"]:
             lines.extend(["Network_Active := TRUE;", ""])
         lines.extend([
             "(* -------------------------------------------------- *)",
@@ -568,12 +596,20 @@ class GxWorks2ExportGenerator:
             "",
         ])
         output_by_id = {mapping["neuron"].id: mapping for mapping in self.output_mappings}
-        for neuron in self.network.get_output_neurons():
+        for output_index, neuron in enumerate(self.network.get_output_neurons(), start=1):
             mapping = output_by_id[neuron.id]
             external = self.output_labels[neuron.id]
             internal = self.neuron_output_labels[neuron.id]
             lines.append(f"(* {st_comment_text(mapping.get('column_name') or neuron.name)} *)")
             if mapping.get("data_type") == "binary":
+                if options["binary_uncertainty"]:
+                    low, high = self.uncertainty_limits["lower"], self.uncertainty_limits["upper"]
+                    lines.extend([f"IF ({internal} > {low:.9f}) AND ({internal} < {high:.9f}) THEN",
+                                  "    Binary_Output_Uncertain := TRUE;"])
+                    if options["uncertain_output_number"]:
+                        lines.extend(["    IF Uncertain_Output_Number = 0 THEN",
+                                      f"        Uncertain_Output_Number := {output_index};", "    END_IF;"])
+                    lines.append("END_IF;")
                 lines.extend([
                     f"IF {internal} > 0.5 THEN",
                     f"    {external} := TRUE;",

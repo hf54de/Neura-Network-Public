@@ -22,12 +22,14 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
 )
 
 from plcfileexport import GxWorks3XmlExporter, Iec61131XmlExporter, variable_summary
 from toolbaricons import ToolbarIcons
 from fbpreview import FunctionBlockPreviewPanel
+from plcexportlayout import ExportCodeSection, configure_export_layout
 from graphicalexperimentdialog import show_yellow_information_dialog
 from plcexportsettings import PlcExportSettingsPanel
 from plcquality import PruningQualityPanel, ExportCopyGuard
@@ -65,7 +67,7 @@ class XmlHighlighter(QSyntaxHighlighter):
 class XmlExportDialog(QDialog):
     """Schreibgeschützte Ansicht einer vollständigen IEC-61131-10-XML-Datei."""
 
-    def __init__(self, export_data, language_code="de", parent=None):
+    def __init__(self, export_data, language_code="de", parent=None, compact_open=True):
         super().__init__(parent)
         self.german = str(language_code).lower() == "de"
         self.xml_profile = str(export_data.get("xml_profile", "iec"))
@@ -125,6 +127,7 @@ class XmlExportDialog(QDialog):
         self.operation_info_text = self.settings_panel.operation_text(operations)
 
         technical_frame = QFrame(self)
+        technical_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         technical_frame.setObjectName("technicalFrame")
         technical_frame.setStyleSheet(
             "QFrame#technicalFrame { border: 1px solid #333333; border-radius: 5px; "
@@ -196,7 +199,8 @@ class XmlExportDialog(QDialog):
         self.xml_editor.setReadOnly(True)
         self.highlighter = XmlHighlighter(self.xml_editor.document())
         xml_layout.addWidget(self.xml_editor, 1)
-        layout.addWidget(xml_group, 1)
+        self.code_section = ExportCodeSection(xml_group, self)
+        layout.addWidget(self.code_section, 1)
 
         button_frame = QFrame(self)
         button_frame.setObjectName("buttonFrame")
@@ -226,6 +230,7 @@ class XmlExportDialog(QDialog):
         self.regenerate_xml()
         self.settings_panel.optionsChanged.connect(self.export_options_changed)
         self.copy_guard = ExportCopyGuard(self.xml_editor, self.copy_xml, self.settings_panel.pruning.isChecked)
+        configure_export_layout(self, compact_open)
 
     def tr_text(self, german, english):
         return german if self.german else english
