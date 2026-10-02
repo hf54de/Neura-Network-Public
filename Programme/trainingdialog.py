@@ -45,6 +45,7 @@ from numberformat import format_number
 from resultanalysisdialog import ResultAnalysisDialog
 from trainingdebugdialog import TrainingDebugDialog
 from trainingerrorchart import TrainingErrorChart
+from analysisplot import CharacteristicPlot
 from trainingcomparison import (
     MAX_COMPARISON_RUNS, TrainingComparisonPopup, comparison_color, normalized_curve,
 )
@@ -165,6 +166,7 @@ class TrainingDialog(QDialog):
         self.training_start_time = None
         self.training_elapsed_base = 0.0
         self._last_elapsed_display_update = 0.0
+        self.processed_training_records = 0
         self.error_chart_start_value = None
         self.error_chart_current_value = None
         self.history_curve_points = []
@@ -679,7 +681,7 @@ class TrainingDialog(QDialog):
             self.initialization_group.setVisible
         )
         self.initialize_network.toggled.connect(
-            lambda checked: QTimer.singleShot(0, self.sync_training_area_heights)
+            self.schedule_training_layout_resize
         )
 
         self.parameter_layout.addRow(
@@ -801,6 +803,9 @@ class TrainingDialog(QDialog):
         self.error_metric_combo = QComboBox()
         self.error_metric_combo.addItem(text("training.metric.mse"), "mse")
         self.error_metric_combo.addItem(text("training.metric.maximum"), "maximum")
+        self.error_metric_combo.addItem(
+            text("training.metric.characteristic"), "characteristic"
+        )
         metric_font = QFont(self.font())
         metric_font.setBold(False)
         self.error_metric_combo.setFont(metric_font)
@@ -1099,6 +1104,50 @@ class TrainingDialog(QDialog):
             0,
             Qt.AlignmentFlag.AlignVCenter,
         )
+
+        self.training_characteristic_controls = QWidget()
+        characteristic_controls_layout = QHBoxLayout(
+            self.training_characteristic_controls
+        )
+        characteristic_controls_layout.setContentsMargins(0, 0, 0, 0)
+        characteristic_controls_layout.setSpacing(6)
+        self.training_characteristic_input_label = QLabel(
+            text("training.characteristic.input")
+        )
+        self.training_characteristic_input = QComboBox()
+        self.training_characteristic_output_label = QLabel(
+            text("training.characteristic.output")
+        )
+        self.training_characteristic_output = QComboBox()
+        self.training_characteristic_reference_label = QLabel(
+            text("training.characteristic.reference")
+        )
+        self.training_characteristic_reference = QSpinBox()
+        self.training_characteristic_reference.setRange(
+            1, max(1, len(self.records))
+        )
+        characteristic_controls_layout.addWidget(
+            self.training_characteristic_input_label
+        )
+        characteristic_controls_layout.addWidget(
+            self.training_characteristic_input, 1
+        )
+        characteristic_controls_layout.addWidget(
+            self.training_characteristic_output_label
+        )
+        characteristic_controls_layout.addWidget(
+            self.training_characteristic_output, 1
+        )
+        characteristic_controls_layout.addWidget(
+            self.training_characteristic_reference_label
+        )
+        characteristic_controls_layout.addWidget(
+            self.training_characteristic_reference
+        )
+        self.training_characteristic_controls.hide()
+        self.error_chart_controls_layout.insertWidget(
+            0, self.training_characteristic_controls, 1
+        )
         self.error_chart_layout.addLayout(
             self.error_chart_controls_layout
         )
@@ -1117,8 +1166,26 @@ class TrainingDialog(QDialog):
         self.error_chart_layout.addWidget(
             self.error_chart
         )
+        self.training_characteristic_plot = CharacteristicPlot(
+            language_manager=self.language
+        )
+        self.training_characteristic_plot.setMinimumHeight(190)
+        self.training_characteristic_plot.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+        self.training_characteristic_plot.set_compact_footer(True)
+        self.training_characteristic_plot.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            True,
+        )
+        self.training_characteristic_plot.hide()
+        self.error_chart_layout.addWidget(
+            self.training_characteristic_plot
+        )
         self.error_chart_layout.setStretch(0, 0)
         self.error_chart_layout.setStretch(1, 1)
+        self.error_chart_layout.setStretch(2, 1)
         self.comparison_legend = QLabel(self.error_chart_group)
         self.comparison_legend.setWordWrap(False)
         self.comparison_legend.setFont(comparison_font)
@@ -1127,6 +1194,16 @@ class TrainingDialog(QDialog):
         self.comparison_legend.linkActivated.connect(self.hide_comparison_run)
         self.comparison_legend.hide()
         self.error_metric_combo.currentIndexChanged.connect(self.update_error_metric)
+        self.populate_training_characteristic_controls()
+        self.training_characteristic_input.currentIndexChanged.connect(
+            self.training_characteristic_selection_changed
+        )
+        self.training_characteristic_output.currentIndexChanged.connect(
+            self.training_characteristic_selection_changed
+        )
+        self.training_characteristic_reference.valueChanged.connect(
+            self.training_characteristic_selection_changed
+        )
         self.error_chart_controls_layout.insertWidget(1, self.comparison_legend)
 
         self.error_chart_start = QLabel(
@@ -1157,6 +1234,9 @@ class TrainingDialog(QDialog):
         )
         self.show_error_chart.toggled.connect(
             self.error_chart_group.setVisible
+        )
+        self.show_error_chart.toggled.connect(
+            self.training_chart_visibility_changed
         )
 
         # Trainingsziel: Die Optionsfelder machen sichtbar, dass genau eine
@@ -1622,7 +1702,7 @@ class TrainingDialog(QDialog):
             initial_width = max(540, min(1184, available.width() - 40))
             initial_height = max(600, min(720, available.height() - 40))
             self.resize(initial_width, initial_height)
-        QTimer.singleShot(0, self.sync_training_area_heights)
+        QTimer.singleShot(0, self.resize_full_view)
 
         self.sync_compact_monitor_button(
             self.monitor_training_data.isChecked()
@@ -1639,12 +1719,111 @@ class TrainingDialog(QDialog):
 
         if not hasattr(self, "left_training_container"):
             return
+        self.parameter_layout.invalidate()
+        self.left_training_layout.invalidate()
+        self.left_training_container.updateGeometry()
+        self.left_training_layout.activate()
         target_height = self.left_training_container.sizeHint().height()
         if target_height <= 0:
             return
         self.error_chart_group.setMinimumHeight(target_height)
         self.error_chart_group.setMaximumHeight(target_height)
         self.content_layout.invalidate()
+
+    def schedule_training_layout_resize(self, _visible=None):
+        """Berechnet die Vollansicht nach ein- oder ausgeblendeten Zeilen neu."""
+
+        QTimer.singleShot(0, self.resize_after_training_layout_change)
+
+    def resize_after_training_layout_change(self):
+        """Passt Kurvenbereich und Fenster an die neue Inhaltshöhe an."""
+
+        if self.compact_mode or self.minimal_mode:
+            return
+        self.resize_full_view(preferred_width=self.width())
+
+    def fit_training_areas_to_window(self):
+        """Verhindert Überlappungen bei begrenzter Bildschirmhöhe."""
+
+        self.content_layout.activate()
+        self.main_layout.activate()
+        available_row_height = self.left_training_container.height()
+        if (
+            available_row_height > 0
+            and self.error_chart_group.height() > available_row_height
+        ):
+            self.error_chart_group.setMinimumHeight(available_row_height)
+            self.error_chart_group.setMaximumHeight(available_row_height)
+            self.content_layout.invalidate()
+            self.content_layout.activate()
+            self.main_layout.activate()
+
+    def release_window_size_limits(self):
+        """Hebt die Grenzen vor dem Wechsel der Ansicht vorübergehend auf."""
+
+        self.setMinimumSize(0, 0)
+        self.setMaximumSize(16777215, 16777215)
+
+    def available_window_size(self):
+        """Liefert den nutzbaren Platz des aktuellen Bildschirms mit Rand."""
+
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return 16777215, 16777215
+        available = screen.availableGeometry()
+        return max(1, available.width() - 40), max(1, available.height() - 40)
+
+    def apply_window_size_limits(
+        self,
+        minimum_width,
+        maximum_width,
+        fixed_height,
+        preferred_width=None,
+        fixed_width=False,
+    ):
+        """Begrenzt die Ansicht, ohne ihre berechnete Höhe veränderbar zu lassen."""
+
+        available_width, available_height = self.available_window_size()
+        fixed_height = max(1, min(int(fixed_height), available_height))
+        maximum_width = max(1, min(int(maximum_width), available_width))
+        minimum_width = max(1, min(int(minimum_width), maximum_width))
+        if fixed_width:
+            minimum_width = maximum_width
+        preferred_width = (
+            self.width() if preferred_width is None else int(preferred_width)
+        )
+        target_width = max(
+            minimum_width,
+            min(preferred_width, maximum_width),
+        )
+        self.setMinimumSize(minimum_width, fixed_height)
+        self.setMaximumSize(maximum_width, fixed_height)
+        self.resize(target_width, fixed_height)
+
+    def resize_full_view(self, top_left=None, preferred_width=None):
+        """Wendet die lesbaren Größenbegrenzungen der Vollansicht an."""
+
+        if self.compact_mode or self.minimal_mode:
+            return
+        self.release_window_size_limits()
+        self.sync_training_area_heights()
+        self.content_layout.activate()
+        self.main_layout.activate()
+        _available_width, available_height = self.available_window_size()
+        preferred_height = max(600, min(720, available_height))
+        required_height = max(
+            preferred_height,
+            self.minimumSizeHint().height(),
+        )
+        self.apply_window_size_limits(
+            1000,
+            1184,
+            required_height,
+            preferred_width=preferred_width,
+        )
+        self.fit_training_areas_to_window()
+        if top_left is not None:
+            self.move(top_left)
 
     def format_workload_integer(self, value):
         """Formatiert große Zählwerte passend zur gewählten Sprache."""
@@ -1898,6 +2077,8 @@ class TrainingDialog(QDialog):
         if not self.minimal_mode:
             self.full_view_geometry = self.geometry()
 
+        self.release_window_size_limits()
+
         self.compact_mode = True
         self.minimal_mode = False
         self.setWindowTitle(
@@ -2002,21 +2183,12 @@ class TrainingDialog(QDialog):
             430,
             self.minimumSizeHint().height()
         )
-        self.setMinimumSize(
-            620,
-            required_height
+        self.apply_window_size_limits(
+            760,
+            1184,
+            required_height,
+            preferred_width=self.width(),
         )
-        screen = QApplication.primaryScreen()
-        available_width = (
-            screen.availableGeometry().width() - 40
-            if screen is not None
-            else self.minimumSizeHint().width()
-        )
-        required_width = max(
-            720,
-            min(self.minimumSizeHint().width(), available_width)
-        )
-        self.resize(required_width, required_height)
         self.move(
             top_left
         )
@@ -2029,6 +2201,8 @@ class TrainingDialog(QDialog):
 
         if not self.compact_mode:
             self.full_view_geometry = self.geometry()
+
+        self.release_window_size_limits()
 
         top_left = self.pos()
         self.compact_mode = False
@@ -2126,21 +2300,18 @@ class TrainingDialog(QDialog):
             64,
             self.minimumSizeHint().height()
         )
-        self.setMinimumSize(
-            760,
-            required_height
-        )
-        screen = QApplication.primaryScreen()
-        available_width = (
-            screen.availableGeometry().width() - 40
-            if screen is not None
-            else self.minimumSizeHint().width()
-        )
+        available_width, _available_height = self.available_window_size()
         required_width = min(
             max(760, self.minimumSizeHint().width()),
             available_width,
         )
-        self.resize(required_width, required_height)
+        self.apply_window_size_limits(
+            required_width,
+            required_width,
+            required_height,
+            preferred_width=required_width,
+            fixed_width=True,
+        )
         self.move(
             top_left
         )
@@ -2149,6 +2320,18 @@ class TrainingDialog(QDialog):
         if not self.compact_mode and not self.minimal_mode:
             return
 
+        target_geometry = self.full_view_geometry
+        top_left = (
+            target_geometry.topLeft()
+            if target_geometry is not None
+            else self.pos()
+        )
+        preferred_width = (
+            target_geometry.width()
+            if target_geometry is not None
+            else self.width()
+        )
+        self.release_window_size_limits()
         self.compact_mode = False
         self.minimal_mode = False
         self.setWindowTitle(
@@ -2223,18 +2406,13 @@ class TrainingDialog(QDialog):
                 True
             )
 
-        self.setMinimumSize(
-            540,
-            0
-        )
         self.content_layout.invalidate()
         self.main_layout.invalidate()
-
-        if self.full_view_geometry is not None:
-            self.setGeometry(
-                self.full_view_geometry
-            )
-        QTimer.singleShot(0, self.sync_training_area_heights)
+        QTimer.singleShot(
+            0,
+            lambda position=top_left, width=preferred_width:
+            self.resize_full_view(position, width)
+        )
 
 
     @staticmethod
@@ -2934,6 +3112,8 @@ class TrainingDialog(QDialog):
         self.update_training_run_label()
         self.set_training_controls_enabled(True)
 
+        self.refresh_training_characteristic()
+
     def clear_training_run_display(self):
         """Entfernt nach leerer Historie alle laufbezogenen Anzeigen."""
 
@@ -3041,9 +3221,208 @@ class TrainingDialog(QDialog):
             self.comparison_popup.set_runs(self.comparison_runs, self.comparison_run_ids)
 
     def update_error_metric(self, index=None):
-        self.error_chart.error_metric = self.error_metric_combo.currentData() or "mse"
+        metric = self.error_metric_combo.currentData() or "mse"
+        characteristic_visible = metric == "characteristic"
+        self.error_chart.setVisible(not characteristic_visible)
+        self.training_characteristic_plot.setVisible(characteristic_visible)
+        self.training_characteristic_controls.setVisible(characteristic_visible)
+        for widget in (
+            self.comparison_button,
+            self.error_chart_info_button,
+            self.error_chart_y_axis_label,
+            self.error_chart_scale,
+        ):
+            widget.setVisible(not characteristic_visible)
+        if characteristic_visible:
+            self.comparison_legend.hide()
+            if self.comparison_popup is not None:
+                self.comparison_popup.hide()
+            self.error_chart_group.setTitle(
+                self.language.text("training.characteristic.group")
+            )
+            self.training_characteristic_selection_changed()
+            return
+
+        self.error_chart_group.setTitle(
+            self.language.text("training.chart.group")
+        )
+        self.error_chart.error_metric = metric
         self.refresh_comparison_runs()
         self.error_chart.update()
+
+    def populate_training_characteristic_controls(self):
+        """Füllt die Auswahl für die nur bei Bedarf berechnete Kennlinie."""
+
+        self.training_characteristic_input.blockSignals(True)
+        self.training_characteristic_output.blockSignals(True)
+        self.training_characteristic_input.clear()
+        self.training_characteristic_output.clear()
+        for mapping in self.input_columns:
+            if mapping.get("data_type") == "binary":
+                continue
+            self.training_characteristic_input.addItem(
+                ResultAnalysisDialog.characteristic_axis_label(mapping),
+                mapping["neuron"].id,
+            )
+        for mapping in self.output_columns:
+            self.training_characteristic_output.addItem(
+                ResultAnalysisDialog.characteristic_axis_label(mapping),
+                mapping["neuron"].id,
+            )
+        self.training_characteristic_input.blockSignals(False)
+        self.training_characteristic_output.blockSignals(False)
+
+    def selected_training_characteristic_mapping(self, mappings, combo):
+        neuron_id = combo.currentData()
+        return next(
+            (
+                mapping for mapping in mappings
+                if mapping["neuron"].id == neuron_id
+            ),
+            None,
+        )
+
+    def training_characteristic_selection_changed(self, _value=None):
+        multiple_inputs = len(self.input_columns) > 1
+        self.training_characteristic_reference_label.setVisible(
+            multiple_inputs
+        )
+        self.training_characteristic_reference.setVisible(multiple_inputs)
+        self.refresh_training_characteristic()
+
+    def training_chart_visibility_changed(self, visible):
+        if visible:
+            self.refresh_training_characteristic()
+
+    def refresh_training_characteristic(self):
+        """Berechnet ausschließlich die aktuell ausgewählte Live-Kennlinie."""
+
+        if (
+            self.error_metric_combo.currentData() != "characteristic"
+            or not self.show_error_chart.isChecked()
+        ):
+            return False
+        input_mapping = self.selected_training_characteristic_mapping(
+            self.input_columns,
+            self.training_characteristic_input,
+        )
+        output_mapping = self.selected_training_characteristic_mapping(
+            self.output_columns,
+            self.training_characteristic_output,
+        )
+        if input_mapping is None or output_mapping is None or not self.records:
+            self.training_characteristic_plot.set_data([], [])
+            return False
+
+        reference_number = min(
+            max(1, self.training_characteristic_reference.value()),
+            len(self.records),
+        )
+        reference_record = self.records[reference_number - 1]
+        source = {
+            "inputs": self.input_columns,
+            "outputs": self.output_columns,
+            "records": self.records,
+        }
+        minimum, maximum = ResultAnalysisDialog.characteristic_input_range(
+            source, input_mapping
+        )
+        snapshots = {
+            neuron: ResultAnalysisDialog.neuron_runtime_snapshot(neuron)
+            for neuron in self.network.get_neurons()
+        }
+        curve_points = []
+        try:
+            for index in range(101):
+                raw_input = minimum + (maximum - minimum) * index / 100
+                self.network.reset_runtime_values()
+                for mapping in self.input_columns:
+                    raw_value = (
+                        raw_input
+                        if mapping["neuron"].id == input_mapping["neuron"].id
+                        else reference_record[mapping["column_index"]]
+                    )
+                    mapping["neuron"].input_value = TrainingDataIO.scale_value(
+                        raw_value,
+                        mapping["calibration"],
+                        translator=self.language.text,
+                    )
+                self.network.forward_pass()
+                raw_output = TrainingDataIO.unscale_value(
+                    output_mapping["neuron"].output_value,
+                    output_mapping["calibration"],
+                    translator=self.language.text,
+                )
+                curve_points.append((raw_input, raw_output))
+        finally:
+            for neuron, values in snapshots.items():
+                for name, value in values.items():
+                    setattr(neuron, name, value)
+
+        multiple_inputs = len(self.input_columns) > 1
+        if multiple_inputs:
+            similar_records = ResultAnalysisDialog.similar_characteristic_records(
+                source,
+                input_mapping,
+                reference_number - 1,
+                maximum_points=30,
+            )
+            data_points = [
+                (
+                    float(self.records[index][input_mapping["column_index"]]),
+                    float(self.records[index][output_mapping["column_index"]]),
+                )
+                for index, _distance, _strength in similar_records
+            ]
+            strengths = [
+                strength for _index, _distance, strength in similar_records
+            ]
+            reference_point = (
+                float(reference_record[input_mapping["column_index"]]),
+                float(reference_record[output_mapping["column_index"]]),
+            )
+            point_legend = self.language.text(
+                "analysis.characteristic.legend_similar"
+            )
+            reference_legend = self.language.text(
+                "analysis.characteristic.legend_reference",
+                record=reference_number,
+            )
+        else:
+            all_points = [
+                (
+                    float(record[input_mapping["column_index"]]),
+                    float(record[output_mapping["column_index"]]),
+                )
+                for record in self.records
+            ]
+            data_points = ResultAnalysisDialog.limited_characteristic_points(
+                all_points
+            )
+            strengths = None
+            reference_point = None
+            point_legend = self.language.text(
+                "analysis.characteristic.legend_points"
+            )
+            reference_legend = ""
+
+        self.training_characteristic_plot.set_data(
+            curve_points,
+            data_points,
+            x_label=ResultAnalysisDialog.characteristic_axis_label(
+                input_mapping
+            ),
+            y_label=ResultAnalysisDialog.characteristic_axis_label(
+                output_mapping
+            ),
+            point_legend=point_legend,
+            reference_point=reference_point,
+            reference_legend=reference_legend,
+            data_point_strengths=strengths,
+            x_unit=str(input_mapping.get("unit") or ""),
+            y_unit=str(output_mapping.get("unit") or ""),
+        )
+        return True
 
     def record_maximum_error(self, epoch, error_value, force=False):
         # Nur den bereits berechneten Wert aufzeichnen, niemals neu berechnen.
@@ -4094,16 +4473,17 @@ class TrainingDialog(QDialog):
             shuffled_records,
             start=1
         ):
-            if self.monitor_training_data.isChecked() and not fast:
-                self.result_status.setText(
-                    self.language.text(
-                        "training.status.progress",
-                        epoch=epoch_number,
-                        total_epochs=total_epochs,
-                        record=record_index,
-                        total_records=record_count
-                    )
+            self.result_status.setText(
+                self.language.text(
+                    "training.status.progress",
+                    epoch=epoch_number,
+                    total_epochs=total_epochs,
+                    record=record_index,
+                    total_records=record_count
                 )
+            )
+            # Paint the counter independently of throttled GUI event processing.
+            self.result_status.repaint()
 
             self.process_training_events()
 
@@ -4254,7 +4634,11 @@ class TrainingDialog(QDialog):
             self.language.text("training.maximum_error.actual_label"),
             QLabel(f"{format_number(details['raw_actual'])}{suffix}")
         )
-        deviation = QLabel(f"{format_number(details['raw_error'])}{suffix}")
+        deviation_suffix = (
+            f" {self.language.text('analysis.unit.percentage_points')}"
+            if unit == "%" else suffix
+        )
+        deviation = QLabel(f"{format_number(details['raw_error'])}{deviation_suffix}")
         deviation.setStyleSheet("font-weight: bold; color: #b85c00;")
         form.addRow(
             self.language.text("training.maximum_error.deviation_label"),
@@ -4607,6 +4991,132 @@ class TrainingDialog(QDialog):
             neuron.update()
         return True
 
+    def capture_training_execution_state(self):
+        """Sichert den geladenen Lauf vor einem neuen Trainingsabschnitt."""
+
+        run_attributes = (
+            "current_run_id",
+            "current_run_timestamp",
+            "current_run_completed_epochs",
+            "current_run_requested_epochs",
+            "current_run_elapsed_seconds",
+            "current_run_initialized",
+            "current_run_learning_rate",
+            "current_run_momentum",
+            "current_run_shuffle_seed",
+            "current_run_parent_id",
+            "current_run_can_continue",
+            "current_run_stopped",
+            "current_run_initial_state",
+            "next_training_run_id",
+            "training_elapsed_base",
+        )
+        result_widgets = (
+            "result_start_mse",
+            "result_mse",
+            "result_epochs",
+            "result_epoch_time",
+            "result_max_error",
+            "result_elapsed_time",
+            "result_status",
+        )
+        return {
+            "network": self.capture_training_state(),
+            "momentum": self.network.get_momentum_state(),
+            "processed_training_records": int(
+                getattr(self, "processed_training_records", 0)
+            ),
+            "run": {
+                name: deepcopy(getattr(self, name))
+                for name in run_attributes
+            },
+            "history_curve_points": deepcopy(self.history_curve_points),
+            "maximum_error_curve_points": deepcopy(
+                self.maximum_error_curve_points
+            ),
+            "error_chart_start_value": self.error_chart_start_value,
+            "error_chart_current_value": self.error_chart_current_value,
+            "error_chart_error_limit": self.error_chart.error_limit,
+            "maximum_error_details": deepcopy(self.maximum_error_details),
+            "plateau_history": deepcopy(self.plateau_history),
+            "plateau_warning_detected": self.plateau_warning_detected,
+            "plateau_warning_dismissed": self.plateau_warning_dismissed,
+            "result_texts": {
+                name: getattr(self, name).text()
+                for name in result_widgets
+            },
+            "total_workload_text": self.total_workload_label.text(),
+            "total_workload_visible": self.total_workload_label.isVisible(),
+        }
+
+    def restore_training_execution_state(self, state):
+        """Stellt den Zustand vor dem fehlgeschlagenen Abschnitt wieder her."""
+
+        if not isinstance(state, dict):
+            return False
+        if not self.restore_training_state(state.get("network")):
+            return False
+
+        self.network.restore_momentum_state(state.get("momentum"))
+        self.processed_training_records = int(
+            state.get("processed_training_records", 0)
+        )
+        for name, value in state.get("run", {}).items():
+            setattr(self, name, deepcopy(value))
+
+        self.history_curve_points = deepcopy(
+            state.get("history_curve_points", [])
+        )
+        self.maximum_error_curve_points = deepcopy(
+            state.get("maximum_error_curve_points", [])
+        )
+        self.error_chart_start_value = state.get(
+            "error_chart_start_value"
+        )
+        self.error_chart_current_value = state.get(
+            "error_chart_current_value"
+        )
+        self.maximum_error_details = deepcopy(
+            state.get("maximum_error_details")
+        )
+        self.plateau_history = deepcopy(state.get("plateau_history", []))
+        self.plateau_warning_detected = bool(
+            state.get("plateau_warning_detected", False)
+        )
+        self.plateau_warning_dismissed = bool(
+            state.get("plateau_warning_dismissed", False)
+        )
+        self.plateau_warning_container.setVisible(
+            self.plateau_warning_detected
+            and not self.plateau_warning_dismissed
+        )
+
+        self.error_chart.clear(state.get("error_chart_error_limit"))
+        for epoch, error_value in self.history_curve_points:
+            self.error_chart.add_point(epoch, error_value)
+        for epoch, error_value in self.maximum_error_curve_points:
+            self.error_chart.add_maximum_point(epoch, error_value)
+        self.error_chart.update()
+
+        for name, text in state.get("result_texts", {}).items():
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.setText(str(text))
+        self.total_workload_label.setText(
+            str(state.get("total_workload_text", ""))
+        )
+        self.total_workload_label.setVisible(
+            bool(state.get("total_workload_visible", False))
+        )
+        self.result_max_error_info.setEnabled(
+            self.maximum_error_details is not None
+        )
+        self.update_error_chart_summary()
+        self.update_training_run_label()
+        self.set_training_controls_enabled(True)
+        self.refresh_training_characteristic()
+        return True
+
     def execute_fixed_epochs(
         self,
         epoch_count
@@ -4655,6 +5165,8 @@ class TrainingDialog(QDialog):
                 self.language.text("training.status.not_started")
             )
             return
+
+        execution_state = self.capture_training_execution_state()
 
         try:
             self.network.set_learning_rate(
@@ -4807,6 +5319,11 @@ class TrainingDialog(QDialog):
             force=True
         )
 
+        # Zeigt vor der ersten Epoche den aktuellen Netzstand. Die
+        # aufwendigere Berechnung bleibt auf die gewählte und sichtbare
+        # Kennlinienansicht beschränkt.
+        self.refresh_training_characteristic()
+
         fast_enabled = not self.monitor_training_data.isChecked()
         self.fast_mode.setChecked(fast_enabled)
         trainer = self.network.trainer
@@ -4818,6 +5335,7 @@ class TrainingDialog(QDialog):
             trainer.visual_updates_enabled = False
             self.error_chart.minimum_update_interval = 1.0
         last_visible_refresh = time.monotonic()
+        last_characteristic_refresh = last_visible_refresh
 
         completed_epochs = base_epochs
         mean_squared_error = None
@@ -4827,6 +5345,7 @@ class TrainingDialog(QDialog):
         error_limit_reached = False
         training_stopped = False
         elapsed_seconds = 0.0
+        training_error = None
 
         try:
             self.network.prepare_training_calculation()
@@ -4862,6 +5381,13 @@ class TrainingDialog(QDialog):
                 self.record_maximum_error(current_epoch, maximum_absolute_error)
 
                 completed_epochs = current_epoch
+                # Both numeric metrics describe the same evaluated epoch,
+                # independently of the selected curve and network monitoring.
+                self.result_mse.setText(format_number(mean_squared_error))
+                self.result_max_error.setText(format_number(maximum_absolute_error))
+                self.result_epochs.setText(str(completed_epochs))
+                self.error_chart_current_value = mean_squared_error
+                self.update_error_chart_summary()
                 self.update_plateau_detection(
                     completed_epochs,
                     mean_squared_error,
@@ -4941,26 +5467,6 @@ class TrainingDialog(QDialog):
 
                 if visible_update_due:
                     last_visible_refresh = current_time
-                    # Die Ergebnisfelder werden immer aktualisiert,
-                    # auch wenn die Netzwerkdarstellung während
-                    # des Trainings nicht live überwacht wird.
-                    self.result_mse.setText(
-                        format_number(mean_squared_error)
-                    )
-
-                    self.result_epochs.setText(
-                        str(
-                            completed_epochs
-                        )
-                    )
-
-                    self.result_max_error.setText(
-                        format_number(maximum_absolute_error)
-                    )
-
-                    self.error_chart_current_value = mean_squared_error
-                    self.update_error_chart_summary()
-
                     if self.monitor_training_data.isChecked():
                         # Nur die grafische Netzwerkdarstellung
                         # wird bei ausgeschaltetem Monitoring
@@ -4972,25 +5478,20 @@ class TrainingDialog(QDialog):
                             }
                         )
 
+                    # Die Kennlinie benötigt 101 Vorwärtsrechnungen. Zwei
+                    # Aktualisierungen pro Sekunde zeigen die Entwicklung,
+                    # ohne den eigentlichen Lernlauf unnötig auszubremsen.
+                    if current_time - last_characteristic_refresh >= 0.5:
+                        if self.refresh_training_characteristic():
+                            last_characteristic_refresh = current_time
+
                     self.process_training_events()
 
         except (
             TypeError,
             ValueError
         ) as error:
-            QMessageBox.warning(
-                self,
-                self.language.text("training.message.title"),
-                str(
-                    error
-                )
-            )
-
-            self.result_status.setText(
-                self.language.text("training.status.aborted")
-            )
-
-            return
+            training_error = error
 
         finally:
             self.network.clear_prepared_training_calculation()
@@ -5021,6 +5522,21 @@ class TrainingDialog(QDialog):
                 )
 
             self.training_start_time = None
+
+        if training_error is not None:
+            self.restore_training_execution_state(execution_state)
+            error_key = getattr(training_error, "message_key", None)
+            error_text = (
+                self.language.text(error_key)
+                if error_key
+                else str(training_error)
+            )
+            QMessageBox.warning(
+                self,
+                self.language.text("training.message.title"),
+                error_text
+            )
+            return
 
         if mean_squared_error is None:
             self.result_status.setText(
@@ -5074,6 +5590,7 @@ class TrainingDialog(QDialog):
             self.error_chart.update()
         self.error_chart_current_value = mean_squared_error
         self.update_error_chart_summary()
+        self.refresh_training_characteristic()
 
         if training_stopped:
             status_text = self.language.text("training.status.user_aborted")

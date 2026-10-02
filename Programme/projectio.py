@@ -500,7 +500,7 @@ class ProjectIO:
         )
 
     @classmethod
-    def load_project(cls, file_path):
+    def load_project(cls, file_path, translator=None):
         """
         Liest eine Projektdatei ein und gibt
         die geprüften Projektdaten zurück.
@@ -527,7 +527,8 @@ class ProjectIO:
         )
 
         cls._validate_project_data(
-            project_data
+            project_data,
+            translator=translator
         )
 
         return project_data
@@ -834,7 +835,8 @@ class ProjectIO:
     @classmethod
     def _validate_project_data(
         cls,
-        project_data
+        project_data,
+        translator=None
     ):
         """
         Prüft die grundlegende Struktur
@@ -1007,6 +1009,7 @@ class ProjectIO:
             )
 
         used_connection_ids = set()
+        used_connection_pairs = set()
 
         for connection_data in connections:
             cls._validate_connection_data(
@@ -1014,6 +1017,21 @@ class ProjectIO:
                 used_connection_ids,
                 used_neuron_ids
             )
+            pair = (connection_data["source"], connection_data["target"])
+            if pair in used_connection_pairs:
+                message = (
+                    translator(
+                        "dialog.project_open.duplicate_connection",
+                        source=pair[0], target=pair[1]
+                    )
+                    if callable(translator)
+                    else (
+                        f"Die Projektdatei enthält mehrere Verbindungen von Neuron "
+                        f"{pair[0]} zu Neuron {pair[1]}. Das Projekt wurde nicht geöffnet."
+                    )
+                )
+                raise ValueError(message)
+            used_connection_pairs.add(pair)
 
     @staticmethod
     def _validate_neuron_data(

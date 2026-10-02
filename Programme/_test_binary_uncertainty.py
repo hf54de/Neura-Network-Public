@@ -71,7 +71,10 @@ class UncertaintyTests(unittest.TestCase):
                     uncertain = .4 < value < .6
                     self.assertEqual("⚠" in controls["state_label"].text(), uncertain)
                     self.assertEqual("#ffd966" in controls["value"].styleSheet(), uncertain)
-                    self.assertIn("Ein" if value > .5 else "Aus", controls["state_label"].text())
+                    self.assertIn("Ein", controls["state_label"].text())
+                    self.assertEqual(
+                        controls["state_label"].isChecked(), value > .5
+                    )
                     dialog.set_binary_output_intermediate_value(proxy, True, record_history=False)
                     self.assertEqual(bool(controls["value"].toolTip()), uncertain)
             dialog.deleteLater()

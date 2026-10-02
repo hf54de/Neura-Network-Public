@@ -169,7 +169,8 @@ class TrainingDataManager(QObject):
 
     def load(self, file_path):
         document = TrainingDataIO.load(
-            file_path
+            file_path,
+            translator=self.t
         )
 
         self.set_document(

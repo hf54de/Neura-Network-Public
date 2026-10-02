@@ -13,6 +13,7 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from language import LanguageManager
+from numberformat import linear_axis_ticks, linear_axis_label
 from trainingcomparison import (
     clipped_curve, comparison_color, normalized_curve, metric_curve_key, metric_chart_title,
 )
@@ -196,19 +197,23 @@ class TrainingErrorChart(QWidget):
         )
 
         painter.fillRect(
-            outer_rect,
-            QColor(255, 255, 255)
+            self.rect(),
+            self.palette().window().color()
         )
         painter.setPen(
             QPen(
-                QColor(185, 195, 205),
+                QColor(194, 204, 214),
                 1.0
             )
         )
+        painter.setBrush(QColor(255, 255, 255))
         painter.drawRoundedRect(
             outer_rect,
-            4.0,
-            4.0
+            7.0,
+            7.0
+        )
+        painter.setBrush(
+            Qt.BrushStyle.NoBrush
         )
 
         plot_rect = outer_rect.adjusted(
@@ -392,13 +397,9 @@ class TrainingErrorChart(QWidget):
             ]
 
         else:
-            tick_count = 5
             y_ticks = [
-                (
-                    tick_index / tick_count,
-                    (tick_index / tick_count) * maximum_error
-                )
-                for tick_index in range(tick_count + 1)
+                (value / maximum_error, value)
+                for value in linear_axis_ticks(0.0, maximum_error)
             ]
 
         for fraction, error_value in y_ticks:
@@ -437,6 +438,9 @@ class TrainingErrorChart(QWidget):
                 ),
                 self.format_axis_value(
                     error_value
+                )
+                if logarithmic_scale else linear_axis_label(
+                    error_value, self.language.current_language
                 )
             )
 

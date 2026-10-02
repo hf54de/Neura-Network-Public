@@ -10,6 +10,14 @@ import math
 from neurontype import NeuronType
 
 
+class TrainingNumericalError(ValueError):
+    """Numerischer Trainingsfehler mit übersetzbarem Meldungsschlüssel."""
+
+    def __init__(self, message_key, fallback_text):
+        super().__init__(fallback_text)
+        self.message_key = str(message_key)
+
+
 class BackpropagationTrainer:
     """
     Führt Backpropagation für ein vorhandenes
@@ -660,9 +668,13 @@ class BackpropagationTrainer:
         )
 
         if not math.isfinite(mean_squared_error):
-            raise ValueError(
-                "Das Training hat keinen endlichen Fehlerwert ergeben. "
-                "Prüfen Sie Skalierung und Lernrate."
+            raise TrainingNumericalError(
+                "training.error.invalid_error_value",
+                "Das Training wurde abgebrochen, weil die berechneten "
+                "Werte zu groß und dadurch ungültig geworden sind. Der "
+                "vorherige Trainingsstand wurde wiederhergestellt. "
+                "Verringern Sie die Lernrate oder prüfen Sie die Skalierung "
+                "der Trainingsdaten."
             )
 
         return {

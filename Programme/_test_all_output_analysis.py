@@ -2,8 +2,10 @@
 import os
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 from pathlib import Path
+from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtWidgets import QApplication, QDoubleSpinBox
 from PySide6.QtGui import QFontDatabase, QFont
+from PySide6.QtTest import QTest
 from resultanalysisdialog import ResultAnalysisDialog
 from trainingdataio import TrainingDataIO
 
@@ -46,6 +48,7 @@ def main():
     dialog.source_combo.blockSignals(False)
     dialog.sources = [source]
     dialog.populate_output_combo()
+    dialog.populate_characteristic_inputs()
     dialog.current_result = dialog.calculate(source)
     network.calls = 0
     values = dialog.calculate_all_sensitivities(source)
@@ -64,15 +67,169 @@ def main():
     assert len({r['plot_color'] for r in dialog.plot.rows}) == 3
     assert dialog.output_legend.isVisible()
     dialog.grab().save(str(out/'combined-plot.png'))
+    expected_tabs = [
+        dialog.records_tab,
+        dialog.overview_tab,
+        dialog.plot_tab,
+        dialog.characteristic_tab,
+        dialog.tolerance_tab,
+        dialog.sensitivity_tab,
+    ]
+    assert dialog.tabs.count() == len(expected_tabs)
+    assert all(dialog.tabs.indexOf(tab) >= 0 for tab in expected_tabs)
     dialog.tabs.setCurrentIndex(3)
     app.processEvents()
+    assert dialog.tabs.currentWidget() is dialog.characteristic_tab
+    assert dialog.output_combo.currentData() is None
+    assert dialog.output_combo.model().item(0).isEnabled()
+    assert not dialog.output_combo.view().isRowHidden(0)
+    assert dialog.characteristic_context.text() == dialog.t(
+        'analysis.output_required'
+    )
+    assert dialog.characteristic_plot.curve_points == []
+    dialog.grab().save(str(out/'all-outputs-characteristic-message.png'))
+    dialog.output_combo.setCurrentIndex(1)
+    app.processEvents()
     assert dialog.output_combo.currentData() == 2
-    assert not dialog.output_combo.model().item(0).isEnabled()
-    assert dialog.output_combo.view().isRowHidden(0)
+    assert dialog.output_combo.model().item(0).isEnabled()
+    assert not dialog.output_combo.view().isRowHidden(0)
+    assert len(dialog.characteristic_plot.curve_points) == 201
+    assert dialog.characteristic_plot.data_points == [(.6, .8)]
+    assert dialog.characteristic_plot.data_point_records == [2]
+    assert dialog.characteristic_plot.reference_point == (.2, 1.5)
+    assert dialog.characteristic_plot.reference_record == 1
+    assert dialog.characteristic_plot.data_point_strengths == [1.0]
+    assert not dialog.characteristic_show_points.isVisible()
+    assert dialog.characteristic_show_all_records.isVisible()
+    assert not dialog.characteristic_show_all_records.isChecked()
+    assert dialog.characteristic_reference_label.isVisible()
+    assert dialog.characteristic_reference_record.isVisible()
+    similarity_source = dict(
+        inputs=mappings[:2],
+        records=[[0, 0, 0], [10, .1, 0], [20, .5, 0], [30, 1, 0]],
+    )
+    similar = dialog.similar_characteristic_records(
+        similarity_source, mappings[0], 0, maximum_points=2
+    )
+    assert [item[0] for item in similar] == [1, 2]
+    assert similar[0][2] == 1.0 and similar[1][2] == .25
+    assert len(dialog.similar_characteristic_records(
+        similarity_source, mappings[0], 0, maximum_points=99
+    )) == 3
+    assert all(abs(a - b) < 1e-12 for a, b in zip(
+        dialog.characteristic_plot.curve_points[0], (.2, 1.4)
+    ))
+    assert all(abs(a - b) < 1e-12 for a, b in zip(
+        dialog.characteristic_plot.curve_points[-1], (.6, 1.8)
+    ))
+    assert network.nodes[0].input_value == 0
+    dialog.grab().save(str(out/'network-characteristic.png'))
+    assert not dialog.characteristic_show_all_button.isEnabled()
+    class WheelEvent:
+        def position(self):
+            return dialog.characteristic_plot.plot_rect().center()
+        def angleDelta(self):
+            return QPoint(0, 120)
+        def accept(self):
+            self.accepted = True
+    dialog.characteristic_plot.wheelEvent(WheelEvent())
+    app.processEvents()
+    assert dialog.characteristic_plot.view_range is not None
+    assert dialog.characteristic_show_all_button.isEnabled()
+    zoomed_range = dialog.characteristic_plot.view_range
+    class MouseEvent:
+        def __init__(self, position):
+            self._position = position
+        def position(self):
+            return self._position
+        def button(self):
+            return Qt.MouseButton.LeftButton
+        def accept(self):
+            self.accepted = True
+    center = dialog.characteristic_plot.plot_rect().center()
+    dialog.characteristic_plot.mousePressEvent(MouseEvent(center))
+    dialog.characteristic_plot.mouseMoveEvent(
+        MouseEvent(center + QPointF(20, 10))
+    )
+    dialog.characteristic_plot.mouseReleaseEvent(
+        MouseEvent(center + QPointF(20, 10))
+    )
+    assert dialog.characteristic_plot.view_range != zoomed_range
+    dialog.characteristic_show_all_button.click()
+    app.processEvents()
+    assert dialog.characteristic_plot.view_range is None
+    assert not dialog.characteristic_show_all_button.isEnabled()
+    dialog.characteristic_show_all_records.setChecked(True)
+    app.processEvents()
+    assert dialog.characteristic_plot.point_legend == 'Similar training records'
+    assert dialog.characteristic_plot.background_legend == 'All training records'
+    assert dialog.characteristic_plot.background_points == [(.6, .8)]
+    assert dialog.characteristic_plot.background_point_records == [2]
+    assert len(dialog.characteristic_plot.data_points) == 1
+    record_two_points = [
+        entry for entry in dialog.characteristic_plot.screen_points
+        if entry['record'] == 2
+    ]
+    assert record_two_points
+    chosen = dialog.characteristic_plot.nearest_record(
+        record_two_points[0]['point']
+    )
+    assert chosen['priority'] == 1
+    class HoverEvent:
+        def __init__(self, position):
+            self._position = position
+        def position(self):
+            return self._position
+        def globalPosition(self):
+            return self._position
+    dialog.characteristic_plot.mouseMoveEvent(
+        HoverEvent(record_two_points[0]['point'])
+    )
+    app.processEvents()
+    assert dialog.characteristic_plot.hovered_screen_entry()['priority'] == 1
+    assert dialog.characteristic_plot.x_unit == '%'
+    assert dialog.characteristic_plot.y_unit == '%'
+    dialog.grab().save(str(out/'characteristic-hover-values.png'))
+    dialog.characteristic_plot.hovered_record = None
+    dialog.characteristic_plot.update()
+    app.processEvents()
+    dialog.grab().save(str(out/'all-records-characteristic.png'))
+    dialog.characteristic_show_all_records.setChecked(False)
+    app.processEvents()
+    source['inputs'] = mappings[:1]
+    dialog.populate_characteristic_inputs()
+    dialog.refresh_characteristic()
+    app.processEvents()
+    assert not dialog.characteristic_reference_label.isVisible()
+    assert not dialog.characteristic_reference_record.isVisible()
+    assert dialog.characteristic_show_points.isVisible()
+    assert not dialog.characteristic_show_all_records.isVisible()
+    assert len(dialog.characteristic_plot.data_points) == 2
+    assert 'reference record' not in dialog.characteristic_explanation.text().lower()
+    dialog.grab().save(str(out/'single-input-characteristic.png'))
+    source['inputs'] = mappings[:2]
+    dialog.populate_characteristic_inputs()
+    dialog.refresh_characteristic()
+    dialog.populate_records_table()
+    app.processEvents()
+    record_two = next(
+        entry for entry in dialog.characteristic_plot.screen_points
+        if entry['record'] == 2 and entry['priority'] == 1
+    )
+    QTest.mouseClick(
+        dialog.characteristic_plot,
+        Qt.MouseButton.LeftButton,
+        pos=record_two['point'].toPoint(),
+    )
+    app.processEvents()
+    assert dialog.tabs.currentIndex() == 0
+    assert dialog.records_table.currentRow() == 1
+    dialog.tabs.setCurrentIndex(4)
+    app.processEvents()
     dialog.tolerance_spin.setValue(.125)
     assert dialog.tolerances[('output',2)] == .125
     dialog.grab().save(str(out/'single-tolerance.png'))
-    dialog.tabs.setCurrentIndex(4)
+    dialog.tabs.setCurrentIndex(5)
     app.processEvents()
     assert dialog.output_combo.currentData() == 2
     assert dialog.output_combo.view().isRowHidden(0)

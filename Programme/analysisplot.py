@@ -8,7 +8,7 @@
 import math
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
 
 from language import LanguageManager
@@ -87,6 +87,34 @@ class SollIstPlot(QWidget):
         return minimum, maximum, minimum, maximum
 
     @staticmethod
+    def axis_ticks(minimum, maximum):
+        """Wählt runde Schritte unabhängig vom Rand und vom Zoomausschnitt."""
+
+        span = maximum - minimum
+        if not math.isfinite(span) or span <= 0.0:
+            return ()
+        raw_step = span / 5.0
+        if raw_step <= 0.0:
+            return ()
+        magnitude = 10.0 ** math.floor(math.log10(raw_step))
+        if magnitude == 0.0:
+            return ()
+        fraction = raw_step / magnitude
+        factor = min((1.0, 2.0, 5.0, 10.0), key=lambda value: abs(math.log(fraction / value)))
+        step = factor * magnitude
+        first = math.ceil(minimum / step)
+        last = math.floor(maximum / step)
+        return tuple(index * step for index in range(first, last + 1))
+
+    def axis_tick_label(self, value):
+        """Vermeidet Rechenartefakte und nutzt das Dezimalzeichen der UI-Sprache."""
+
+        text = "0" if value == 0.0 else f"{value:.12g}"
+        if self.language.current_language == "de":
+            text = text.replace(".", ",")
+        return text
+
+    @staticmethod
     def bounded_interval(minimum, maximum, base_minimum, base_maximum):
         """Hält einen vergrößerten Ausschnitt innerhalb des Gesamtbereichs."""
 
@@ -135,14 +163,8 @@ class SollIstPlot(QWidget):
         if self.binary and self.view_range is None:
             x_ticks = y_ticks = (0.0, 0.5, 1.0)
         else:
-            x_ticks = tuple(
-                x_minimum + (x_maximum - x_minimum) * index / 5
-                for index in range(6)
-            )
-            y_ticks = tuple(
-                y_minimum + (y_maximum - y_minimum) * index / 5
-                for index in range(6)
-            )
+            x_ticks = self.axis_ticks(x_minimum, x_maximum)
+            y_ticks = self.axis_ticks(y_minimum, y_maximum)
 
         for x_value in x_ticks:
             x = self.map_point(
@@ -152,7 +174,7 @@ class SollIstPlot(QWidget):
             painter.setPen(QPen(QColor("#e3e8ec"), 1))
             painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
             painter.setPen(QColor("#4f5962"))
-            painter.drawText(QRectF(x - 35, rect.bottom() + 5, 70, 20), Qt.AlignmentFlag.AlignHCenter, f"{x_value:.4g}")
+            painter.drawText(QRectF(x - 35, rect.bottom() + 5, 70, 20), Qt.AlignmentFlag.AlignHCenter, self.axis_tick_label(x_value))
 
         for y_value in y_ticks:
             y = self.map_point(
@@ -162,7 +184,7 @@ class SollIstPlot(QWidget):
             painter.setPen(QPen(QColor("#e3e8ec"), 1))
             painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
             painter.setPen(QColor("#4f5962"))
-            painter.drawText(QRectF(2, y - 10, 54, 20), Qt.AlignmentFlag.AlignRight, f"{y_value:.4g}")
+            painter.drawText(QRectF(2, y - 10, 54, 20), Qt.AlignmentFlag.AlignRight, self.axis_tick_label(y_value))
 
         if self.show_tolerance and self.tolerance > 0.0:
             painter.save()
@@ -512,6 +534,715 @@ class SollIstPlot(QWidget):
             QToolTip.hideText()
             self.unsetCursor()
             self.update()
+        super().leaveEvent(event)
+
+
+class CharacteristicPlot(QWidget):
+    """Zeigt eine aus echten Vorwärtsläufen berechnete Netzkennlinie."""
+
+    recordActivated = Signal(str, int)
+    viewChanged = Signal(bool)
+
+    def __init__(self, parent=None, language_manager=None):
+        super().__init__(parent)
+        self.language = language_manager or LanguageManager()
+        self.t = self.language.text
+        self.curve_points = []
+        self.background_points = []
+        self.data_points = []
+        self.data_point_strengths = []
+        self.reference_point = None
+        self.data_point_records = []
+        self.background_point_records = []
+        self.reference_record = None
+        self.source_kind = ""
+        self.x_label = ""
+        self.y_label = ""
+        self.x_unit = ""
+        self.y_unit = ""
+        self.point_legend = ""
+        self.background_legend = ""
+        self.reference_legend = ""
+        self.compact_footer = False
+        self.view_range = None
+        self.dragging_plot = False
+        self.last_drag_position = None
+        self.hovered_record = None
+        self.screen_points = []
+        self.setMouseTracking(True)
+        self.setMinimumHeight(330)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+
+    def set_data(
+        self,
+        curve_points,
+        data_points,
+        x_label="",
+        y_label="",
+        point_legend="",
+        reference_point=None,
+        reference_legend="",
+        data_point_strengths=None,
+        background_points=None,
+        background_legend="",
+        data_point_records=None,
+        background_point_records=None,
+        reference_record=None,
+        source_kind="",
+        x_unit="",
+        y_unit="",
+    ):
+        self.curve_points = [
+            (float(x_value), float(y_value))
+            for x_value, y_value in curve_points
+            if math.isfinite(float(x_value))
+            and math.isfinite(float(y_value))
+        ]
+        self.data_points = [
+            (float(x_value), float(y_value))
+            for x_value, y_value in data_points
+            if math.isfinite(float(x_value))
+            and math.isfinite(float(y_value))
+        ]
+        self.background_points = [
+            (float(x_value), float(y_value))
+            for x_value, y_value in (background_points or [])
+            if math.isfinite(float(x_value))
+            and math.isfinite(float(y_value))
+        ]
+        strengths = list(data_point_strengths or [])
+        self.data_point_strengths = [
+            max(0.0, min(1.0, float(strengths[index])))
+            if index < len(strengths) else 1.0
+            for index in range(len(self.data_points))
+        ]
+        records = list(data_point_records or [])
+        self.data_point_records = [
+            int(records[index]) if index < len(records) else None
+            for index in range(len(self.data_points))
+        ]
+        background_records = list(background_point_records or [])
+        self.background_point_records = [
+            int(background_records[index])
+            if index < len(background_records) else None
+            for index in range(len(self.background_points))
+        ]
+        self.reference_point = None
+        if reference_point is not None:
+            x_value, y_value = reference_point
+            if math.isfinite(float(x_value)) and math.isfinite(float(y_value)):
+                self.reference_point = (float(x_value), float(y_value))
+        self.reference_record = (
+            int(reference_record) if reference_record is not None else None
+        )
+        self.source_kind = str(source_kind or "")
+        self.x_label = str(x_label or "")
+        self.y_label = str(y_label or "")
+        self.x_unit = str(x_unit or "").strip()
+        self.y_unit = str(y_unit or "").strip()
+        self.point_legend = str(point_legend or "")
+        self.background_legend = str(background_legend or "")
+        self.reference_legend = str(reference_legend or "")
+        self.reset_view()
+
+    def legend_items(self):
+        items = [
+            ("curve", self.t("analysis.characteristic.legend_curve"))
+        ]
+        if self.background_points and self.background_legend:
+            items.append(("background", self.background_legend))
+        if self.data_points and self.point_legend:
+            items.append(("similar", self.point_legend))
+        if self.reference_point is not None and self.reference_legend:
+            items.append(("reference", self.reference_legend))
+        return items
+
+    def compact_footer_active(self):
+        if not self.compact_footer:
+            return False
+        metrics = self.fontMetrics()
+        items = self.legend_items()
+        legend_width = sum(
+            32 + metrics.horizontalAdvance(label)
+            for _kind, label in items
+        ) + 18 * max(0, len(items) - 1)
+        axis_width = min(
+            220,
+            max(80, metrics.horizontalAdvance(self.x_label) + 16),
+        )
+        return axis_width + legend_width + 24 <= max(80, self.width() - 32)
+
+    def set_compact_footer(self, enabled):
+        self.compact_footer = bool(enabled)
+        self.update()
+
+    def plot_rect(self):
+        bottom_margin = 92 if self.compact_footer_active() else 112
+        return QRectF(
+            76,
+            36,
+            max(80, self.width() - 108),
+            max(80, self.height() - bottom_margin),
+        )
+
+    @staticmethod
+    def padded_range(values):
+        if not values:
+            return 0.0, 1.0
+        minimum = min(values)
+        maximum = max(values)
+        if math.isclose(minimum, maximum):
+            padding = max(1.0, abs(minimum) * 0.1)
+        else:
+            padding = (maximum - minimum) * 0.08
+        return minimum - padding, maximum + padding
+
+    def base_view_range(self):
+        points = (
+            list(self.curve_points)
+            + list(self.background_points)
+            + list(self.data_points)
+        )
+        if self.reference_point is not None:
+            points.append(self.reference_point)
+        if not points:
+            return 0.0, 1.0, 0.0, 1.0
+        x_minimum, x_maximum = self.padded_range(
+            [point[0] for point in points]
+        )
+        y_minimum, y_maximum = self.padded_range(
+            [point[1] for point in points]
+        )
+        return x_minimum, x_maximum, y_minimum, y_maximum
+
+    def current_view_range(self):
+        return self.view_range or self.base_view_range()
+
+    def reset_view(self):
+        self.view_range = None
+        self.dragging_plot = False
+        self.last_drag_position = None
+        self.hovered_record = None
+        self.unsetCursor()
+        QToolTip.hideText()
+        self.viewChanged.emit(False)
+        self.update()
+
+    @staticmethod
+    def map_point(
+        x_value,
+        y_value,
+        rect,
+        x_minimum,
+        x_maximum,
+        y_minimum,
+        y_maximum,
+    ):
+        x_span = max(1e-12, x_maximum - x_minimum)
+        y_span = max(1e-12, y_maximum - y_minimum)
+        return QPointF(
+            rect.left() + (x_value - x_minimum) / x_span * rect.width(),
+            rect.bottom() - (y_value - y_minimum) / y_span * rect.height(),
+        )
+
+    def axis_tick_label(self, value):
+        text = "0" if value == 0.0 else f"{value:.12g}"
+        return (
+            text.replace(".", ",")
+            if self.language.current_language == "de"
+            else text
+        )
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.fillRect(
+            self.rect(),
+            self.palette().window().color(),
+        )
+        outer_rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        painter.setPen(QPen(QColor("#c2ccd6"), 1))
+        painter.setBrush(QColor("#ffffff"))
+        painter.drawRoundedRect(outer_rect, 7, 7)
+        rect = self.plot_rect()
+        painter.setPen(QPen(QColor("#c9d2dc"), 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(rect)
+
+        if not self.curve_points:
+            painter.setPen(QColor("#5b6570"))
+            painter.drawText(
+                rect,
+                Qt.AlignmentFlag.AlignCenter,
+                self.t("analysis.characteristic.no_data"),
+            )
+            return
+
+        x_minimum, x_maximum, y_minimum, y_maximum = (
+            self.current_view_range()
+        )
+
+        painter.setPen(QPen(QColor("#e1e7ec"), 1))
+        for value in SollIstPlot.axis_ticks(x_minimum, x_maximum):
+            point = self.map_point(
+                value, y_minimum, rect,
+                x_minimum, x_maximum, y_minimum, y_maximum,
+            )
+            painter.drawLine(
+                QPointF(point.x(), rect.top()),
+                QPointF(point.x(), rect.bottom()),
+            )
+            painter.setPen(QColor("#44515c"))
+            painter.drawText(
+                QRectF(point.x() - 45, rect.bottom() + 5, 90, 20),
+                Qt.AlignmentFlag.AlignCenter,
+                self.axis_tick_label(value),
+            )
+            painter.setPen(QPen(QColor("#e1e7ec"), 1))
+        for value in SollIstPlot.axis_ticks(y_minimum, y_maximum):
+            point = self.map_point(
+                x_minimum, value, rect,
+                x_minimum, x_maximum, y_minimum, y_maximum,
+            )
+            painter.drawLine(
+                QPointF(rect.left(), point.y()),
+                QPointF(rect.right(), point.y()),
+            )
+            painter.setPen(QColor("#44515c"))
+            painter.drawText(
+                QRectF(2, point.y() - 10, 68, 20),
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                self.axis_tick_label(value),
+            )
+            painter.setPen(QPen(QColor("#e1e7ec"), 1))
+
+        legend_items = self.legend_items()
+        metrics = painter.fontMetrics()
+        item_widths = [
+            32 + metrics.horizontalAdvance(label)
+            for _kind, label in legend_items
+        ]
+        legend_spacing = 18
+        legend_width = sum(item_widths) + legend_spacing * (
+            len(legend_items) - 1
+        )
+        compact_footer = self.compact_footer_active()
+        if compact_footer:
+            axis_width = min(
+                220,
+                max(80, metrics.horizontalAdvance(self.x_label) + 16),
+            )
+            footer_center = outer_rect.center().x()
+            center_offset = (axis_width + legend_width) / 4 + 6
+            axis_center = footer_center - center_offset
+            legend_center = footer_center + center_offset
+            legend_x = legend_center - legend_width / 2
+            legend_y = rect.bottom() + 43
+            x_label_rect = QRectF(
+                axis_center - axis_width / 2,
+                rect.bottom() + 31,
+                axis_width,
+                24,
+            )
+            x_label = metrics.elidedText(
+                self.x_label,
+                Qt.TextElideMode.ElideRight,
+                max(1, int(x_label_rect.width() - 8)),
+            )
+        else:
+            legend_x = rect.center().x() - legend_width / 2
+            legend_y = rect.bottom() + 68
+            x_label_rect = QRectF(
+                rect.left(), rect.bottom() + 31, rect.width(), 24
+            )
+            x_label = self.x_label
+
+        painter.setPen(QColor("#243746"))
+        painter.drawText(
+            x_label_rect,
+            Qt.AlignmentFlag.AlignCenter,
+            x_label,
+        )
+        painter.save()
+        painter.translate(19, rect.center().y())
+        painter.rotate(-90)
+        painter.drawText(
+            QRectF(-rect.height() / 2, -12, rect.height(), 24),
+            Qt.AlignmentFlag.AlignCenter,
+            self.y_label,
+        )
+        painter.restore()
+
+        painter.save()
+        painter.setClipRect(rect.adjusted(-2, -2, 2, 2))
+        self.screen_points = []
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(117, 129, 139, 62))
+        for index, (x_value, y_value) in enumerate(self.background_points):
+            point = self.map_point(
+                x_value, y_value, rect,
+                x_minimum, x_maximum, y_minimum, y_maximum,
+            )
+            painter.drawEllipse(point, 1.45, 1.45)
+            if rect.adjusted(-8, -8, 8, 8).contains(point):
+                self.screen_points.append({
+                    "point": point,
+                    "record": self.background_point_records[index],
+                    "x": x_value,
+                    "y": y_value,
+                    "priority": 0,
+                })
+
+        paint_order = sorted(
+            range(len(self.data_points)),
+            key=lambda index: self.data_point_strengths[index],
+        )
+        for index in paint_order:
+            x_value, y_value = self.data_points[index]
+            strength = self.data_point_strengths[index]
+            alpha = round(65 + 150 * strength)
+            outline = QColor(141, 105, 0, min(255, alpha + 25))
+            fill = QColor(244, 196, 48, alpha)
+            painter.setPen(QPen(outline, 0.8))
+            painter.setBrush(fill)
+            point = self.map_point(
+                x_value, y_value, rect,
+                x_minimum, x_maximum, y_minimum, y_maximum,
+            )
+            painter.drawEllipse(point, 3.2, 3.2)
+            if rect.adjusted(-8, -8, 8, 8).contains(point):
+                self.screen_points.append({
+                    "point": point,
+                    "record": self.data_point_records[index],
+                    "x": x_value,
+                    "y": y_value,
+                    "priority": 1,
+                })
+
+        if self.reference_point is not None:
+            point = self.map_point(
+                self.reference_point[0], self.reference_point[1], rect,
+                x_minimum, x_maximum, y_minimum, y_maximum,
+            )
+            painter.setPen(QPen(QColor("#735500"), 1.2))
+            painter.setBrush(QColor("#f4c430"))
+            painter.drawEllipse(point, 5.5, 5.5)
+            if rect.adjusted(-10, -10, 10, 10).contains(point):
+                self.screen_points.append({
+                    "point": point,
+                    "record": self.reference_record,
+                    "x": self.reference_point[0],
+                    "y": self.reference_point[1],
+                    "priority": 2,
+                })
+
+        path = QPainterPath()
+        for index, (x_value, y_value) in enumerate(self.curve_points):
+            point = self.map_point(
+                x_value, y_value, rect,
+                x_minimum, x_maximum, y_minimum, y_maximum,
+            )
+            if index == 0:
+                path.moveTo(point)
+            else:
+                path.lineTo(point)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor("#1676b8"), 2.2))
+        painter.drawPath(path)
+        painter.restore()
+
+        hovered_entry = self.hovered_screen_entry()
+        if hovered_entry is not None:
+            point = hovered_entry["point"]
+            painter.save()
+            painter.setClipRect(rect)
+            painter.setPen(
+                QPen(QColor("#4f788f"), 1, Qt.PenStyle.DashLine)
+            )
+            painter.drawLine(QPointF(rect.left(), point.y()), point)
+            painter.drawLine(point, QPointF(point.x(), rect.bottom()))
+            painter.restore()
+
+            x_suffix = f" {self.x_unit}" if self.x_unit else ""
+            y_suffix = f" {self.y_unit}" if self.y_unit else ""
+            x_text = (
+                f"{self.axis_tick_label(hovered_entry['x'])}{x_suffix}"
+            )
+            y_text = (
+                f"{self.axis_tick_label(hovered_entry['y'])}{y_suffix}"
+            )
+            painter.setPen(QPen(QColor("#4f788f"), 1))
+            painter.setBrush(QColor("#eef5f8"))
+            x_value_label = QRectF(
+                point.x() - 48, rect.bottom() + 4, 96, 22
+            )
+            y_value_label = QRectF(
+                1, point.y() - 11, 70, 22
+            )
+            painter.drawRoundedRect(x_value_label, 3, 3)
+            painter.drawRoundedRect(y_value_label, 3, 3)
+            painter.drawText(
+                x_value_label, Qt.AlignmentFlag.AlignCenter, x_text
+            )
+            painter.drawText(
+                y_value_label, Qt.AlignmentFlag.AlignCenter, y_text
+            )
+
+        item_x = legend_x
+        for index, (kind, label) in enumerate(legend_items):
+            if kind == "curve":
+                painter.setPen(QPen(QColor("#1676b8"), 2.2))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawLine(
+                    QPointF(item_x, legend_y),
+                    QPointF(item_x + 24, legend_y),
+                )
+            elif kind == "background":
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(117, 129, 139, 90))
+                painter.drawEllipse(
+                    QPointF(item_x + 12, legend_y), 2.2, 2.2
+                )
+            elif kind == "similar":
+                painter.setPen(QPen(QColor(141, 105, 0, 150), 1))
+                painter.setBrush(QColor(244, 196, 48, 135))
+                painter.drawEllipse(
+                    QPointF(item_x + 12, legend_y), 3.5, 3.5
+                )
+            else:
+                painter.setPen(QPen(QColor("#735500"), 1.2))
+                painter.setBrush(QColor("#f4c430"))
+                painter.drawEllipse(
+                    QPointF(item_x + 12, legend_y), 5.0, 5.0
+                )
+            painter.setPen(QColor("#243746"))
+            painter.drawText(
+                QPointF(item_x + 32, legend_y + 5), label
+            )
+            item_x += item_widths[index] + legend_spacing
+
+    def nearest_record(self, position, maximum_distance=10.0):
+        candidates = []
+        for entry in self.screen_points:
+            if entry["record"] is None:
+                continue
+            point = entry["point"]
+            distance = math.hypot(
+                position.x() - point.x(), position.y() - point.y()
+            )
+            if distance <= maximum_distance:
+                candidates.append((entry["priority"], -distance, entry))
+        if not candidates:
+            return None
+        return max(
+            candidates,
+            key=lambda candidate: (candidate[0], candidate[1]),
+        )[2]
+
+    def hovered_screen_entry(self):
+        if self.hovered_record is None:
+            return None
+        entries = [
+            entry for entry in self.screen_points
+            if entry["record"] == self.hovered_record
+        ]
+        return max(
+            entries,
+            key=lambda entry: entry["priority"],
+            default=None,
+        )
+
+    def mouseMoveEvent(self, event):
+        if self.dragging_plot and self.last_drag_position is not None:
+            rect = self.plot_rect()
+            position = event.position()
+            delta = position - self.last_drag_position
+            x_minimum, x_maximum, y_minimum, y_maximum = (
+                self.current_view_range()
+            )
+            base_x_minimum, base_x_maximum, base_y_minimum, base_y_maximum = (
+                self.base_view_range()
+            )
+            x_shift = (
+                delta.x() / max(1.0, rect.width())
+                * (x_maximum - x_minimum)
+            )
+            y_shift = (
+                delta.y() / max(1.0, rect.height())
+                * (y_maximum - y_minimum)
+            )
+            new_x_minimum, new_x_maximum = SollIstPlot.bounded_interval(
+                x_minimum - x_shift,
+                x_maximum - x_shift,
+                base_x_minimum,
+                base_x_maximum,
+            )
+            new_y_minimum, new_y_maximum = SollIstPlot.bounded_interval(
+                y_minimum + y_shift,
+                y_maximum + y_shift,
+                base_y_minimum,
+                base_y_maximum,
+            )
+            self.view_range = (
+                new_x_minimum,
+                new_x_maximum,
+                new_y_minimum,
+                new_y_maximum,
+            )
+            self.last_drag_position = position
+            self.hovered_record = None
+            self.viewChanged.emit(True)
+            QToolTip.hideText()
+            self.update()
+            return
+
+        entry = self.nearest_record(event.position())
+        if entry is None:
+            if self.hovered_record is not None:
+                self.hovered_record = None
+                self.update()
+            QToolTip.hideText()
+            self.setCursor(
+                Qt.CursorShape.OpenHandCursor
+                if self.plot_rect().contains(event.position())
+                else Qt.CursorShape.ArrowCursor
+            )
+            return
+
+        record = int(entry["record"])
+        if record != self.hovered_record:
+            self.hovered_record = record
+            self.update()
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        QToolTip.showText(
+            event.globalPosition().toPoint(),
+            self.t(
+                "analysis.characteristic.tooltip",
+                record=entry["record"],
+                x_label=self.x_label,
+                x=self.axis_tick_label(entry["x"]),
+                y_label=self.y_label,
+                y=self.axis_tick_label(entry["y"]),
+            ),
+            self,
+        )
+
+    def mousePressEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        entry = self.nearest_record(event.position())
+        if entry is not None:
+            self.recordActivated.emit(
+                self.source_kind, int(entry["record"])
+            )
+            event.accept()
+            return
+        if self.plot_rect().contains(event.position()):
+            self.dragging_plot = True
+            self.last_drag_position = event.position()
+            self.hovered_record = None
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            QToolTip.hideText()
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self.dragging_plot:
+            self.dragging_plot = False
+            self.last_drag_position = None
+            self.setCursor(
+                Qt.CursorShape.OpenHandCursor
+                if self.plot_rect().contains(event.position())
+                else Qt.CursorShape.ArrowCursor
+            )
+            event.accept()
+
+    def wheelEvent(self, event):
+        rect = self.plot_rect()
+        position = event.position()
+        if not rect.contains(position) or event.angleDelta().y() == 0:
+            super().wheelEvent(event)
+            return
+
+        x_minimum, x_maximum, y_minimum, y_maximum = (
+            self.current_view_range()
+        )
+        base_x_minimum, base_x_maximum, base_y_minimum, base_y_maximum = (
+            self.base_view_range()
+        )
+        factor = 0.8 if event.angleDelta().y() > 0 else 1.25
+        if factor > 1.0 and self.view_range is None:
+            event.accept()
+            return
+        if factor < 1.0:
+            x_base_span = max(1e-12, base_x_maximum - base_x_minimum)
+            y_base_span = max(1e-12, base_y_maximum - base_y_minimum)
+            if (
+                x_maximum - x_minimum <= x_base_span * 1e-6
+                or y_maximum - y_minimum <= y_base_span * 1e-6
+            ):
+                event.accept()
+                return
+
+        x_fraction = (
+            (position.x() - rect.left()) / max(1.0, rect.width())
+        )
+        y_fraction = (
+            (rect.bottom() - position.y()) / max(1.0, rect.height())
+        )
+        x_span = x_maximum - x_minimum
+        y_span = y_maximum - y_minimum
+        x_center = x_minimum + x_fraction * x_span
+        y_center = y_minimum + y_fraction * y_span
+        new_x_minimum = x_center - (x_center - x_minimum) * factor
+        new_x_maximum = x_center + (x_maximum - x_center) * factor
+        new_y_minimum = y_center - (y_center - y_minimum) * factor
+        new_y_maximum = y_center + (y_maximum - y_center) * factor
+        if factor > 1.0:
+            new_x_minimum, new_x_maximum = SollIstPlot.bounded_interval(
+                new_x_minimum,
+                new_x_maximum,
+                base_x_minimum,
+                base_x_maximum,
+            )
+            new_y_minimum, new_y_maximum = SollIstPlot.bounded_interval(
+                new_y_minimum,
+                new_y_maximum,
+                base_y_minimum,
+                base_y_maximum,
+            )
+            at_base = all((
+                math.isclose(new_x_minimum, base_x_minimum),
+                math.isclose(new_x_maximum, base_x_maximum),
+                math.isclose(new_y_minimum, base_y_minimum),
+                math.isclose(new_y_maximum, base_y_maximum),
+            ))
+            self.view_range = None if at_base else (
+                new_x_minimum,
+                new_x_maximum,
+                new_y_minimum,
+                new_y_maximum,
+            )
+        else:
+            self.view_range = (
+                new_x_minimum,
+                new_x_maximum,
+                new_y_minimum,
+                new_y_maximum,
+            )
+        self.hovered_record = None
+        self.viewChanged.emit(self.view_range is not None)
+        QToolTip.hideText()
+        self.update()
+        event.accept()
+
+    def leaveEvent(self, event):
+        if not self.dragging_plot:
+            self.hovered_record = None
+            QToolTip.hideText()
+            self.unsetCursor()
         super().leaveEvent(event)
 
 

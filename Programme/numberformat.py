@@ -8,6 +8,34 @@
 import math
 
 
+def linear_axis_ticks(minimum, maximum):
+    """Liefert runde Achsenschritte innerhalb des sichtbaren Wertebereichs."""
+    span = maximum - minimum
+    if not math.isfinite(span) or span <= 0.0:
+        return ()
+    raw_step = span / 5.0
+    if raw_step <= 0.0:
+        return ()
+    magnitude = 10.0 ** math.floor(math.log10(raw_step))
+    if magnitude == 0.0:
+        return ()
+    fraction = raw_step / magnitude
+    factor = min(
+        (1.0, 2.0, 5.0, 10.0),
+        key=lambda value: abs(math.log(fraction / value)),
+    )
+    step = factor * magnitude
+    first = math.ceil(minimum / step)
+    last = math.floor(maximum / step)
+    return tuple(index * step for index in range(first, last + 1))
+
+
+def linear_axis_label(value, language_code):
+    """Formatiert lineare Achsenwerte ohne unnötige Nachkommastellen."""
+    text = "0" if value == 0.0 else f"{value:.12g}"
+    return text.replace(".", ",") if language_code == "de" else text
+
+
 def format_number(
     value,
     significant_digits=6,

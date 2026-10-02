@@ -10,7 +10,8 @@ from PySide6.QtGui import QBrush, QColor, QPen, QTransform
 from PySide6.QtWidgets import (
     QGraphicsRectItem,
     QGraphicsScene,
-    QMenu
+    QMenu,
+    QMessageBox,
 )
 
 from commentitem import CommentItem
@@ -18,6 +19,7 @@ from connection import Connection
 from connectionpreview import ConnectionPreview
 from network import NeuralNetwork
 from neuron import Neuron
+from neurontype import NeuronType
 from language import LanguageManager
 
 
@@ -451,12 +453,35 @@ class EditorScene(QGraphicsScene):
             target_neuron
         )
 
+    def show_connection_restriction(self, restriction):
+        """Erklärt, weshalb die gewünschte Verbindung nicht zulässig ist."""
+
+        text_keys = {
+            "self": "canvas.connection.invalid.self",
+            "output_source": "canvas.connection.invalid.output_source",
+            "input_target": "canvas.connection.invalid.input_target",
+            "cycle": "canvas.connection.invalid.cycle",
+            "direction": "canvas.connection.invalid.direction",
+        }
+        key = text_keys.get(restriction)
+        if key is None:
+            return
+        parent = self.views()[0] if self.views() else None
+        QMessageBox.warning(
+            parent,
+            self.t("canvas.connection.invalid.title"),
+            self.t(key),
+        )
+
     def start_connection(self, source_neuron):
         """
         Beginnt das Erstellen einer neuen Verbindung.
         """
 
         self.cancel_connection()
+
+        if source_neuron.neuron_type == NeuronType.OUTPUT:
+            return False
 
         self.connection_source_neuron = source_neuron
 
@@ -470,6 +495,73 @@ class EditorScene(QGraphicsScene):
 
         self.addItem(
             self.connection_preview
+        )
+
+        return True
+
+    def connection_drawing_restriction(self, source_neuron, target_neuron):
+        """Prüft zusätzlich die sichtbare Signalrichtung von links nach rechts."""
+
+        restriction = self.network.connection_restriction(
+            source_neuron,
+            target_neuron,
+        )
+        if restriction is not None:
+            return restriction
+        if (
+            target_neuron.get_input_port_position().x()
+            <= source_neuron.get_output_port_position().x()
+        ):
+            return "direction"
+        return None
+
+    def connection_skips_visible_layer(self, source_neuron, target_neuron):
+        """Erkennt Neuronen, die vollständig zwischen Start und Ziel liegen."""
+
+        source_x = source_neuron.get_output_port_position().x()
+        target_x = target_neuron.get_input_port_position().x()
+
+        return any(
+            neuron is not source_neuron
+            and neuron is not target_neuron
+            and neuron.get_input_port_position().x() > source_x
+            and neuron.get_output_port_position().x() < target_x
+            for neuron in self.network.get_neurons()
+        )
+
+    def confirm_layer_skipping_connection(self):
+        """Fragt nach, bevor eine sichtbare Neuronenschicht übersprungen wird."""
+
+        parent = self.views()[0] if self.views() else None
+        message_box = QMessageBox(parent)
+        message_box.setIcon(QMessageBox.Icon.Warning)
+        message_box.setWindowTitle(
+            self.t("canvas.connection.skip.title")
+        )
+        message_box.setText(
+            self.t("canvas.connection.skip.message")
+        )
+        message_box.setStandardButtons(
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.Cancel
+        )
+        message_box.setDefaultButton(
+            QMessageBox.StandardButton.Cancel
+        )
+        message_box.button(
+            QMessageBox.StandardButton.Yes
+        ).setText(
+            self.t("canvas.connection.skip.create")
+        )
+        message_box.button(
+            QMessageBox.StandardButton.Cancel
+        ).setText(
+            self.t("common.cancel")
+        )
+
+        return (
+            message_box.exec()
+            == QMessageBox.StandardButton.Yes
         )
 
     def cancel_connection(self):
@@ -800,20 +892,19 @@ class EditorScene(QGraphicsScene):
         scene_position = event.scenePos()
 
         # Ausgangsport angeklickt:
-        # Verbindungserstellung beginnen.
+        # Das zugehörige Neuron auswählen und – sofern zulässig –
+        # die Verbindungserstellung beginnen.
         for item in self.items(scene_position):
             if (
                 isinstance(item, Neuron)
                 and item.is_output_port_at(scene_position)
             ):
-                if not item.isSelected():
-                    if not (
-                        event.modifiers()
-                        & Qt.KeyboardModifier.ControlModifier
-                    ):
-                        self.clearSelection()
+                self.clearSelection()
+                item.setSelected(True)
 
-                    item.setSelected(True)
+                if item.neuron_type == NeuronType.OUTPUT:
+                    event.accept()
+                    return
 
                 self.start_connection(item)
 
@@ -910,24 +1001,37 @@ class EditorScene(QGraphicsScene):
 
             self.cancel_connection()
 
-            if (
-                target_neuron is not None
-                and target_neuron is not source_neuron
-                and not self.connection_exists(
+            if target_neuron is not None:
+                restriction = self.connection_drawing_restriction(
                     source_neuron,
-                    target_neuron
+                    target_neuron,
                 )
-            ):
-                connection = self.add_connection(
-                    self.next_connection_id,
+                if restriction is not None:
+                    self.show_connection_restriction(restriction)
+                elif not self.connection_exists(
                     source_neuron,
-                    target_neuron
-                )
+                    target_neuron,
+                ):
+                    if (
+                        self.connection_skips_visible_layer(
+                            source_neuron,
+                            target_neuron,
+                        )
+                        and not self.confirm_layer_skipping_connection()
+                    ):
+                        event.accept()
+                        return
 
-                self.next_connection_id += 1
+                    connection = self.add_connection(
+                        self.next_connection_id,
+                        source_neuron,
+                        target_neuron,
+                    )
 
-                self.clearSelection()
-                connection.setSelected(True)
+                    self.next_connection_id += 1
+
+                    self.clearSelection()
+                    connection.setSelected(True)
 
             event.accept()
             return

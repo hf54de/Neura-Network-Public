@@ -18,6 +18,7 @@ from PySide6.QtCore import (
     QPoint,
     QPointF,
     QRectF,
+    QSize,
     QSettings,
     Signal,
     QStandardPaths,
@@ -29,6 +30,7 @@ from PySide6.QtGui import (
     QColor,
     QCursor,
     QFontDatabase,
+    QIcon,
     QKeySequence,
     QPainter,
     QPainterPath,
@@ -67,6 +69,10 @@ from PySide6.QtWidgets import (
     QSlider,
     QSpinBox,
     QStackedWidget,
+    QTabWidget,
+    QStyle,
+    QStyleOptionButton,
+    QStyleOptionSlider,
     QTableWidget,
     QTableWidgetItem,
     QToolButton,
@@ -196,6 +202,725 @@ class CompactInputSpinBox(QDoubleSpinBox):
         return text
 
 
+class CenteredCheckMarkBox(QCheckBox):
+    """Behält das native Kontrollfeld bei und zentriert dessen Häkchen."""
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self.checkState() != Qt.CheckState.Checked:
+            return
+
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        indicator = self.style().subElementRect(
+            QStyle.SubElement.SE_CheckBoxIndicator,
+            option,
+            self,
+        )
+        if indicator.isEmpty():
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        inset = max(1.0, indicator.width() * 0.08)
+        interior = QRectF(indicator).adjusted(inset, inset, -inset, -inset)
+        fill_color = option.palette.highlight().color()
+        mark_color = option.palette.highlightedText().color()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(fill_color)
+        corner_radius = max(1.0, interior.width() * 0.16)
+        painter.drawRoundedRect(interior, corner_radius, corner_radius)
+
+        path = QPainterPath()
+        path.moveTo(
+            interior.left() + interior.width() * 0.25,
+            interior.top() + interior.height() * 0.52,
+        )
+        path.lineTo(
+            interior.left() + interior.width() * 0.43,
+            interior.top() + interior.height() * 0.68,
+        )
+        path.lineTo(
+            interior.left() + interior.width() * 0.75,
+            interior.top() + interior.height() * 0.34,
+        )
+        pen = QPen(mark_color, max(1.2, interior.width() * 0.10))
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPath(path)
+
+
+class CompactInputSlider(QSlider):
+    """Analoger Schieberegler im segmentierten Stil der Ausgabekacheln."""
+
+    def __init__(self, parent=None):
+        super().__init__(Qt.Orientation.Horizontal, parent)
+        self.foreground_color = QColor("#333333")
+
+    def set_foreground_color(self, color):
+        self.foreground_color = QColor(color)
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        option = QStyleOptionSlider()
+        self.initStyleOption(option)
+        handle_rect = self.style().subControlRect(
+            QStyle.ComplexControl.CC_Slider,
+            option,
+            QStyle.SubControl.SC_SliderHandle,
+            self,
+        )
+        handle_width = max(10.0, float(handle_rect.width()))
+        track_left = handle_width / 2.0
+        track_right = max(track_left, self.width() - handle_width / 2.0)
+        track_width = max(1.0, track_right - track_left)
+        span = self.maximum() - self.minimum()
+        ratio = (
+            0.0
+            if span <= 0
+            else (self.value() - self.minimum()) / float(span)
+        )
+        ratio = max(0.0, min(1.0, ratio))
+        if option.upsideDown:
+            ratio = 1.0 - ratio
+
+        segment_count = 15
+        gap = max(1.0, min(2.2, track_width * 0.009))
+        segment_width = max(
+            1.0,
+            (track_width - gap * (segment_count - 1)) / segment_count,
+        )
+        bar_height = max(5.0, min(8.0, self.height() * 0.34))
+        top = (self.height() - bar_height) / 2.0
+        inactive_color = QColor(self.foreground_color)
+        inactive_color.setAlpha(55)
+        active_count = int(math.ceil(ratio * segment_count - 1e-9))
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        for step in range(segment_count):
+            painter.setBrush(
+                self.foreground_color
+                if step < active_count
+                else inactive_color
+            )
+            x = track_left + step * (segment_width + gap)
+            painter.drawRoundedRect(
+                QRectF(x, top, segment_width, bar_height),
+                1.2,
+                1.2,
+            )
+
+        handle_center = QPointF(
+            track_left + ratio * track_width,
+            self.height() / 2.0,
+        )
+        handle_radius = max(4.5, min(6.5, self.height() * 0.30))
+        if self.hasFocus():
+            focus_color = QColor(self.foreground_color)
+            focus_color.setAlpha(80)
+            painter.setPen(QPen(focus_color, 1.2))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(
+                handle_center,
+                handle_radius + 2.0,
+                handle_radius + 2.0,
+            )
+        painter.setPen(QPen(self.foreground_color, 1.2))
+        painter.setBrush(QColor("#c51d24"))
+        painter.drawEllipse(handle_center, handle_radius, handle_radius)
+
+
+class CompactInputDial(QSlider):
+    """Bedienbarer Halbkreis-Drehregler im Stil der Zeigeranzeige."""
+
+    def __init__(self, display_minimum=0.0, display_maximum=1.0, unit="", parent=None):
+        super().__init__(Qt.Orientation.Horizontal, parent)
+        self.display_minimum = float(display_minimum)
+        self.display_maximum = float(display_maximum)
+        self.unit = str(unit or "")
+        self.foreground_color = QColor("#333333")
+        self.setMinimumHeight(64)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def set_foreground_color(self, color):
+        self.foreground_color = QColor(color)
+        self.update()
+
+    def _geometry(self):
+        label_height = max(16.0, float(self.fontMetrics().height()) + 2.0)
+        label_gap = 3.0
+        vertical_margin = 4.0
+        available_width = max(20.0, self.width() - 16.0)
+        available_height = max(
+            20.0,
+            2.0 * (
+                self.height()
+                - 2.0 * vertical_margin
+                - label_gap
+                - label_height
+            ),
+        )
+        diameter = max(20.0, min(available_width, available_height))
+        group_height = diameter / 2.0 + label_gap + label_height
+        group_top = max(
+            vertical_margin,
+            (self.height() - group_height) / 2.0,
+        )
+        rect = QRectF(
+            (self.width() - diameter) / 2.0,
+            group_top,
+            diameter,
+            diameter,
+        )
+        return rect, QPointF(rect.center().x(), rect.center().y())
+
+    def _set_value_from_position(self, position):
+        _rect, center = self._geometry()
+        dx = float(position.x()) - center.x()
+        dy = center.y() - float(position.y())
+        if dy < 0.0:
+            angle = math.pi if dx < 0.0 else 0.0
+        else:
+            angle = math.atan2(dy, dx)
+            angle = max(0.0, min(math.pi, angle))
+        ratio = 1.0 - angle / math.pi
+        value = self.minimum() + ratio * (self.maximum() - self.minimum())
+        self.setValue(round(value))
+
+    def mousePressEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton:
+            return super().mousePressEvent(event)
+        self.setFocus(Qt.FocusReason.MouseFocusReason)
+        self.setSliderDown(True)
+        self._set_value_from_position(event.position())
+        event.accept()
+
+    def mouseMoveEvent(self, event):
+        if not self.isSliderDown():
+            return super().mouseMoveEvent(event)
+        self._set_value_from_position(event.position())
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton or not self.isSliderDown():
+            return super().mouseReleaseEvent(event)
+        self._set_value_from_position(event.position())
+        self.setSliderDown(False)
+        event.accept()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect, center = self._geometry()
+        span = self.maximum() - self.minimum()
+        ratio = (
+            0.0
+            if span <= 0
+            else (self.value() - self.minimum()) / float(span)
+        )
+        ratio = max(0.0, min(1.0, ratio))
+
+        segment_count = 15
+        segment_angle = 180.0 / segment_count
+        gap_angle = 2.6
+        scale_width = max(4.0, min(8.0, rect.width() * 0.055))
+        scale_rect = rect.adjusted(
+            scale_width / 2.0,
+            scale_width / 2.0,
+            -scale_width / 2.0,
+            -scale_width / 2.0,
+        )
+        inactive_color = QColor(self.foreground_color)
+        inactive_color.setAlpha(55)
+        active_count = int(math.ceil(ratio * segment_count - 1e-9))
+        for step in range(segment_count):
+            pen = QPen(
+                self.foreground_color if step < active_count else inactive_color,
+                scale_width,
+            )
+            pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+            painter.setPen(pen)
+            start_angle = 180.0 - (step + 1) * segment_angle + gap_angle / 2.0
+            painter.drawArc(
+                scale_rect,
+                int(round(start_angle * 16.0)),
+                int(round((segment_angle - gap_angle) * 16.0)),
+            )
+
+        radius = min(scale_rect.width(), scale_rect.height()) / 2.0
+        angle = math.radians(180.0 - ratio * 180.0)
+        direction = QPointF(math.cos(angle), -math.sin(angle))
+        perpendicular = QPointF(-direction.y(), direction.x())
+        needle_length = radius * 0.78
+        counterweight_length = radius * 0.14
+        half_base_width = max(2.6, rect.width() * 0.026)
+        tip = center + direction * needle_length
+        left = center + perpendicular * half_base_width
+        counterweight = center - direction * counterweight_length
+        right = center - perpendicular * half_base_width
+        needle = QPainterPath()
+        needle.moveTo(tip)
+        needle.lineTo(left)
+        needle.lineTo(counterweight)
+        needle.lineTo(right)
+        needle.closeSubpath()
+        needle_color = QColor("#c51d24")
+        painter.setPen(QPen(self.foreground_color, 0.8))
+        painter.setBrush(needle_color)
+        painter.drawPath(needle)
+
+        hub_radius = max(3.8, rect.width() * 0.036)
+        painter.drawEllipse(center, hub_radius, hub_radius)
+        inner_color = QColor(
+            "#111111"
+            if (
+                0.2126 * self.foreground_color.red()
+                + 0.7152 * self.foreground_color.green()
+                + 0.0722 * self.foreground_color.blue()
+            ) > 145.0
+            else "#ffffff"
+        )
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(inner_color)
+        painter.drawEllipse(center, hub_radius * 0.36, hub_radius * 0.36)
+
+        painter.setPen(self.foreground_color)
+        label_height = max(16.0, float(painter.fontMetrics().height()) + 2.0)
+        label_top = center.y() + 3.0
+        painter.drawText(
+            QRectF(
+                rect.left(),
+                label_top,
+                rect.width() / 2.0,
+                label_height,
+            ),
+            Qt.AlignmentFlag.AlignLeft,
+            "0 %",
+        )
+        painter.drawText(
+            QRectF(
+                rect.center().x(),
+                label_top,
+                rect.width() / 2.0,
+                label_height,
+            ),
+            Qt.AlignmentFlag.AlignRight,
+            "100 %",
+        )
+
+        if self.hasFocus():
+            focus_color = QColor(self.foreground_color)
+            focus_color.setAlpha(80)
+            painter.setPen(QPen(focus_color, 1.2))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(self.rect().adjusted(2, 2, -2, -2), 5, 5)
+
+
+class CompactVerticalInputSlider(QSlider):
+    """Bedienbarer vertikaler Eingaberegler im segmentierten Stil."""
+
+    def __init__(self, parent=None):
+        super().__init__(Qt.Orientation.Vertical, parent)
+        self.foreground_color = QColor("#333333")
+        self.setMinimumHeight(64)
+        self.setFixedWidth(22)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Expanding,
+        )
+
+    def set_foreground_color(self, color):
+        self.foreground_color = QColor(color)
+        self.update()
+
+    def _set_value_from_position(self, position):
+        top = 2.0
+        track_height = max(1.0, self.height() - 2.0 * top)
+        ratio = (top + track_height - float(position.y())) / track_height
+        ratio = max(0.0, min(1.0, ratio))
+        value = self.minimum() + ratio * (self.maximum() - self.minimum())
+        self.setValue(round(value))
+
+    def mousePressEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton:
+            return super().mousePressEvent(event)
+        self.setFocus(Qt.FocusReason.MouseFocusReason)
+        self.setSliderDown(True)
+        self._set_value_from_position(event.position())
+        event.accept()
+
+    def mouseMoveEvent(self, event):
+        if not self.isSliderDown():
+            return super().mouseMoveEvent(event)
+        self._set_value_from_position(event.position())
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton or not self.isSliderDown():
+            return super().mouseReleaseEvent(event)
+        self._set_value_from_position(event.position())
+        self.setSliderDown(False)
+        event.accept()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        span = self.maximum() - self.minimum()
+        ratio = (
+            0.0
+            if span <= 0
+            else (self.value() - self.minimum()) / float(span)
+        )
+        ratio = max(0.0, min(1.0, ratio))
+
+        segment_count = 15
+        gap = max(1.0, min(2.2, self.height() * 0.009))
+        top = 2.0
+        track_height = max(float(segment_count), self.height() - 2.0 * top)
+        segment_height = max(
+            1.0,
+            (track_height - gap * (segment_count - 1)) / segment_count,
+        )
+        segment_width = max(8.0, self.width() - 4.0)
+        left = (self.width() - segment_width) / 2.0
+        bottom = top + track_height
+        inactive_color = QColor(self.foreground_color)
+        inactive_color.setAlpha(55)
+        active_count = int(math.ceil(ratio * segment_count - 1e-9))
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        for step in range(segment_count):
+            painter.setBrush(
+                self.foreground_color
+                if step < active_count
+                else inactive_color
+            )
+            y = bottom - (step + 1) * segment_height - step * gap
+            painter.drawRoundedRect(
+                QRectF(left, y, segment_width, segment_height),
+                1.3,
+                1.3,
+            )
+
+        marker_y = bottom - ratio * track_height
+        marker_y = max(top + 1.0, min(bottom - 1.0, marker_y))
+        marker_left = left - 1.5
+        marker_right = left + segment_width + 1.5
+        painter.setPen(QPen(self.foreground_color, 3.6))
+        painter.drawLine(
+            QPointF(marker_left, marker_y),
+            QPointF(marker_right, marker_y),
+        )
+        painter.setPen(QPen(QColor("#c51d24"), 2.0))
+        painter.drawLine(
+            QPointF(marker_left, marker_y),
+            QPointF(marker_right, marker_y),
+        )
+
+        if self.hasFocus():
+            focus_color = QColor(self.foreground_color)
+            focus_color.setAlpha(80)
+            painter.setPen(QPen(focus_color, 1.2))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 4, 4)
+
+
+class CompactVerticalInputPage(QWidget):
+    """Ordnet Skalentexte und vertikalen Eingaberegler mittig an."""
+
+    def __init__(self, minimum, maximum, unit="", parent=None):
+        super().__init__(parent)
+        self.maximum_label = QLabel("100 %", self)
+        self.minimum_label = QLabel("0 %", self)
+        for label in (self.maximum_label, self.minimum_label):
+            label.setProperty("nn_max_font_size", 10.0)
+            label.setAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+        self.slider = CompactVerticalInputSlider(self)
+        self.setMinimumHeight(64)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_positions()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.update_positions()
+
+    def update_positions(self):
+        vertical_padding = 2
+        slider_width = self.slider.width()
+        slider_left = round((self.width() - slider_width) / 2.0)
+        self.slider.setGeometry(
+            slider_left,
+            vertical_padding,
+            slider_width,
+            max(1, self.height() - 2 * vertical_padding),
+        )
+        gap = 4
+        label_width = max(0, slider_left - gap)
+        label_height = max(
+            12,
+            self.maximum_label.fontMetrics().height() + 2,
+            self.minimum_label.fontMetrics().height() + 2,
+        )
+        self.maximum_label.setGeometry(
+            0,
+            vertical_padding,
+            label_width,
+            label_height,
+        )
+        self.minimum_label.setGeometry(
+            0,
+            max(0, self.height() - label_height - vertical_padding),
+            label_width,
+            label_height,
+        )
+
+
+class CompactOutputBar(QWidget):
+    """Segmentierte Balkenanzeige mit genauer Positionsmarke."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.minimum = 0
+        self.maximum = 1000
+        self.value = 0
+        self.foreground_color = QColor("#333333")
+        self.setFixedHeight(14)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+
+    def setRange(self, minimum, maximum):
+        self.minimum = int(minimum)
+        self.maximum = int(maximum)
+        self.value = max(self.minimum, min(self.maximum, self.value))
+        self.update()
+
+    def setValue(self, value):
+        self.value = max(self.minimum, min(self.maximum, int(value)))
+        self.update()
+
+    def set_foreground_color(self, color):
+        self.foreground_color = QColor(color)
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        span = self.maximum - self.minimum
+        ratio = 0.0 if span <= 0 else (self.value - self.minimum) / span
+        ratio = max(0.0, min(1.0, ratio))
+
+        segment_count = 15
+        gap = max(1.2, min(2.4, self.width() * 0.009))
+        left = 2.0
+        available_width = max(
+            float(segment_count),
+            self.width() - 2.0 * left - gap * (segment_count - 1),
+        )
+        segment_width = available_width / segment_count
+        bar_height = max(6.0, min(9.0, self.height() * 0.62))
+        top = (self.height() - bar_height) / 2.0
+        inactive_color = QColor(self.foreground_color)
+        inactive_color.setAlpha(55)
+        active_count = int(math.ceil(ratio * segment_count - 1e-9))
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        for step in range(segment_count):
+            painter.setBrush(
+                self.foreground_color
+                if step < active_count
+                else inactive_color
+            )
+            x = left + step * (segment_width + gap)
+            segment = QRectF(x, top, segment_width, bar_height)
+            painter.drawRoundedRect(segment, 1.3, 1.3)
+
+        marker_x = left + ratio * (
+            self.width() - 2.0 * left
+        )
+        marker_x = max(left + 1.0, min(self.width() - left - 1.0, marker_x))
+        marker_top = top - 1.5
+        marker_bottom = top + bar_height + 1.5
+        painter.setPen(QPen(self.foreground_color, 3.6))
+        painter.drawLine(
+            QPointF(marker_x, marker_top),
+            QPointF(marker_x, marker_bottom),
+        )
+        painter.setPen(QPen(QColor("#c51d24"), 2.0))
+        painter.drawLine(
+            QPointF(marker_x, marker_top),
+            QPointF(marker_x, marker_bottom),
+        )
+
+
+class CompactVerticalOutputBar(QWidget):
+    """Vertikale Variante der segmentierten analogen Balkenanzeige."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.minimum = 0
+        self.maximum = 1000
+        self.value = 0
+        self.foreground_color = QColor("#333333")
+        self.setMinimumHeight(64)
+        self.setFixedWidth(22)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Expanding,
+        )
+
+    def setRange(self, minimum, maximum):
+        self.minimum = int(minimum)
+        self.maximum = int(maximum)
+        self.value = max(self.minimum, min(self.maximum, self.value))
+        self.update()
+
+    def setValue(self, value):
+        self.value = max(self.minimum, min(self.maximum, int(value)))
+        self.update()
+
+    def set_foreground_color(self, color):
+        self.foreground_color = QColor(color)
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        span = self.maximum - self.minimum
+        ratio = 0.0 if span <= 0 else (self.value - self.minimum) / span
+        ratio = max(0.0, min(1.0, ratio))
+
+        segment_count = 15
+        gap = max(1.0, min(2.2, self.height() * 0.009))
+        top = 2.0
+        track_height = max(
+            float(segment_count),
+            self.height() - 2.0 * top,
+        )
+        segment_height = max(
+            1.0,
+            (track_height - gap * (segment_count - 1)) / segment_count,
+        )
+        segment_width = max(8.0, self.width() - 4.0)
+        left = (self.width() - segment_width) / 2.0
+        bottom = top + track_height
+        inactive_color = QColor(self.foreground_color)
+        inactive_color.setAlpha(55)
+        active_count = int(math.ceil(ratio * segment_count - 1e-9))
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        for step in range(segment_count):
+            painter.setBrush(
+                self.foreground_color
+                if step < active_count
+                else inactive_color
+            )
+            y = bottom - (step + 1) * segment_height - step * gap
+            painter.drawRoundedRect(
+                QRectF(left, y, segment_width, segment_height),
+                1.3,
+                1.3,
+            )
+
+        marker_y = bottom - ratio * track_height
+        marker_y = max(top + 1.0, min(bottom - 1.0, marker_y))
+        marker_left = left - 1.5
+        marker_right = left + segment_width + 1.5
+        painter.setPen(QPen(self.foreground_color, 3.6))
+        painter.drawLine(
+            QPointF(marker_left, marker_y),
+            QPointF(marker_right, marker_y),
+        )
+        painter.setPen(QPen(QColor("#c51d24"), 2.0))
+        painter.drawLine(
+            QPointF(marker_left, marker_y),
+            QPointF(marker_right, marker_y),
+        )
+
+
+class CompactVerticalOutputPage(QWidget):
+    """Zentriert den Balken an der Kachel, unabhängig von den Skalentexten."""
+
+    def __init__(self, minimum, maximum, unit, card, parent=None):
+        super().__init__(parent)
+        self.card = card
+        suffix = f" {unit}" if unit else ""
+        self.maximum_label = QLabel(
+            f"{format_number(maximum, 5)}{suffix}", self
+        )
+        self.minimum_label = QLabel(
+            f"{format_number(minimum, 5)}{suffix}", self
+        )
+        for label in (self.maximum_label, self.minimum_label):
+            label.setProperty("nn_max_font_size", 10.0)
+            label.setAlignment(
+                Qt.AlignmentFlag.AlignRight
+                | Qt.AlignmentFlag.AlignVCenter
+            )
+        self.bar = CompactVerticalOutputBar(card)
+        self.bar.setVisible(False)
+        self.setMinimumHeight(64)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_positions()
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        self.update_positions()
+
+    def paintEvent(self, event):
+        self.update_positions()
+        super().paintEvent(event)
+
+    def update_positions(self):
+        card_center = self.card.width() / 2.0
+        bar_width = self.bar.width()
+        bar_left = round(card_center - bar_width / 2.0)
+        page_top = self.mapTo(self.card, QPoint(0, 0)).y()
+        self.bar.setGeometry(
+            bar_left,
+            page_top,
+            bar_width,
+            self.height(),
+        )
+        if self.bar.isVisible():
+            self.bar.raise_()
+
+        gap = 4
+        card_center_in_page = self.mapFrom(
+            self.card,
+            QPoint(round(card_center), 0),
+        ).x()
+        label_width = max(
+            0,
+            round(card_center_in_page - bar_width / 2.0 - gap),
+        )
+        label_height = max(
+            12,
+            self.maximum_label.fontMetrics().height() + 2,
+            self.minimum_label.fontMetrics().height() + 2,
+        )
+        self.maximum_label.setGeometry(0, 0, label_width, label_height)
+        self.minimum_label.setGeometry(
+            0,
+            max(0, self.height() - label_height),
+            label_width,
+            label_height,
+        )
+
+
 class CompactOutputGauge(QWidget):
     """Kompakte halbkreisförmige Zeigeranzeige für einen Output."""
 
@@ -220,59 +945,140 @@ class CompactOutputGauge(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        label_height = max(16.0, float(self.fontMetrics().height()) + 2.0)
+        label_gap = 3.0
+        vertical_margin = 4.0
         available_width = max(20.0, self.width() - 16.0)
-        available_height = max(20.0, 2.0 * (self.height() - 20.0))
+        available_height = max(
+            20.0,
+            2.0 * (
+                self.height()
+                - 2.0 * vertical_margin
+                - label_gap
+                - label_height
+            ),
+        )
         diameter = max(20.0, min(available_width, available_height))
-        group_height = diameter / 2.0 + 20.0
-        group_top = max(4.0, (self.height() - group_height) / 2.0)
+        group_height = diameter / 2.0 + label_gap + label_height
+        group_top = max(
+            vertical_margin,
+            (self.height() - group_height) / 2.0,
+        )
         rect = QRectF(
             (self.width() - diameter) / 2.0,
             group_top,
             diameter,
             diameter,
         )
-        painter.setPen(QPen(self.foreground_color, 1.6))
-        painter.drawArc(rect, 0, 180 * 16)
         center = QPointF(rect.center().x(), rect.center().y())
-        radius_x = rect.width() / 2.0
-        radius_y = rect.height() / 2.0
-        painter.setPen(QPen(self.foreground_color, 1.0))
-        for step in range(9):
-            tick_angle = math.radians(180.0 - step / 8.0 * 180.0)
-            outer = QPointF(
-                center.x() + math.cos(tick_angle) * radius_x,
-                center.y() - math.sin(tick_angle) * radius_y,
-            )
-            inner_factor = 0.88 if step in (0, 4, 8) else 0.92
-            inner = QPointF(
-                center.x() + math.cos(tick_angle) * radius_x * inner_factor,
-                center.y() - math.sin(tick_angle) * radius_y * inner_factor,
-            )
-            painter.drawLine(inner, outer)
         span = self.maximum - self.minimum
         ratio = 0.0 if span <= 0.0 else (self.value - self.minimum) / span
         ratio = max(0.0, min(1.0, ratio))
-        angle = math.radians(180.0 - ratio * 180.0)
-        end = QPointF(
-            center.x() + math.cos(angle) * radius_x * 0.78,
-            center.y() - math.sin(angle) * radius_y * 0.78,
+
+        # Die segmentierte Skala verwendet ausschließlich die automatisch zur
+        # Kachelfarbe gewählte Kontrastfarbe. Dadurch entsteht keine
+        # irreführende Grün-Gelb-Rot-Bewertung des Messwerts.
+        segment_count = 15
+        segment_angle = 180.0 / segment_count
+        gap_angle = 2.6
+        scale_width = max(4.0, min(8.0, diameter * 0.055))
+        scale_rect = rect.adjusted(
+            scale_width / 2.0,
+            scale_width / 2.0,
+            -scale_width / 2.0,
+            -scale_width / 2.0,
         )
-        painter.setPen(QPen(QColor("#c51d24"), 1.6))
-        painter.drawLine(center, end)
-        painter.setBrush(QColor("#c51d24"))
-        painter.drawEllipse(center, 2.8, 2.8)
+        inactive_color = QColor(self.foreground_color)
+        inactive_color.setAlpha(55)
+        active_count = int(math.ceil(ratio * segment_count - 1e-9))
+        for step in range(segment_count):
+            segment_color = (
+                self.foreground_color
+                if step < active_count
+                else inactive_color
+            )
+            pen = QPen(segment_color, scale_width)
+            pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+            painter.setPen(pen)
+            start_angle = (
+                180.0 - (step + 1) * segment_angle + gap_angle / 2.0
+            )
+            painter.drawArc(
+                scale_rect,
+                int(round(start_angle * 16.0)),
+                int(round((segment_angle - gap_angle) * 16.0)),
+            )
+
+        radius_x = scale_rect.width() / 2.0
+        radius_y = scale_rect.height() / 2.0
+        angle = math.radians(180.0 - ratio * 180.0)
+        direction = QPointF(math.cos(angle), -math.sin(angle))
+        perpendicular = QPointF(-direction.y(), direction.x())
+        needle_length = min(radius_x, radius_y) * 0.78
+        counterweight_length = min(radius_x, radius_y) * 0.14
+        half_base_width = max(2.6, diameter * 0.026)
+        tip = QPointF(
+            center.x() + direction.x() * needle_length,
+            center.y() + direction.y() * needle_length,
+        )
+        left = QPointF(
+            center.x() + perpendicular.x() * half_base_width,
+            center.y() + perpendicular.y() * half_base_width,
+        )
+        counterweight = QPointF(
+            center.x() - direction.x() * counterweight_length,
+            center.y() - direction.y() * counterweight_length,
+        )
+        right = QPointF(
+            center.x() - perpendicular.x() * half_base_width,
+            center.y() - perpendicular.y() * half_base_width,
+        )
+        needle = QPainterPath()
+        needle.moveTo(tip)
+        needle.lineTo(left)
+        needle.lineTo(counterweight)
+        needle.lineTo(right)
+        needle.closeSubpath()
+        needle_color = QColor("#c51d24")
+        painter.setPen(QPen(self.foreground_color, 0.8))
+        painter.setBrush(needle_color)
+        painter.drawPath(needle)
+
+        hub_radius = max(3.8, diameter * 0.036)
+        painter.setBrush(needle_color)
+        painter.drawEllipse(center, hub_radius, hub_radius)
+        foreground_luminance = (
+            0.2126 * self.foreground_color.red()
+            + 0.7152 * self.foreground_color.green()
+            + 0.0722 * self.foreground_color.blue()
+        )
+        hub_inner_color = QColor(
+            "#111111" if foreground_luminance > 145.0 else "#ffffff"
+        )
+        painter.setBrush(hub_inner_color)
+        painter.drawEllipse(center, hub_radius * 0.36, hub_radius * 0.36)
+
         painter.setPen(self.foreground_color)
-        suffix = f" {self.unit}" if self.unit else ""
         label_top = rect.center().y() + 3.0
         painter.drawText(
-            QRectF(0.0, label_top, self.width() / 2.0, 16.0),
+            QRectF(
+                rect.left(),
+                label_top,
+                rect.width() / 2.0,
+                label_height,
+            ),
             Qt.AlignmentFlag.AlignLeft,
-            f"{format_number(self.minimum, 5)}{suffix}",
+            "0 %",
         )
         painter.drawText(
-            QRectF(self.width() / 2.0, label_top, self.width() / 2.0, 16.0),
+            QRectF(
+                rect.center().x(),
+                label_top,
+                rect.width() / 2.0,
+                label_height,
+            ),
             Qt.AlignmentFlag.AlignRight,
-            f"{format_number(self.maximum, 5)}{suffix}",
+            "100 %",
         )
 
 
@@ -302,6 +1108,16 @@ class ExperimentCard(QFrame):
         )
         self.text_color = QColor("#ffffff" if luminance < 145.0 else "#111111")
         self.apply_card_colors()
+        for slider in self.findChildren(CompactInputSlider):
+            slider.set_foreground_color(self.text_color)
+        for dial in self.findChildren(CompactInputDial):
+            dial.set_foreground_color(self.text_color)
+        for slider in self.findChildren(CompactVerticalInputSlider):
+            slider.set_foreground_color(self.text_color)
+        for bar in self.findChildren(CompactOutputBar):
+            bar.set_foreground_color(self.text_color)
+        for bar in self.findChildren(CompactVerticalOutputBar):
+            bar.set_foreground_color(self.text_color)
         for gauge in self.findChildren(CompactOutputGauge):
             gauge.set_foreground_color(self.text_color)
         self.update()
@@ -321,12 +1137,24 @@ class ExperimentCard(QFrame):
         self.selected_for_editing = bool(selected)
         self.update()
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        for page in self.findChildren(CompactVerticalInputPage):
+            page.update_positions()
+            QTimer.singleShot(0, page.update_positions)
+        for page in self.findChildren(CompactVerticalOutputPage):
+            page.update_positions()
+            QTimer.singleShot(0, page.update_positions)
+
     def prepare_responsive_layout(self, width, height):
         """Ordnet den Inhalt hoher Eingabekarten übersichtlich untereinander an."""
 
         binary_grid = getattr(self, "responsive_binary_grid", None)
         binary_name = getattr(self, "responsive_binary_name", None)
         binary_value = getattr(self, "responsive_binary_value", None)
+        binary_state_label = getattr(
+            self, "responsive_binary_state_label", None
+        )
         if (
             binary_grid is not None
             and binary_name is not None
@@ -336,20 +1164,49 @@ class ExperimentCard(QFrame):
                 getattr(self, "binary_intermediate_enabled", False)
             )
             tall = bool(intermediate and float(height) >= 78.0)
-            state = (intermediate, tall)
+            binary_stacked = bool(not intermediate and float(height) >= 78.0)
+            state = (intermediate, tall, binary_stacked)
             if state != getattr(self, "responsive_binary_state", None):
                 self.responsive_binary_state = state
                 binary_grid.removeWidget(binary_name)
                 binary_grid.removeWidget(binary_value)
+                if binary_state_label is not None:
+                    binary_grid.removeWidget(binary_state_label)
                 for column in range(5):
                     binary_grid.setColumnStretch(column, 0)
                     binary_grid.setColumnMinimumWidth(column, 0)
                 binary_grid.setHorizontalSpacing(0)
                 binary_grid.setRowMinimumHeight(1, 0)
                 if not intermediate:
-                    binary_grid.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+                    binary_name.setMinimumWidth(1)
                     binary_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    binary_grid.addWidget(binary_name, 0, 0, 1, 5)
+                    if binary_stacked:
+                        binary_grid.setAlignment(Qt.AlignmentFlag(0))
+                        binary_grid.setHorizontalSpacing(4)
+                        binary_grid.setVerticalSpacing(0)
+                        binary_grid.addWidget(binary_name, 0, 0, 1, 5)
+                        if binary_state_label is not None:
+                            binary_grid.addWidget(
+                                binary_state_label,
+                                1,
+                                0,
+                                1,
+                                5,
+                                Qt.AlignmentFlag.AlignCenter,
+                            )
+                    else:
+                        binary_grid.setAlignment(Qt.AlignmentFlag(0))
+                        binary_grid.setHorizontalSpacing(4)
+                        binary_grid.setColumnStretch(0, 1)
+                        binary_grid.setColumnStretch(1, 1)
+                        binary_grid.addWidget(binary_name, 0, 0)
+                        if binary_state_label is not None:
+                            binary_grid.addWidget(
+                                binary_state_label,
+                                0,
+                                1,
+                                Qt.AlignmentFlag.AlignCenter,
+                            )
                 elif tall:
                     binary_grid.setAlignment(Qt.AlignmentFlag.AlignHCenter)
                     binary_grid.setVerticalSpacing(0)
@@ -391,11 +1248,33 @@ class ExperimentCard(QFrame):
                     self, "responsive_binary_main_layout", None
                 )
                 if main_layout is not None:
-                    main_layout.setStretch(0, 1)
-                    # In hohen Kacheln liegen Name/Wert wie beim Eingang oben
-                    # und die eigentliche Anzeige deutlich weiter unten.
-                    main_layout.setStretch(2, 2 if tall else 0)
-                    main_layout.setStretch(4, 1)
+                    spacer_policy = (
+                        QSizePolicy.Policy.Expanding
+                        if intermediate
+                        else QSizePolicy.Policy.Fixed
+                    )
+                    for index in (0, 2, 4):
+                        item = main_layout.itemAt(index)
+                        spacer = item.spacerItem() if item is not None else None
+                        if spacer is not None:
+                            spacer.changeSize(
+                                0,
+                                0,
+                                QSizePolicy.Policy.Minimum,
+                                spacer_policy,
+                            )
+                    if intermediate:
+                        main_layout.setStretch(0, 1)
+                        # In hohen Zwischenwertkacheln liegen Name und Wert
+                        # oben, die eigentliche Anzeige weiter unten.
+                        main_layout.setStretch(2, 2 if tall else 0)
+                        main_layout.setStretch(4, 1)
+                    else:
+                        # Ohne Zwischenwert soll das Raster exakt wie bei
+                        # der binären Eingangskachel die Höhe ausfüllen.
+                        main_layout.setStretch(0, 0)
+                        main_layout.setStretch(2, 0)
+                        main_layout.setStretch(4, 0)
                     main_layout.invalidate()
                 binary_grid.invalidate()
             return tall
@@ -426,7 +1305,10 @@ class ExperimentCard(QFrame):
         if grid is None or name is None or value is None:
             return False
         stacked = bool(
-            getattr(self, "responsive_output_bar_mode", False)
+            (
+                getattr(self, "responsive_output_bar_mode", False)
+                or getattr(self, "responsive_output_pointer_mode", False)
+            )
             and float(height) >= 78.0
         )
         if stacked != getattr(self, "responsive_output_stacked", None):
@@ -453,7 +1335,10 @@ class ExperimentCard(QFrame):
                 return min(float(width) / 150.0, float(height) / 100.0)
             return min(float(width) / 180.0, float(height) / 50.0)
         if getattr(self, "responsive_output_grid", None) is not None:
-            if getattr(self, "responsive_output_bar_mode", False):
+            if (
+                getattr(self, "responsive_output_bar_mode", False)
+                or getattr(self, "responsive_output_pointer_mode", False)
+            ):
                 if stacked:
                     return min(float(width) / 150.0, float(height) / 100.0)
                 return min(float(width) / 180.0, float(height) / 50.0)
@@ -467,6 +1352,7 @@ class ExperimentCard(QFrame):
         if (
             getattr(self, "responsive_output_grid", None) is not None
             and not getattr(self, "responsive_output_bar_mode", False)
+            and not getattr(self, "responsive_output_pointer_mode", False)
         ):
             maximum_factor = min(maximum_factor, 2.50)
         minimum_factor = float(getattr(self, "minimum_content_scale", 0.70))
@@ -536,6 +1422,8 @@ class ExperimentCard(QFrame):
                 cls.scale_layout(child_layout, factor)
 
     def paintEvent(self, event):
+        for page in self.findChildren(CompactVerticalOutputPage):
+            page.update_positions()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         path = QPainterPath()
@@ -1659,7 +2547,7 @@ class CommentEditDialog(QDialog):
         self.text_edit.setMinimumSize(360, 130)
         form.addRow(translator("Text:", "Text:"), self.text_edit)
         self.font_size_spin = QSpinBox(self)
-        self.font_size_spin.setRange(8, 48)
+        self.font_size_spin.setRange(1, 48)
         self.font_size_spin.setValue(int(data.get("font_size", 11)))
         form.addRow(translator("Schriftgröße:", "Font size:"), self.font_size_spin)
         self.bold_check = QCheckBox(translator("Fett", "Bold"), self)
@@ -2572,6 +3460,586 @@ class ResizableBackgroundItem(QGraphicsPixmapItem):
             dialog.finish_history_action()
 
 
+STANDARD_DESIGN_ICONS = (
+    ("arrow", "Pfeil", "Arrow"),
+    ("double_arrow", "Doppelpfeil", "Double arrow"),
+    ("curved_arrow", "Gebogener Pfeil", "Curved arrow"),
+    ("chevron", "Winkelpfeil", "Chevron"),
+    ("check", "Haken", "Check mark"),
+    ("cross", "Kreuz", "Cross"),
+    ("plus", "Plus", "Plus"),
+    ("minus", "Minus", "Minus"),
+    ("warning", "Warnung", "Warning"),
+    ("information", "Information", "Information"),
+    ("power", "Ein / Aus", "Power"),
+    ("home", "Haus", "Home"),
+    ("circle", "Kreis", "Circle"),
+    ("diamond", "Raute", "Diamond"),
+    ("back", "Rücksprung", "Back"),
+    ("forward", "Vorwärts", "Forward"),
+    ("exchange", "Austausch", "Exchange"),
+    ("split", "Aufteilen", "Split"),
+    ("merge", "Zusammenführen", "Merge"),
+    ("play", "Start", "Start"),
+    ("stop", "Stopp", "Stop"),
+    ("pause", "Pause", "Pause"),
+    ("reset", "Zurücksetzen", "Reset"),
+    ("refresh", "Aktualisieren", "Refresh"),
+    ("question", "Fragezeichen", "Question"),
+    ("prohibited", "Verbot", "Prohibited"),
+    ("valve", "Ventil", "Valve"),
+    ("pump", "Pumpe", "Pump"),
+    ("motor", "Motor", "Motor"),
+    ("fan", "Lüfter", "Fan"),
+    ("heater", "Heizung", "Heater"),
+    ("tank", "Behälter", "Tank"),
+    ("pipe", "Rohrleitung", "Pipe"),
+    ("meter", "Messgerät", "Meter"),
+    ("temperature", "Temperatur", "Temperature"),
+    ("pressure", "Druck", "Pressure"),
+    ("flow", "Durchfluss", "Flow"),
+    ("level", "Füllstand", "Level"),
+    ("lock", "Schloss", "Lock"),
+    ("unlock", "Entsperren", "Unlock"),
+    ("eye", "Auge", "Eye"),
+    ("clock", "Uhr", "Clock"),
+    ("gear", "Zahnrad", "Gear"),
+    ("person", "Person", "Person"),
+    ("logic_and", "UND", "AND"),
+    ("logic_or", "ODER", "OR"),
+    ("logic_not", "NICHT", "NOT"),
+    ("logic_nand", "NAND", "NAND"),
+    ("logic_nor", "NOR", "NOR"),
+    ("logic_xor", "XOR", "XOR"),
+    ("logic_xnor", "XNOR", "XNOR"),
+    ("logic_zero", "Logisch 0", "Logic 0"),
+    ("logic_one", "Logisch 1", "Logic 1"),
+)
+
+STANDARD_DESIGN_ICON_GROUPS = (
+    (
+        "general",
+        "Allgemein",
+        "General",
+        (
+            "arrow", "double_arrow", "curved_arrow", "chevron",
+            "check", "cross", "plus", "minus", "warning",
+            "information", "power", "home", "circle", "diamond",
+            "question", "prohibited",
+        ),
+    ),
+    (
+        "operation",
+        "Bedienung",
+        "Operation",
+        (
+            "back", "forward", "exchange", "split", "merge", "play",
+            "stop", "pause", "reset", "refresh",
+        ),
+    ),
+    (
+        "process",
+        "Prozess",
+        "Process",
+        (
+            "valve", "pump", "motor", "fan", "heater", "tank", "pipe",
+            "meter", "temperature", "pressure", "flow", "level",
+        ),
+    ),
+    (
+        "logic",
+        "Logik",
+        "Logic",
+        (
+            "logic_and", "logic_or", "logic_not", "logic_nand",
+            "logic_nor", "logic_xor", "logic_xnor", "logic_zero",
+            "logic_one",
+        ),
+    ),
+    (
+        "other",
+        "Sonstige",
+        "Other",
+        ("lock", "unlock", "eye", "clock", "gear", "person"),
+    ),
+)
+
+
+def draw_standard_design_icon(painter, rect, icon_name, color):
+    """Zeichnet ein einfarbiges Standardsymbol skalierbar als Vektorgrafik."""
+
+    size = max(1.0, min(rect.width(), rect.height()))
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.translate(rect.center())
+    painter.scale(size / 100.0, size / 100.0)
+    pen = QPen(QColor(color), 3.0)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    name = str(icon_name)
+
+    path = QPainterPath()
+    if name == "arrow":
+        path.moveTo(-38.0, 0.0)
+        path.lineTo(30.0, 0.0)
+        path.moveTo(9.0, -21.0)
+        path.lineTo(32.0, 0.0)
+        path.lineTo(9.0, 21.0)
+        painter.drawPath(path)
+    elif name == "double_arrow":
+        path.moveTo(-28.0, 0.0)
+        path.lineTo(28.0, 0.0)
+        path.moveTo(-9.0, -20.0)
+        path.lineTo(-31.0, 0.0)
+        path.lineTo(-9.0, 20.0)
+        path.moveTo(9.0, -20.0)
+        path.lineTo(31.0, 0.0)
+        path.lineTo(9.0, 20.0)
+        painter.drawPath(path)
+    elif name == "curved_arrow":
+        path.moveTo(-32.0, 25.0)
+        path.cubicTo(-34.0, -17.0, -2.0, -34.0, 27.0, -14.0)
+        painter.drawPath(path)
+        head = QPainterPath()
+        head.moveTo(7.0, -31.0)
+        head.lineTo(31.0, -12.0)
+        head.lineTo(4.0, -4.0)
+        painter.drawPath(head)
+    elif name == "chevron":
+        path.moveTo(-14.0, -30.0)
+        path.lineTo(17.0, 0.0)
+        path.lineTo(-14.0, 30.0)
+        painter.drawPath(path)
+    elif name == "check":
+        path.moveTo(-34.0, 2.0)
+        path.lineTo(-10.0, 27.0)
+        path.lineTo(35.0, -28.0)
+        painter.drawPath(path)
+    elif name == "cross":
+        painter.drawLine(QPointF(-29.0, -29.0), QPointF(29.0, 29.0))
+        painter.drawLine(QPointF(29.0, -29.0), QPointF(-29.0, 29.0))
+    elif name == "plus":
+        painter.drawLine(QPointF(-34.0, 0.0), QPointF(34.0, 0.0))
+        painter.drawLine(QPointF(0.0, -34.0), QPointF(0.0, 34.0))
+    elif name == "minus":
+        painter.drawLine(QPointF(-34.0, 0.0), QPointF(34.0, 0.0))
+    elif name == "warning":
+        path.moveTo(0.0, -39.0)
+        path.lineTo(40.0, 34.0)
+        path.lineTo(-40.0, 34.0)
+        path.closeSubpath()
+        painter.drawPath(path)
+        painter.drawLine(QPointF(0.0, -13.0), QPointF(0.0, 12.0))
+        painter.setBrush(QColor(color))
+        painter.drawEllipse(QPointF(0.0, 24.0), 3.5, 3.5)
+    elif name == "information":
+        painter.drawEllipse(QRectF(-38.0, -38.0, 76.0, 76.0))
+        painter.drawLine(QPointF(0.0, -5.0), QPointF(0.0, 25.0))
+        painter.setBrush(QColor(color))
+        painter.drawEllipse(QPointF(0.0, -20.0), 3.5, 3.5)
+    elif name == "power":
+        painter.drawArc(QRectF(-35.0, -35.0, 70.0, 70.0), 45 * 16, 270 * 16)
+        painter.drawLine(QPointF(0.0, -39.0), QPointF(0.0, 1.0))
+    elif name == "home":
+        path.moveTo(-38.0, -4.0)
+        path.lineTo(0.0, -36.0)
+        path.lineTo(38.0, -4.0)
+        path.moveTo(-29.0, -10.0)
+        path.lineTo(-29.0, 34.0)
+        path.lineTo(29.0, 34.0)
+        path.lineTo(29.0, -10.0)
+        painter.drawPath(path)
+    elif name == "diamond":
+        path.moveTo(0.0, -38.0)
+        path.lineTo(38.0, 0.0)
+        path.lineTo(0.0, 38.0)
+        path.lineTo(-38.0, 0.0)
+        path.closeSubpath()
+        painter.drawPath(path)
+    elif name == "back":
+        painter.drawLine(QPointF(34.0, -30.0), QPointF(34.0, 30.0))
+        path.moveTo(28.0, 0.0)
+        path.lineTo(-29.0, 0.0)
+        path.moveTo(-8.0, -21.0)
+        path.lineTo(-31.0, 0.0)
+        path.lineTo(-8.0, 21.0)
+        painter.drawPath(path)
+    elif name == "forward":
+        painter.drawLine(QPointF(-34.0, -30.0), QPointF(-34.0, 30.0))
+        path.moveTo(-28.0, 0.0)
+        path.lineTo(29.0, 0.0)
+        path.moveTo(8.0, -21.0)
+        path.lineTo(31.0, 0.0)
+        path.lineTo(8.0, 21.0)
+        painter.drawPath(path)
+    elif name == "exchange":
+        path.moveTo(-34.0, -14.0)
+        path.lineTo(27.0, -14.0)
+        path.moveTo(8.0, -30.0)
+        path.lineTo(29.0, -14.0)
+        path.lineTo(8.0, 2.0)
+        path.moveTo(34.0, 14.0)
+        path.lineTo(-27.0, 14.0)
+        path.moveTo(-8.0, -2.0)
+        path.lineTo(-29.0, 14.0)
+        path.lineTo(-8.0, 30.0)
+        painter.drawPath(path)
+    elif name == "split":
+        path.moveTo(-36.0, 0.0)
+        path.lineTo(-9.0, 0.0)
+        path.lineTo(27.0, -26.0)
+        path.moveTo(-9.0, 0.0)
+        path.lineTo(27.0, 26.0)
+        path.moveTo(12.0, -29.0)
+        path.lineTo(31.0, -28.0)
+        path.lineTo(25.0, -10.0)
+        path.moveTo(12.0, 29.0)
+        path.lineTo(31.0, 28.0)
+        path.lineTo(25.0, 10.0)
+        painter.drawPath(path)
+    elif name == "merge":
+        path.moveTo(-30.0, -27.0)
+        path.lineTo(9.0, 0.0)
+        path.lineTo(34.0, 0.0)
+        path.moveTo(-30.0, 27.0)
+        path.lineTo(9.0, 0.0)
+        path.moveTo(14.0, -19.0)
+        path.lineTo(35.0, 0.0)
+        path.lineTo(14.0, 19.0)
+        painter.drawPath(path)
+    elif name == "play":
+        path.moveTo(-25.0, -35.0)
+        path.lineTo(36.0, 0.0)
+        path.lineTo(-25.0, 35.0)
+        path.closeSubpath()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(color))
+        painter.drawPath(path)
+    elif name == "stop":
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(color))
+        painter.drawRoundedRect(QRectF(-33.0, -33.0, 66.0, 66.0), 5.0, 5.0)
+    elif name == "pause":
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(color))
+        painter.drawRoundedRect(QRectF(-29.0, -35.0, 20.0, 70.0), 3.0, 3.0)
+        painter.drawRoundedRect(QRectF(9.0, -35.0, 20.0, 70.0), 3.0, 3.0)
+    elif name == "reset":
+        painter.drawArc(QRectF(-34.0, -34.0, 68.0, 68.0), 35 * 16, 285 * 16)
+        path.moveTo(-35.0, -4.0)
+        path.lineTo(-36.0, 22.0)
+        path.lineTo(-12.0, 15.0)
+        painter.drawPath(path)
+    elif name == "refresh":
+        painter.drawArc(QRectF(-34.0, -34.0, 68.0, 68.0), 25 * 16, 135 * 16)
+        painter.drawArc(QRectF(-34.0, -34.0, 68.0, 68.0), 205 * 16, 135 * 16)
+        path.moveTo(31.0, -25.0)
+        path.lineTo(32.0, -4.0)
+        path.lineTo(12.0, -8.0)
+        path.moveTo(-31.0, 25.0)
+        path.lineTo(-32.0, 4.0)
+        path.lineTo(-12.0, 8.0)
+        painter.drawPath(path)
+    elif name == "question":
+        painter.drawEllipse(QRectF(-38.0, -38.0, 76.0, 76.0))
+        path.moveTo(-15.0, -15.0)
+        path.cubicTo(-9.0, -31.0, 18.0, -30.0, 19.0, -9.0)
+        path.cubicTo(20.0, 4.0, 1.0, 5.0, 1.0, 17.0)
+        painter.drawPath(path)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(color))
+        painter.drawEllipse(QPointF(1.0, 29.0), 3.8, 3.8)
+    elif name == "prohibited":
+        painter.drawEllipse(QRectF(-36.0, -36.0, 72.0, 72.0))
+        painter.drawLine(QPointF(-25.0, -25.0), QPointF(25.0, 25.0))
+    elif name == "valve":
+        path.moveTo(-38.0, -25.0)
+        path.lineTo(0.0, 0.0)
+        path.lineTo(-38.0, 25.0)
+        path.closeSubpath()
+        path.moveTo(38.0, -25.0)
+        path.lineTo(0.0, 0.0)
+        path.lineTo(38.0, 25.0)
+        path.closeSubpath()
+        painter.drawPath(path)
+        painter.drawLine(QPointF(0.0, 0.0), QPointF(0.0, -31.0))
+        painter.drawLine(QPointF(-15.0, -31.0), QPointF(15.0, -31.0))
+    elif name == "pump":
+        painter.drawEllipse(QRectF(-35.0, -35.0, 70.0, 70.0))
+        path.moveTo(-18.0, -22.0)
+        path.lineTo(25.0, 0.0)
+        path.lineTo(-18.0, 22.0)
+        path.closeSubpath()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(color))
+        painter.drawPath(path)
+    elif name == "motor":
+        painter.drawEllipse(QRectF(-38.0, -38.0, 76.0, 76.0))
+        path.moveTo(-22.0, 22.0)
+        path.lineTo(-22.0, -22.0)
+        path.lineTo(0.0, 8.0)
+        path.lineTo(22.0, -22.0)
+        path.lineTo(22.0, 22.0)
+        painter.drawPath(path)
+    elif name == "fan":
+        painter.drawEllipse(QRectF(-7.0, -7.0, 14.0, 14.0))
+        painter.save()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(color))
+        for _step in range(3):
+            blade = QPainterPath()
+            blade.moveTo(4.0, -3.0)
+            blade.cubicTo(16.0, -35.0, 36.0, -28.0, 29.0, -9.0)
+            blade.cubicTo(24.0, 3.0, 12.0, 5.0, 4.0, 3.0)
+            blade.closeSubpath()
+            painter.drawPath(blade)
+            painter.rotate(120.0)
+        painter.restore()
+    elif name == "heater":
+        path.moveTo(-35.0, 22.0)
+        path.lineTo(-25.0, -22.0)
+        path.lineTo(-13.0, 22.0)
+        path.lineTo(-1.0, -22.0)
+        path.lineTo(11.0, 22.0)
+        path.lineTo(23.0, -22.0)
+        path.lineTo(35.0, 22.0)
+        painter.drawPath(path)
+        painter.drawLine(QPointF(-37.0, 33.0), QPointF(37.0, 33.0))
+    elif name == "tank":
+        painter.drawEllipse(QRectF(-34.0, -37.0, 68.0, 20.0))
+        painter.drawArc(QRectF(-34.0, 17.0, 68.0, 20.0), 180 * 16, 180 * 16)
+        painter.drawLine(QPointF(-34.0, -27.0), QPointF(-34.0, 27.0))
+        painter.drawLine(QPointF(34.0, -27.0), QPointF(34.0, 27.0))
+    elif name == "pipe":
+        thick_pen = QPen(QColor(color), 6.0)
+        thick_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+        thick_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(thick_pen)
+        path.moveTo(-34.0, -28.0)
+        path.lineTo(-8.0, -28.0)
+        path.lineTo(-8.0, 28.0)
+        path.lineTo(34.0, 28.0)
+        painter.drawPath(path)
+    elif name == "meter":
+        painter.drawArc(QRectF(-38.0, -25.0, 76.0, 76.0), 0, 180 * 16)
+        painter.drawLine(QPointF(-38.0, 13.0), QPointF(38.0, 13.0))
+        painter.drawLine(QPointF(0.0, 13.0), QPointF(22.0, -12.0))
+        painter.drawEllipse(QPointF(0.0, 13.0), 3.5, 3.5)
+    elif name == "temperature":
+        painter.drawEllipse(QRectF(-16.0, 16.0, 32.0, 32.0))
+        painter.drawRoundedRect(QRectF(-10.0, -39.0, 20.0, 66.0), 10.0, 10.0)
+        painter.drawLine(QPointF(0.0, 20.0), QPointF(0.0, -25.0))
+    elif name == "pressure":
+        painter.drawEllipse(QRectF(-36.0, -36.0, 72.0, 72.0))
+        painter.drawLine(QPointF(0.0, 0.0), QPointF(22.0, -20.0))
+        painter.drawEllipse(QPointF(0.0, 0.0), 3.5, 3.5)
+        painter.drawLine(QPointF(0.0, 36.0), QPointF(0.0, 43.0))
+    elif name == "flow":
+        for vertical in (-22.0, 0.0, 22.0):
+            path.moveTo(-36.0, vertical)
+            path.cubicTo(-17.0, vertical - 12.0, 5.0, vertical + 12.0, 28.0, vertical)
+            path.moveTo(12.0, vertical - 12.0)
+            path.lineTo(31.0, vertical)
+            path.lineTo(12.0, vertical + 12.0)
+        painter.drawPath(path)
+    elif name == "level":
+        path.moveTo(-33.0, -35.0)
+        path.lineTo(-33.0, 35.0)
+        path.lineTo(33.0, 35.0)
+        path.lineTo(33.0, -35.0)
+        painter.drawPath(path)
+        painter.drawLine(QPointF(-24.0, 20.0), QPointF(24.0, 20.0))
+        painter.drawLine(QPointF(-24.0, 5.0), QPointF(24.0, 5.0))
+        painter.drawLine(QPointF(-24.0, -10.0), QPointF(24.0, -10.0))
+    elif name in ("logic_and", "logic_nand"):
+        painter.drawLine(QPointF(-48.0, -18.0), QPointF(-34.0, -18.0))
+        painter.drawLine(QPointF(-48.0, 18.0), QPointF(-34.0, 18.0))
+        path.moveTo(-34.0, -34.0)
+        path.lineTo(-5.0, -34.0)
+        path.cubicTo(19.0, -34.0, 34.0, -19.0, 34.0, 0.0)
+        path.cubicTo(34.0, 19.0, 19.0, 34.0, -5.0, 34.0)
+        path.lineTo(-34.0, 34.0)
+        path.closeSubpath()
+        painter.drawPath(path)
+        if name == "logic_nand":
+            painter.drawEllipse(QPointF(40.0, 0.0), 6.0, 6.0)
+            painter.drawLine(QPointF(46.0, 0.0), QPointF(50.0, 0.0))
+        else:
+            painter.drawLine(QPointF(34.0, 0.0), QPointF(49.0, 0.0))
+    elif name in (
+        "logic_or", "logic_nor", "logic_xor", "logic_xnor"
+    ):
+        painter.drawLine(QPointF(-48.0, -18.0), QPointF(-29.0, -18.0))
+        painter.drawLine(QPointF(-48.0, 18.0), QPointF(-29.0, 18.0))
+        path.moveTo(-34.0, -34.0)
+        path.cubicTo(-10.0, -33.0, 22.0, -28.0, 35.0, 0.0)
+        path.cubicTo(22.0, 28.0, -10.0, 33.0, -34.0, 34.0)
+        path.cubicTo(-18.0, 14.0, -18.0, -14.0, -34.0, -34.0)
+        path.closeSubpath()
+        painter.drawPath(path)
+        if name in ("logic_xor", "logic_xnor"):
+            extra = QPainterPath()
+            extra.moveTo(-41.0, -34.0)
+            extra.cubicTo(-25.0, -14.0, -25.0, 14.0, -41.0, 34.0)
+            painter.drawPath(extra)
+        if name in ("logic_nor", "logic_xnor"):
+            painter.drawEllipse(QPointF(41.0, 0.0), 6.0, 6.0)
+            painter.drawLine(QPointF(47.0, 0.0), QPointF(50.0, 0.0))
+        else:
+            painter.drawLine(QPointF(35.0, 0.0), QPointF(49.0, 0.0))
+    elif name == "logic_not":
+        painter.drawLine(QPointF(-48.0, 0.0), QPointF(-32.0, 0.0))
+        path.moveTo(-32.0, -34.0)
+        path.lineTo(-32.0, 34.0)
+        path.lineTo(26.0, 0.0)
+        path.closeSubpath()
+        painter.drawPath(path)
+        painter.drawEllipse(QPointF(33.0, 0.0), 7.0, 7.0)
+        painter.drawLine(QPointF(40.0, 0.0), QPointF(49.0, 0.0))
+    elif name in ("logic_zero", "logic_one"):
+        painter.drawRoundedRect(QRectF(-32.0, -35.0, 64.0, 70.0), 5.0, 5.0)
+        painter.drawLine(QPointF(32.0, 0.0), QPointF(49.0, 0.0))
+        if name == "logic_zero":
+            painter.drawEllipse(QRectF(-12.0, -23.0, 24.0, 46.0))
+        else:
+            path.moveTo(-9.0, -14.0)
+            path.lineTo(0.0, -23.0)
+            path.lineTo(0.0, 23.0)
+            path.moveTo(-11.0, 23.0)
+            path.lineTo(12.0, 23.0)
+            painter.drawPath(path)
+    elif name == "lock":
+        painter.drawRoundedRect(QRectF(-32.0, -2.0, 64.0, 43.0), 5.0, 5.0)
+        painter.drawArc(QRectF(-22.0, -36.0, 44.0, 48.0), 0, 180 * 16)
+        painter.drawLine(QPointF(-22.0, -12.0), QPointF(-22.0, 0.0))
+        painter.drawLine(QPointF(22.0, -12.0), QPointF(22.0, 0.0))
+        painter.drawLine(QPointF(0.0, 14.0), QPointF(0.0, 27.0))
+    elif name == "unlock":
+        painter.drawRoundedRect(QRectF(-32.0, -2.0, 64.0, 43.0), 5.0, 5.0)
+        painter.drawArc(QRectF(-9.0, -40.0, 44.0, 48.0), 0, 180 * 16)
+        painter.drawLine(QPointF(35.0, -16.0), QPointF(35.0, 2.0))
+        painter.drawLine(QPointF(0.0, 14.0), QPointF(0.0, 27.0))
+    elif name == "eye":
+        path.moveTo(-40.0, 0.0)
+        path.cubicTo(-22.0, -29.0, 22.0, -29.0, 40.0, 0.0)
+        path.cubicTo(22.0, 29.0, -22.0, 29.0, -40.0, 0.0)
+        painter.drawPath(path)
+        painter.drawEllipse(QPointF(0.0, 0.0), 12.0, 12.0)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(color))
+        painter.drawEllipse(QPointF(0.0, 0.0), 4.0, 4.0)
+    elif name == "clock":
+        painter.drawEllipse(QRectF(-37.0, -37.0, 74.0, 74.0))
+        painter.drawLine(QPointF(0.0, 0.0), QPointF(0.0, -23.0))
+        painter.drawLine(QPointF(0.0, 0.0), QPointF(19.0, 12.0))
+    elif name == "gear":
+        painter.drawEllipse(QRectF(-25.0, -25.0, 50.0, 50.0))
+        painter.drawEllipse(QRectF(-8.0, -8.0, 16.0, 16.0))
+        for step in range(8):
+            angle = math.radians(step * 45.0)
+            inner = QPointF(math.cos(angle) * 27.0, math.sin(angle) * 27.0)
+            outer = QPointF(math.cos(angle) * 40.0, math.sin(angle) * 40.0)
+            painter.drawLine(inner, outer)
+    elif name == "person":
+        painter.drawEllipse(QRectF(-14.0, -38.0, 28.0, 28.0))
+        path.moveTo(-32.0, 35.0)
+        path.cubicTo(-29.0, 6.0, -17.0, -2.0, 0.0, -2.0)
+        path.cubicTo(17.0, -2.0, 29.0, 6.0, 32.0, 35.0)
+        painter.drawPath(path)
+    else:
+        painter.drawEllipse(QRectF(-36.0, -36.0, 72.0, 72.0))
+    painter.restore()
+
+
+def standard_design_icon_preview(icon_name, color="#34495e", size=56):
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    draw_standard_design_icon(
+        painter,
+        QRectF(4.0, 4.0, size - 8.0, size - 8.0),
+        icon_name,
+        color,
+    )
+    painter.end()
+    return QIcon(pixmap)
+
+
+class StandardIconDialog(QDialog):
+    """Kompakte Auswahl der eingebauten Gestaltungssymbole."""
+
+    def __init__(self, translator, parent=None, current_icon=None):
+        super().__init__(parent)
+        self.translate = translator
+        self.selected_icon = None
+        self.setWindowTitle(translator("Symbol auswählen", "Select symbol"))
+        layout = QVBoxLayout(self)
+        introduction = QLabel(
+            translator(
+                "Wählen Sie ein Symbol. Farbe, Größe und Drehung können danach geändert werden.",
+                "Select a symbol. Its color, size, and rotation can be changed afterward.",
+            ),
+            self,
+        )
+        introduction.setWordWrap(True)
+        layout.addWidget(introduction)
+        icon_definitions = {
+            name: (german, english)
+            for name, german, english in STANDARD_DESIGN_ICONS
+        }
+        tabs = QTabWidget(self)
+        current_tab_index = 0
+        for tab_index, (_key, german, english, icon_names) in enumerate(
+            STANDARD_DESIGN_ICON_GROUPS
+        ):
+            page = QWidget(tabs)
+            grid = QGridLayout(page)
+            grid.setContentsMargins(6, 6, 6, 6)
+            grid.setSpacing(5)
+            for index, name in enumerate(icon_names):
+                label_parts = icon_definitions.get(name)
+                if label_parts is None:
+                    continue
+                label = translator(*label_parts)
+                button = QToolButton(page)
+                button.setIcon(standard_design_icon_preview(name))
+                button.setIconSize(QSize(28, 28))
+                button.setText(label)
+                button.setToolTip(label)
+                button.setToolButtonStyle(
+                    Qt.ToolButtonStyle.ToolButtonTextUnderIcon
+                )
+                button_font = button.font()
+                button_font.setPointSize(max(7, button_font.pointSize() - 1))
+                button.setFont(button_font)
+                button.setFixedSize(74, 58)
+                if name == current_icon:
+                    button.setCheckable(True)
+                    button.setChecked(True)
+                    current_tab_index = tab_index
+                button.clicked.connect(
+                    lambda _checked=False, selected=name:
+                    self.choose_icon(selected)
+                )
+                grid.addWidget(button, index // 6, index % 6)
+            grid.setRowStretch((len(icon_names) + 5) // 6, 1)
+            tabs.addTab(page, translator(german, english))
+        tabs.setCurrentIndex(current_tab_index)
+        layout.addWidget(tabs)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel, self)
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(
+            translator("Abbrechen", "Cancel")
+        )
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def choose_icon(self, icon_name):
+        self.selected_icon = str(icon_name)
+        self.accept()
+
+
 class DesignShapeItem(QGraphicsItem):
     """Frei platzierbare Linie, Bézierkurve, Rechteck- oder Ellipsenform."""
 
@@ -2623,11 +4091,13 @@ class DesignShapeItem(QGraphicsItem):
         self.line_color = QColor(values.get("line_color", "#202020"))
         self.line_width = max(1.0, float(values.get("line_width", 1.0)))
         self.arrow_enabled = bool(values.get("arrow_enabled", False))
+        self.icon_name = str(values.get("icon_name", "arrow"))
         fill = values.get("fill_color")
         self.fill_color = QColor(fill) if fill else None
         self.editable = True
         self.locked = bool(values.get("locked", False))
         self.resizing = False
+        self.rotating = False
         self.moving = False
         self.drag_allowed = False
         self.line_endpoint = None
@@ -2640,6 +4110,11 @@ class DesignShapeItem(QGraphicsItem):
         self.resize_start = QPointF()
         self.resize_start_size = (self.item_width, self.item_height)
         self.setZValue(float(values.get("layer", 0.0)))
+        self.setTransformOriginPoint(
+            self.item_width / 2.0,
+            self.item_height / 2.0,
+        )
+        self.setRotation(float(values.get("rotation", 0.0)))
         self.setFlags(
             QGraphicsItem.GraphicsItemFlag.ItemIsMovable
             | QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
@@ -2676,6 +4151,7 @@ class DesignShapeItem(QGraphicsItem):
     def set_locked(self, locked):
         self.locked = bool(locked)
         self.resizing = False
+        self.rotating = False
         self.moving = False
         self.drag_allowed = False
         self.line_endpoint = None
@@ -2690,9 +4166,14 @@ class DesignShapeItem(QGraphicsItem):
     def boundingRect(self):
         arrow_margin = self.arrow_size() if self.is_connector() else 0.0
         margin = max(self.line_width, self.HANDLE_SIZE, arrow_margin)
-        return self.content_rect().adjusted(
+        rect = self.content_rect().adjusted(
             -margin, -margin, margin, margin
         )
+        if self.shape_type == "icon":
+            rect = rect.united(self.rotation_handle_rect().adjusted(
+                -margin, -margin, margin, margin
+            ))
+        return rect
 
     def arrow_size(self):
         return max(10.0, min(60.0, 6.0 + self.line_width * 3.0))
@@ -2732,6 +4213,19 @@ class DesignShapeItem(QGraphicsItem):
         return QRectF(
             self.item_width - size,
             self.item_height - size,
+            size,
+            size,
+        )
+
+    def rotation_handle_center(self):
+        return QPointF(self.item_width / 2.0, -24.0)
+
+    def rotation_handle_rect(self):
+        size = self.HANDLE_SIZE
+        center = self.rotation_handle_center()
+        return QRectF(
+            center.x() - size / 2.0,
+            center.y() - size / 2.0,
             size,
             size,
         )
@@ -2885,6 +4379,13 @@ class DesignShapeItem(QGraphicsItem):
                     painter.setPen(Qt.PenStyle.NoPen)
                     painter.setBrush(self.line_color)
                     painter.drawPath(arrow)
+        elif self.shape_type == "icon":
+            draw_standard_design_icon(
+                painter,
+                rect.adjusted(5.0, 5.0, -5.0, -5.0),
+                self.icon_name,
+                self.line_color,
+            )
         elif self.shape_type == "ellipse":
             painter.drawEllipse(rect)
         else:
@@ -2924,6 +4425,14 @@ class DesignShapeItem(QGraphicsItem):
                         painter.drawRect(self.line_handle_rect(self.control_point_2))
             elif not self.is_connector() and not self.resizing and not handles_hidden:
                 painter.drawRect(self.handle_rect())
+                if self.shape_type == "icon" and not self.rotating:
+                    center = self.rotation_handle_center()
+                    painter.drawLine(
+                        QPointF(self.item_width / 2.0, 0.0),
+                        center,
+                    )
+                    painter.setBrush(QColor("#ffffff"))
+                    painter.drawEllipse(self.rotation_handle_rect())
         elif (
             self.editable
             and not self.locked
@@ -2949,6 +4458,16 @@ class DesignShapeItem(QGraphicsItem):
         self.drag_allowed = bool(
             self.editable and not self.locked and self.isSelected()
         )
+        if (
+            self.editable
+            and self.drag_allowed
+            and self.shape_type == "icon"
+            and self.rotation_handle_rect().contains(event.pos())
+        ):
+            self.rotating = True
+            self.update()
+            event.accept()
+            return
         if (
             self.editable
             and not self.locked
@@ -3009,6 +4528,18 @@ class DesignShapeItem(QGraphicsItem):
             self.move_group_endpoints(event.scenePos())
             event.accept()
             return
+        if self.rotating:
+            center = self.mapToScene(
+                QPointF(self.item_width / 2.0, self.item_height / 2.0)
+            )
+            delta = event.scenePos() - center
+            angle = math.degrees(math.atan2(delta.y(), delta.x())) + 90.0
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                angle = round(angle / 15.0) * 15.0
+            self.setRotation(angle % 360.0)
+            self.update()
+            event.accept()
+            return
         if self.line_endpoint is not None:
             self.prepareGeometryChange()
             point = QPointF(event.pos())
@@ -3037,10 +4568,19 @@ class DesignShapeItem(QGraphicsItem):
             return
         if self.resizing:
             delta = event.scenePos() - self.resize_start
+            if self.shape_type == "icon" and self.rotation():
+                angle = math.radians(-self.rotation())
+                delta = QPointF(
+                    delta.x() * math.cos(angle) - delta.y() * math.sin(angle),
+                    delta.x() * math.sin(angle) + delta.y() * math.cos(angle),
+                )
             self.prepareGeometryChange()
             start_width, start_height = self.resize_start_size
 
-            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            if (
+                self.shape_type == "icon"
+                or event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+            ):
                 relative_x = delta.x() / max(start_width, 1.0)
                 relative_y = delta.y() / max(start_height, 1.0)
                 scale = (
@@ -3058,6 +4598,10 @@ class DesignShapeItem(QGraphicsItem):
             else:
                 self.item_width = max(24.0, start_width + delta.x())
                 self.item_height = max(24.0, start_height + delta.y())
+            self.setTransformOriginPoint(
+                self.item_width / 2.0,
+                self.item_height / 2.0,
+            )
             self.update()
             event.accept()
             return
@@ -3082,7 +4626,16 @@ class DesignShapeItem(QGraphicsItem):
         self.line_endpoint = None
         if was_line_resize:
             self.update()
-        if self.drag_allowed and not was_line_resize and not was_group_endpoint_drag:
+        was_rotating = self.rotating
+        self.rotating = False
+        if was_rotating:
+            self.update()
+        if (
+            self.drag_allowed
+            and not was_line_resize
+            and not was_group_endpoint_drag
+            and not was_rotating
+        ):
             super().mouseReleaseEvent(event)
         else:
             event.accept()
@@ -3106,6 +4659,11 @@ class DesignShapeItem(QGraphicsItem):
             "layer": self.zValue(),
             "locked": self.locked,
         }
+        if self.shape_type == "icon":
+            data.update({
+                "icon_name": self.icon_name,
+                "rotation": self.rotation(),
+            })
         if self.is_connector():
             data.update({
                 "x1": self.line_start.x(),
@@ -3188,6 +4746,10 @@ class MovableCardProxy(QGraphicsProxyWidget):
                 target_width, target_height
             )
             card.apply_content_scale(content_scale)
+            for page in card.findChildren(CompactVerticalInputPage):
+                page.update_positions()
+            for page in card.findChildren(CompactVerticalOutputPage):
+                page.update_positions()
         card.updateGeometry()
         self.updateGeometry()
         self.update()
@@ -4010,6 +5572,10 @@ class GraphicalExperimentDialog(QDialog):
             self.tr("Grafik laden…", "Load image…")
         )
         self.load_image_action.setIcon(ToolbarIcons.icon("project_image"))
+        self.add_icon_action = self.add_elements_menu.addAction(
+            self.tr("Symbol…", "Symbol…")
+        )
+        self.add_icon_action.setIcon(standard_design_icon_preview("arrow", size=24))
         self.shape_elements_menu = self.add_elements_menu.addMenu(
             self.tr("Grafische Form", "Graphic shape")
         )
@@ -4062,6 +5628,9 @@ class GraphicalExperimentDialog(QDialog):
         self.background_color_action.triggered.connect(self.choose_background_color)
         self.add_comment_design_action.triggered.connect(
             self.request_comment_placement
+        )
+        self.add_icon_action.triggered.connect(
+            lambda _checked=False: self.choose_standard_icon()
         )
         self.add_line_action.triggered.connect(
             lambda: self.request_shape_placement("line")
@@ -4164,6 +5733,12 @@ class GraphicalExperimentDialog(QDialog):
         toolbar.addWidget(self.test_results_button)
         toolbar.addWidget(self.show_all_button)
         main_layout.addLayout(toolbar)
+        layout_margins = main_layout.contentsMargins()
+        self.setMinimumWidth(
+            toolbar.minimumSize().width()
+            + layout_margins.left()
+            + layout_margins.right()
+        )
 
         self.scene = QGraphicsScene(self)
         self.scene.setSceneRect(0.0, 0.0, self.CANVAS_WIDTH, self.CANVAS_HEIGHT)
@@ -4730,6 +6305,41 @@ class GraphicalExperimentDialog(QDialog):
             lambda target=str(shape_type): self.request_shape_placement(target),
         )
 
+    def choose_standard_icon(self, position=None):
+        """Öffnet die Symbolbibliothek und startet anschließend die Platzierung."""
+
+        if not self.edit_mode:
+            return
+        dialog = StandardIconDialog(self.tr, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted or not dialog.selected_icon:
+            return
+        if position is None:
+            self.request_icon_placement(dialog.selected_icon)
+        else:
+            self.add_shape(
+                "icon",
+                QPointF(position),
+                {"icon_name": dialog.selected_icon},
+            )
+
+    def request_icon_placement(self, icon_name):
+        if not self.edit_mode:
+            return
+        self.begin_history_action()
+        item = self.add_shape(
+            "icon",
+            QPointF(),
+            {"icon_name": str(icon_name)},
+            record_history=False,
+        )
+        if item is None:
+            self.active_history_state = None
+            return
+        self.start_element_placement(
+            [item],
+            lambda name=str(icon_name): self.request_icon_placement(name),
+        )
+
     def request_comment_placement(self, data=None):
         if not self.edit_mode:
             return
@@ -4838,6 +6448,7 @@ class GraphicalExperimentDialog(QDialog):
             "curve": (180.0, 70.0),
             "rectangle": (180.0, 110.0),
             "ellipse": (130.0, 130.0),
+            "icon": (90.0, 90.0),
         }
         width, height = defaults.get(str(shape_type), defaults["rectangle"])
         item = DesignShapeItem(shape_type, width, height, data)
@@ -4958,10 +6569,27 @@ class GraphicalExperimentDialog(QDialog):
         back_action.setIcon(ToolbarIcons.icon("layer_back"))
         lock_action, unlock_action = self.add_lock_actions(menu)
         menu.addSeparator()
-        line_color_action = menu.addAction(self.tr("Linienfarbe…", "Line color…"))
+        is_icon = item.shape_type == "icon"
+        change_icon_action = None
+        if is_icon:
+            change_icon_action = menu.addAction(
+                self.tr("Symbol ändern…", "Change symbol…")
+            )
+            change_icon_action.setIcon(
+                standard_design_icon_preview(item.icon_name, size=24)
+            )
+        line_color_action = menu.addAction(
+            self.tr("Symbolfarbe…", "Symbol color…")
+            if is_icon
+            else self.tr("Linienfarbe…", "Line color…")
+        )
         line_color_action.setIcon(ToolbarIcons.icon("color"))
-        line_width_action = menu.addAction(self.tr("Linienstärke…", "Line width…"))
-        line_width_action.setIcon(ToolbarIcons.icon("line_width"))
+        line_width_action = None
+        if not is_icon:
+            line_width_action = menu.addAction(
+                self.tr("Linienstärke…", "Line width…")
+            )
+            line_width_action.setIcon(ToolbarIcons.icon("line_width"))
         arrow_action = reverse_arrow_action = None
         if item.is_connector():
             menu.addSeparator()
@@ -4976,8 +6604,20 @@ class GraphicalExperimentDialog(QDialog):
             )
             reverse_arrow_action.setIcon(ToolbarIcons.icon("reverse"))
             reverse_arrow_action.setEnabled(item.arrow_enabled)
+        rotate_left_action = rotate_right_action = rotation_action = None
+        if is_icon:
+            menu.addSeparator()
+            rotate_left_action = menu.addAction(
+                self.tr("90° nach links", "Rotate 90° left")
+            )
+            rotate_right_action = menu.addAction(
+                self.tr("90° nach rechts", "Rotate 90° right")
+            )
+            rotation_action = menu.addAction(
+                self.tr("Drehwinkel…", "Rotation angle…")
+            )
         fill_color_action = transparent_action = None
-        if not item.is_connector():
+        if not item.is_connector() and not is_icon:
             menu.addSeparator()
             fill_color_action = menu.addAction(self.tr("Füllfarbe…", "Fill color…"))
             fill_color_action.setIcon(ToolbarIcons.icon("color"))
@@ -4986,7 +6626,11 @@ class GraphicalExperimentDialog(QDialog):
             transparent_action.setCheckable(True)
             transparent_action.setChecked(item.fill_color is None)
         menu.addSeparator()
-        delete_action = menu.addAction(self.tr("Form entfernen", "Remove shape"))
+        delete_action = menu.addAction(
+            self.tr("Symbol entfernen", "Remove symbol")
+            if is_icon
+            else self.tr("Form entfernen", "Remove shape")
+        )
         delete_action.setIcon(ToolbarIcons.icon("delete"))
         selected_shapes = [
             shape for shape in self.scene.selectedItems()
@@ -5014,16 +6658,39 @@ class GraphicalExperimentDialog(QDialog):
             self.set_elements_locked(self.selected_movable_items(), True)
         elif unlock_action is not None and selected == unlock_action:
             self.set_elements_locked(self.selected_movable_items(), False)
+        elif change_icon_action is not None and selected == change_icon_action:
+            dialog = StandardIconDialog(
+                self.tr,
+                self,
+                current_icon=item.icon_name,
+            )
+            if (
+                dialog.exec() == QDialog.DialogCode.Accepted
+                and dialog.selected_icon
+            ):
+                self.begin_history_action()
+                for shape in targets:
+                    if shape.shape_type == "icon":
+                        shape.icon_name = dialog.selected_icon
+                        shape.update()
+                self.finish_history_action()
         elif selected == line_color_action:
-            color = choose_color(item.line_color, self, self.tr("Linienfarbe", "Line color"))
+            color = choose_color(
+                item.line_color,
+                self,
+                self.tr("Symbolfarbe", "Symbol color")
+                if is_icon
+                else self.tr("Linienfarbe", "Line color"),
+            )
             if color.isValid():
                 self.begin_history_action()
                 for shape in targets:
-                    shape.line_color = QColor(color)
-                    shape.update()
+                    if not is_icon or shape.shape_type == "icon":
+                        shape.line_color = QColor(color)
+                        shape.update()
                 self.finish_history_action()
 
-        elif selected == line_width_action:
+        elif line_width_action is not None and selected == line_width_action:
             value, accepted = QInputDialog.getDouble(
                 self, self.tr("Linienstärke", "Line width"),
                 self.tr("Linienstärke in Pixel:", "Line width in pixels:"),
@@ -5035,6 +6702,34 @@ class GraphicalExperimentDialog(QDialog):
                     shape.prepareGeometryChange()
                     shape.line_width = float(value)
                     shape.update()
+            self.finish_history_action()
+        elif rotate_left_action is not None and selected == rotate_left_action:
+            self.begin_history_action()
+            for shape in targets:
+                if shape.shape_type == "icon":
+                    shape.setRotation((shape.rotation() - 90.0) % 360.0)
+            self.finish_history_action()
+        elif rotate_right_action is not None and selected == rotate_right_action:
+            self.begin_history_action()
+            for shape in targets:
+                if shape.shape_type == "icon":
+                    shape.setRotation((shape.rotation() + 90.0) % 360.0)
+            self.finish_history_action()
+        elif rotation_action is not None and selected == rotation_action:
+            value, accepted = QInputDialog.getDouble(
+                self,
+                self.tr("Drehwinkel", "Rotation angle"),
+                self.tr("Winkel in Grad:", "Angle in degrees:"),
+                item.rotation() % 360.0,
+                0.0,
+                359.9,
+                1,
+            )
+            if accepted:
+                self.begin_history_action()
+                for shape in targets:
+                    if shape.shape_type == "icon":
+                        shape.setRotation(float(value) % 360.0)
                 self.finish_history_action()
         elif arrow_action is not None and selected == arrow_action:
             self.begin_history_action()
@@ -5332,6 +7027,10 @@ class GraphicalExperimentDialog(QDialog):
             )
         )
         image_action.setIcon(ToolbarIcons.icon("project_image"))
+        icon_action = element_menu.addAction(
+            self.tr("Symbol…", "Symbol…")
+        )
+        icon_action.setIcon(standard_design_icon_preview("arrow", size=24))
         shape_menu = element_menu.addMenu(
             self.tr("Grafische Form", "Graphic shape")
         )
@@ -5364,6 +7063,8 @@ class GraphicalExperimentDialog(QDialog):
             self.add_existing_element(self.network_view_card, scene_position)
         elif selected == add_action:
             self.add_comment(scene_position)
+        elif selected == icon_action:
+            self.choose_standard_icon(scene_position)
         elif selected == line_action:
             self.add_shape("line", scene_position)
         elif selected == curve_action:
@@ -5379,6 +7080,12 @@ class GraphicalExperimentDialog(QDialog):
 
     def output_controls_for_proxy(self, proxy):
         for item, controls, _mapping in self.output_cards:
+            if item is proxy:
+                return controls
+        return None
+
+    def input_controls_for_proxy(self, proxy):
+        for item, controls, _mapping in self.input_cards:
             if item is proxy:
                 return controls
         return None
@@ -5427,7 +7134,9 @@ class GraphicalExperimentDialog(QDialog):
         transparent_action.setIcon(ToolbarIcons.icon("transparent"))
         transparent_action.setCheckable(True)
         transparent_action.setChecked(proxy.widget().card_transparent)
-        edit_action = delete_action = remove_action = bar_action = pointer_action = None
+        edit_action = delete_action = remove_action = None
+        bar_action = vertical_bar_action = pointer_action = None
+        input_slider_action = input_vertical_slider_action = input_dial_action = None
         input_values_action = output_values_action = None
         binary_intermediate_action = None
         rename_array_action = None
@@ -5472,6 +7181,42 @@ class GraphicalExperimentDialog(QDialog):
                 output_values_action.setChecked(
                     proxy.widget().show_output_values
                 )
+        input_controls = self.input_controls_for_proxy(proxy)
+        if input_controls is not None and not input_controls.get("binary"):
+            menu.addSeparator()
+            input_slider_action = menu.addAction(
+                self.tr(
+                    "Schieberegler horizontal",
+                    "Horizontal slider",
+                )
+            )
+            input_slider_action.setIcon(ToolbarIcons.icon("bar_display"))
+            input_vertical_slider_action = menu.addAction(
+                self.tr(
+                    "Schieberegler vertikal",
+                    "Vertical slider",
+                )
+            )
+            input_vertical_slider_action.setIcon(
+                ToolbarIcons.icon("bar_display")
+            )
+            input_dial_action = menu.addAction(
+                self.tr("Drehregler", "Rotary control")
+            )
+            input_dial_action.setIcon(ToolbarIcons.icon("pointer_display"))
+            input_slider_action.setCheckable(True)
+            input_vertical_slider_action.setCheckable(True)
+            input_dial_action.setCheckable(True)
+            input_slider_action.setChecked(
+                input_controls["display_mode"] == "slider"
+            )
+            input_vertical_slider_action.setChecked(
+                input_controls["display_mode"] == "slider_vertical"
+            )
+            input_dial_action.setChecked(
+                input_controls["display_mode"] == "dial"
+            )
+
         controls = self.output_controls_for_proxy(proxy)
         if controls is not None and controls.get("binary"):
             intermediate_targets = [
@@ -5494,13 +7239,29 @@ class GraphicalExperimentDialog(QDialog):
             )
         elif controls is not None and controls.get("display_mode") != "binary":
             menu.addSeparator()
-            bar_action = menu.addAction(self.tr("Balkenanzeige", "Bar display"))
+            bar_action = menu.addAction(
+                self.tr(
+                    "Balkenanzeige horizontal",
+                    "Horizontal bar display",
+                )
+            )
             bar_action.setIcon(ToolbarIcons.icon("bar_display"))
+            vertical_bar_action = menu.addAction(
+                self.tr(
+                    "Balkenanzeige vertikal",
+                    "Vertical bar display",
+                )
+            )
+            vertical_bar_action.setIcon(ToolbarIcons.icon("bar_display"))
             pointer_action = menu.addAction(self.tr("Zeigeranzeige", "Pointer display"))
             pointer_action.setIcon(ToolbarIcons.icon("pointer_display"))
             bar_action.setCheckable(True)
+            vertical_bar_action.setCheckable(True)
             pointer_action.setCheckable(True)
             bar_action.setChecked(controls["display_mode"] == "bar")
+            vertical_bar_action.setChecked(
+                controls["display_mode"] == "bar_vertical"
+            )
             pointer_action.setChecked(controls["display_mode"] == "pointer")
         selected = menu.exec(global_position)
         if selected == front_action:
@@ -5573,10 +7334,35 @@ class GraphicalExperimentDialog(QDialog):
                     item, binary_intermediate_action.isChecked(), record_history=False,
                 )
             self.finish_history_action()
-        elif bar_action is not None and selected in (bar_action, pointer_action):
+        elif input_slider_action is not None and selected in (
+            input_slider_action,
+            input_vertical_slider_action,
+            input_dial_action,
+        ):
             self.begin_history_action()
+            display_mode = "slider"
+            if selected == input_vertical_slider_action:
+                display_mode = "slider_vertical"
+            elif selected == input_dial_action:
+                display_mode = "dial"
+            self.set_input_display_mode(
+                input_controls,
+                display_mode,
+            )
+            self.finish_history_action()
+        elif bar_action is not None and selected in (
+            bar_action,
+            vertical_bar_action,
+            pointer_action,
+        ):
+            self.begin_history_action()
+            display_mode = "bar"
+            if selected == vertical_bar_action:
+                display_mode = "bar_vertical"
+            elif selected == pointer_action:
+                display_mode = "pointer"
             self.set_output_display_mode(
-                controls, "bar" if selected == bar_action else "pointer"
+                controls, display_mode
             )
             self.finish_history_action()
 
@@ -5936,7 +7722,7 @@ class GraphicalExperimentDialog(QDialog):
             )
         )
         if is_binary:
-            editor = QCheckBox(self.tr("Ein", "On"), card)
+            editor = CenteredCheckMarkBox(self.tr("Ein", "On"), card)
             def update_binary_input_color(state, widget=editor):
                 border, background, foreground = state_palette(self.color_settings, state, ("", "", ""))
                 widget.setStyleSheet(
@@ -5977,34 +7763,78 @@ class GraphicalExperimentDialog(QDialog):
         card.responsive_input_stacked = False
         layout.addLayout(top)
 
-        slider = QSlider(Qt.Orientation.Horizontal, card)
+        slider = CompactInputSlider(card)
         slider.setRange(0, 1000)
+        slider.set_foreground_color(card.text_color)
         self.sync_slider(slider, initial_value, minimum, maximum)
-        slider.setVisible(not is_binary)
+        dial = CompactInputDial(
+            minimum,
+            maximum,
+            str(mapping.get("unit") or ""),
+            card,
+        )
+        dial.setRange(0, 1000)
+        dial.set_foreground_color(card.text_color)
+        self.sync_slider(dial, initial_value, minimum, maximum)
+        vertical_page = CompactVerticalInputPage(
+            minimum,
+            maximum,
+            str(mapping.get("unit") or ""),
+            card,
+        )
+        vertical_slider = vertical_page.slider
+        vertical_slider.setRange(0, 1000)
+        vertical_slider.set_foreground_color(card.text_color)
+        self.sync_slider(vertical_slider, initial_value, minimum, maximum)
+        display_stack = QStackedWidget(card)
+        display_stack.addWidget(slider)
+        display_stack.addWidget(dial)
+        display_stack.addWidget(vertical_page)
+        display_stack.setFixedHeight(20)
+        display_stack.setVisible(not is_binary)
         if not is_binary:
-            slider.sliderPressed.connect(self.input_slider_pressed)
-            slider.sliderReleased.connect(self.input_slider_released)
-            slider.valueChanged.connect(
-                lambda position, target=editor, low=minimum, high=maximum:
-                target.setValue(low + position / 1000.0 * (high - low))
-            )
+            for control in (slider, dial, vertical_slider):
+                control.sliderPressed.connect(self.input_slider_pressed)
+                control.sliderReleased.connect(self.input_slider_released)
+                control.valueChanged.connect(
+                    lambda position, target=editor, low=minimum, high=maximum:
+                    target.setValue(low + position / 1000.0 * (high - low))
+                )
             editor.valueChanged.connect(
                 lambda value, target=slider, low=minimum, high=maximum:
                 self.sync_slider(target, value, low, high)
             )
-        layout.addWidget(slider)
+            editor.valueChanged.connect(
+                lambda value, target=dial, low=minimum, high=maximum:
+                self.sync_slider(target, value, low, high)
+            )
+            editor.valueChanged.connect(
+                lambda value, target=vertical_slider, low=minimum, high=maximum:
+                self.sync_slider(target, value, low, high)
+            )
+        layout.addWidget(display_stack)
 
         proxy = MovableCardProxy("input")
         proxy.setWidget(card)
         self.scene.addItem(proxy)
         proxy.setZValue(10.0)
         proxy.configure_card_size(115.0, 40.0 if is_binary else 44.0)
-        return proxy, {
+        controls = {
             "card": card,
             "editor": editor,
             "slider": slider,
+            "dial": dial,
+            "vertical_slider": vertical_slider,
+            "vertical_page": vertical_page,
+            "display_stack": display_stack,
+            "display_mode": "binary" if is_binary else "slider",
+            "binary": is_binary,
+            "proxy": proxy,
             "mapping": mapping,
         }
+        if not is_binary:
+            self.set_input_display_mode(controls, "slider")
+        return proxy, controls
 
     def create_output_card(self, mapping):
         card = self.card_widget()
@@ -6049,26 +7879,40 @@ class GraphicalExperimentDialog(QDialog):
             led.setStyleSheet(
                 "background:#a5abb0; border:1px solid #747a80; border-radius:7px;"
             )
-            state_label = QLabel(self.tr("○ Aus", "○ Off"), card)
-            state_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            state_label.setMinimumHeight(16)
-            state_label.setStyleSheet(
-                "background:#f3f5f6; color:#4f5963; border:1px solid #9aa5ad; "
-                "border-radius:4px;"
+            state_label = CenteredCheckMarkBox(self.tr("Ein", "On"), card)
+            state_label.setChecked(False)
+            state_label.setAttribute(
+                Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+                True,
             )
-            binary_bar = QProgressBar(card)
+            state_label.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            state_label.setMinimumHeight(16)
+            off_border, off_background, off_foreground = state_palette(
+                self.color_settings,
+                False,
+                ("", "", ""),
+            )
+            state_label.setStyleSheet(
+                f"QCheckBox {{ background:{off_background}; "
+                f"color:{off_foreground}; border:1px solid {off_border}; "
+                "border-radius:4px; }}"
+                if off_background else ""
+            )
+            state_label.setMinimumWidth(28)
+            state_label.setSizePolicy(
+                QSizePolicy.Policy.Preferred,
+                QSizePolicy.Policy.Fixed,
+            )
+            top.addWidget(name, 0, 0)
+            top.addWidget(state_label, 0, 1, Qt.AlignmentFlag.AlignCenter)
+            binary_bar = CompactOutputBar(card)
             binary_bar.setRange(0, 1000)
             binary_bar.setValue(0)
-            binary_bar.setTextVisible(False)
-            binary_bar.setMinimumHeight(16)
-            binary_stack = QStackedWidget(card)
-            binary_stack.addWidget(state_label)
-            binary_stack.addWidget(binary_bar)
-            binary_stack.setMinimumHeight(16)
-            binary_stack.setMaximumHeight(80)
+            binary_bar.set_foreground_color(card.text_color)
+            binary_bar.setVisible(False)
             display.addWidget(led)
             display.setAlignment(led, Qt.AlignmentFlag.AlignVCenter)
-            display.addWidget(binary_stack, 1)
+            display.addWidget(binary_bar, 1)
             layout.addLayout(display)
             # Hohe binäre Ausgabekacheln nutzen die verfügbare Höhe bewusst:
             # Name oben, Status unten und symmetrische Außenabstände.
@@ -6081,6 +7925,7 @@ class GraphicalExperimentDialog(QDialog):
             card.responsive_binary_grid = top
             card.responsive_binary_name = name
             card.responsive_binary_value = value_label
+            card.responsive_binary_state_label = state_label
             card.responsive_binary_main_layout = layout
             card.binary_intermediate_enabled = False
             card.responsive_binary_state = (False, False)
@@ -6095,7 +7940,7 @@ class GraphicalExperimentDialog(QDialog):
                 "value": value_label,
                 "bar": None,
                 "binary_bar": binary_bar,
-                "binary_stack": binary_stack,
+                "binary_stack": None,
                 "led": led,
                 "gauge": None,
                 "state_label": state_label,
@@ -6108,10 +7953,9 @@ class GraphicalExperimentDialog(QDialog):
                 "binary": True,
             }
 
-        bar = QProgressBar(card)
+        bar = CompactOutputBar(card)
         bar.setRange(0, 1000)
-        bar.setTextVisible(False)
-        bar.setFixedHeight(14)
+        bar.set_foreground_color(card.text_color)
         minimum, maximum = self.display_range(mapping)
         unit = str(mapping.get("unit") or "")
         bar_page = QWidget(card)
@@ -6136,10 +7980,23 @@ class GraphicalExperimentDialog(QDialog):
         range_layout.addWidget(maximum_label)
         bar_layout.addLayout(range_layout)
         bar_page.setFixedHeight(28)
+
+        vertical_page = CompactVerticalOutputPage(
+            minimum,
+            maximum,
+            unit,
+            card,
+            card,
+        )
+        vertical_bar = vertical_page.bar
+        vertical_bar.setRange(0, 1000)
+        vertical_bar.set_foreground_color(card.text_color)
+
         gauge = CompactOutputGauge(minimum, maximum, unit, card)
         display_stack = QStackedWidget(card)
         display_stack.addWidget(bar_page)
         display_stack.addWidget(gauge)
+        display_stack.addWidget(vertical_page)
         display.addWidget(led)
         display.setAlignment(led, Qt.AlignmentFlag.AlignBottom)
         display.addWidget(display_stack, 1)
@@ -6156,6 +8013,8 @@ class GraphicalExperimentDialog(QDialog):
             "binary_stack": None,
             "led": led,
             "gauge": gauge,
+            "vertical_bar": vertical_bar,
+            "vertical_page": vertical_page,
             "state_label": None,
             "display_stack": display_stack,
             "display_layout": display,
@@ -6178,18 +8037,38 @@ class GraphicalExperimentDialog(QDialog):
         if not self.edit_mode or controls["display_mode"] == "binary":
             return
         menu = QMenu(self)
-        bar_action = menu.addAction(self.tr("Balkenanzeige", "Bar display"))
+        bar_action = menu.addAction(
+            self.tr(
+                "Balkenanzeige horizontal",
+                "Horizontal bar display",
+            )
+        )
         bar_action.setIcon(ToolbarIcons.icon("bar_display"))
+        vertical_bar_action = menu.addAction(
+            self.tr(
+                "Balkenanzeige vertikal",
+                "Vertical bar display",
+            )
+        )
+        vertical_bar_action.setIcon(ToolbarIcons.icon("bar_display"))
         pointer_action = menu.addAction(self.tr("Zeigeranzeige", "Pointer display"))
         pointer_action.setIcon(ToolbarIcons.icon("pointer_display"))
         bar_action.setCheckable(True)
+        vertical_bar_action.setCheckable(True)
         pointer_action.setCheckable(True)
         bar_action.setChecked(controls["display_mode"] == "bar")
+        vertical_bar_action.setChecked(
+            controls["display_mode"] == "bar_vertical"
+        )
         pointer_action.setChecked(controls["display_mode"] == "pointer")
         selected = menu.exec(controls["card"].mapToGlobal(position))
         if selected == bar_action:
             self.begin_history_action()
             self.set_output_display_mode(controls, "bar")
+            self.finish_history_action()
+        elif selected == vertical_bar_action:
+            self.begin_history_action()
+            self.set_output_display_mode(controls, "bar_vertical")
             self.finish_history_action()
         elif selected == pointer_action:
             self.begin_history_action()
@@ -6200,13 +8079,25 @@ class GraphicalExperimentDialog(QDialog):
     def set_output_display_mode(controls, mode):
         if controls.get("display_mode") == "binary":
             return
-        controls["display_mode"] = "pointer" if mode == "pointer" else "bar"
+        controls["display_mode"] = (
+            mode
+            if mode in ("bar_vertical", "pointer")
+            else "bar"
+        )
         pointer_mode = controls["display_mode"] == "pointer"
+        vertical_mode = controls["display_mode"] == "bar_vertical"
+        tall_mode = pointer_mode or vertical_mode
         card = controls.get("card")
         if isinstance(card, ExperimentCard):
-            card.responsive_output_bar_mode = not pointer_mode
-        controls["display_stack"].setCurrentIndex(1 if pointer_mode else 0)
-        if pointer_mode:
+            card.responsive_output_bar_mode = not tall_mode
+            card.responsive_output_pointer_mode = pointer_mode
+        controls["display_stack"].setCurrentIndex(
+            2 if vertical_mode else (1 if pointer_mode else 0)
+        )
+        controls["vertical_bar"].setVisible(vertical_mode)
+        if vertical_mode:
+            controls["vertical_page"].update_positions()
+        if tall_mode:
             controls["display_stack"].setMinimumHeight(64)
             controls["display_stack"].setMaximumHeight(16777215)
             controls["display_stack"].setSizePolicy(
@@ -6217,14 +8108,14 @@ class GraphicalExperimentDialog(QDialog):
         controls["display_layout"].setAlignment(
             controls["led"],
             Qt.AlignmentFlag.AlignVCenter
-            if pointer_mode
+            if tall_mode
             else Qt.AlignmentFlag.AlignBottom,
         )
         if isinstance(card, ExperimentCard):
             content_scale = card.content_scale_for_size(card.width(), card.height())
             card.apply_content_scale(content_scale)
         proxy = controls.get("proxy")
-        desired_minimum_height = 96.0 if pointer_mode else 44.0
+        desired_minimum_height = 96.0 if tall_mode else 44.0
         if proxy is not None:
             proxy.minimum_card_height = desired_minimum_height
             controls["card"].setMinimumHeight(round(desired_minimum_height))
@@ -6235,6 +8126,42 @@ class GraphicalExperimentDialog(QDialog):
                 )
         else:
             controls["card"].adjustSize()
+        controls["card"].updateGeometry()
+
+    @staticmethod
+    def set_input_display_mode(controls, mode):
+        if controls.get("binary"):
+            return
+        controls["display_mode"] = (
+            mode
+            if mode in ("slider_vertical", "dial")
+            else "slider"
+        )
+        dial_mode = controls["display_mode"] == "dial"
+        vertical_mode = controls["display_mode"] == "slider_vertical"
+        tall_mode = dial_mode or vertical_mode
+        stack = controls["display_stack"]
+        stack.setCurrentIndex(2 if vertical_mode else (1 if dial_mode else 0))
+        if tall_mode:
+            stack.setMinimumHeight(64)
+            stack.setMaximumHeight(16777215)
+            stack.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Expanding,
+            )
+        else:
+            stack.setFixedHeight(20)
+        proxy = controls.get("proxy")
+        desired_minimum_height = (
+            110.0 if vertical_mode else (96.0 if dial_mode else 44.0)
+        )
+        if proxy is not None:
+            proxy.minimum_card_height = desired_minimum_height
+            card = controls["card"]
+            card.setMinimumHeight(round(desired_minimum_height))
+            card.setMaximumHeight(16777215)
+            if card.height() < desired_minimum_height:
+                proxy.set_card_size(card.width(), desired_minimum_height)
         controls["card"].updateGeometry()
 
     @staticmethod
@@ -6280,6 +8207,10 @@ class GraphicalExperimentDialog(QDialog):
                 editor.setValue(value)
                 minimum, maximum = self.value_range(mapping)
                 self.sync_slider(controls["slider"], value, minimum, maximum)
+                self.sync_slider(controls["dial"], value, minimum, maximum)
+                self.sync_slider(
+                    controls["vertical_slider"], value, minimum, maximum
+                )
                 editor.setToolTip(editor.text())
             editor.blockSignals(False)
 
@@ -6302,14 +8233,15 @@ class GraphicalExperimentDialog(QDialog):
             self.begin_history_action()
         controls["value"].setVisible(enabled)
         controls["led"].setVisible(enabled)
-        controls["binary_stack"].setCurrentIndex(1 if enabled else 0)
+        controls["binary_bar"].setVisible(enabled)
+        controls["state_label"].setVisible(not enabled)
         card.binary_intermediate_enabled = enabled
         card.responsive_binary_state = None
         main_layout = controls.get("main_layout")
         if main_layout is not None:
-            main_layout.setStretch(0, 1)
-            main_layout.setStretch(2, 0 if enabled else 2)
-            main_layout.setStretch(4, 1)
+            main_layout.setStretch(0, 1 if enabled else 0)
+            main_layout.setStretch(2, 0)
+            main_layout.setStretch(4, 1 if enabled else 0)
             main_layout.invalidate()
         proxy.set_card_size(card.width(), card.height())
         if record_history:
@@ -6505,6 +8437,10 @@ class GraphicalExperimentDialog(QDialog):
                     controls["bar"].setValue(
                         round(max(0.0, min(1.0, ratio)) * 1000.0)
                     )
+                if controls.get("vertical_bar") is not None:
+                    controls["vertical_bar"].setValue(
+                        round(max(0.0, min(1.0, ratio)) * 1000.0)
+                    )
                 if controls.get("binary_bar") is not None:
                     controls["binary_bar"].setValue(
                         round(max(0.0, min(1.0, mapping["neuron"].output_value)) * 1000.0)
@@ -6519,11 +8455,20 @@ class GraphicalExperimentDialog(QDialog):
                     f"background:{color}; border:1px solid {border}; border-radius:7px;"
                 )
                 if controls["state_label"] is not None:
-                    controls["state_label"].setText(self.tr("● Ein", "● On") if active else self.tr("○ Aus", "○ Off"))
-                    border, background, foreground = state_palette(self.color_settings, active,
-                        ("#39a85a", "#e6f7eb", "#0b6b2c") if active else ("#9aa5ad", "#f3f5f6", "#4f5963"))
+                    controls["state_label"].setChecked(active)
+                    controls["state_label"].setText(
+                        self.tr("Ein", "On")
+                    )
+                    border, background, foreground = state_palette(
+                        self.color_settings,
+                        active,
+                        ("", "", ""),
+                    )
                     controls["state_label"].setStyleSheet(
-                        f"background:{background}; color:{foreground}; border:1px solid {border}; border-radius:4px;"
+                        f"QCheckBox {{ background:{background}; "
+                        f"color:{foreground}; border:1px solid {border}; "
+                        "border-radius:4px; }}"
+                        if background else ""
                     )
                 if binary:
                     uncertain = is_uncertain(mapping["neuron"].output_value, self.uncertainty_settings)
@@ -6532,7 +8477,9 @@ class GraphicalExperimentDialog(QDialog):
                     for widget in (controls["value"], controls["led"], controls["state_label"], controls["binary_bar"]):
                         widget.setToolTip(tooltip if uncertain else "")
                     if uncertain:
-                        controls["state_label"].setText(self.tr("⚠ Ein · Unklar", "⚠ On · Uncertain") if active else self.tr("⚠ Aus · Unklar", "⚠ Off · Uncertain"))
+                        controls["state_label"].setText(
+                            self.tr("⚠ Ein · Unklar", "⚠ On · Uncertain")
+                        )
                         controls["state_label"].setStyleSheet(warning_style(self.color_settings))
                         controls["led"].setStyleSheet(warning_style(self.color_settings))
             if self.network_view_card is not None:
@@ -6581,6 +8528,7 @@ class GraphicalExperimentDialog(QDialog):
         ):
             button.setEnabled(self.edit_mode)
         self.add_comment_design_action.setEnabled(self.edit_mode)
+        self.add_icon_action.setEnabled(self.edit_mode)
         self.load_image_action.setEnabled(self.edit_mode)
         self.background_color_action.setEnabled(self.edit_mode)
         self.grid_visible_action.setEnabled(self.edit_mode)
@@ -7094,6 +9042,14 @@ class GraphicalExperimentDialog(QDialog):
         self.restoring_history = True
         try:
             document = snapshot["layout"]
+            for _proxy, controls, mapping in self.input_cards:
+                self.set_input_display_mode(
+                    controls,
+                    document.get("input_displays", {}).get(
+                        self.card_key("input", mapping),
+                        controls["display_mode"],
+                    ),
+                )
             for _proxy, controls, mapping in self.output_cards:
                 self.set_output_display_mode(
                     controls,
@@ -7292,6 +9248,11 @@ class GraphicalExperimentDialog(QDialog):
                 self.card_key("output", mapping): controls["display_mode"]
                 for _proxy, controls, mapping in self.output_cards
             },
+            "input_displays": {
+                self.card_key("input", mapping): controls["display_mode"]
+                for _proxy, controls, mapping in self.input_cards
+                if not controls.get("binary")
+            },
         }
 
     def is_dirty(self):
@@ -7353,6 +9314,8 @@ class GraphicalExperimentDialog(QDialog):
             document = json.loads(self.layout_file.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return
+        if not isinstance(document, dict):
+            return
         window_size = document.get("window_size")
         if isinstance(window_size, dict):
             try:
@@ -7371,6 +9334,12 @@ class GraphicalExperimentDialog(QDialog):
         self.grid_visible_action.setChecked(self.grid_enabled)
         self.grid_visible_action.blockSignals(False)
         self.update_grid_visibility()
+        input_displays = document.get("input_displays", {})
+        for _proxy, controls, mapping in self.input_cards:
+            self.set_input_display_mode(
+                controls,
+                input_displays.get(self.card_key("input", mapping), "slider"),
+            )
         output_displays = document.get("output_displays", {})
         for _proxy, controls, mapping in self.output_cards:
             self.set_output_display_mode(

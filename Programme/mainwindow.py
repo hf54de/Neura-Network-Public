@@ -10493,7 +10493,8 @@ class MainWindow(QMainWindow):
 
         try:
             project_data = ProjectIO.load_project(
-                file_path
+                file_path,
+                translator=self.language.text
             )
 
         except (

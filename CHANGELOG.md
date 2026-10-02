@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.0-beta.06 – 02.10.2026
+
+- add live network characteristic plots to the training and analysis views
+- add zooming, panning, point details, dataset navigation, and comparison controls
+- improve training rollback, error handling, chart rendering, and window layouts
+- validate network connections and warn when connections skip layers
+- extend graphical experiments with new controls, gauges, scalable layouts,standard symbols, and grouped logic symbols
+- update translations, automated tests, example projects, and documentation
+- refresh the German and English manuals and packaged tutorial files
+
 ## 0.10.0-beta.05 – 16.09.2026
 
 - add profile storage

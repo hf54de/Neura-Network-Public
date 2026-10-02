@@ -8,6 +8,7 @@
 from collections import defaultdict
 from datetime import datetime
 from html import escape
+import math
 from math import log10
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -39,7 +41,7 @@ from docxreport import DocxReport
 from language import LanguageManager
 from numberformat import format_number
 from trainingdataio import TrainingDataIO
-from analysisplot import FeatureImportancePlot, SollIstPlot
+from analysisplot import CharacteristicPlot, FeatureImportancePlot, SollIstPlot
 from graphicalexperimentdialog import show_yellow_information_dialog
 
 
@@ -253,6 +255,88 @@ class ResultAnalysisDialog(QDialog):
             widget.setSizePolicy(policy)
         self.tabs.addTab(self.plot_tab, self.t("analysis.tab.plot"))
 
+        self.characteristic_tab = QWidget()
+        characteristic_layout = QVBoxLayout(self.characteristic_tab)
+        self.characteristic_explanation = QLabel(
+            self.t("analysis.characteristic.explanation")
+        )
+        self.characteristic_explanation.setWordWrap(True)
+        characteristic_layout.addWidget(self.characteristic_explanation)
+
+        characteristic_controls = QHBoxLayout()
+        characteristic_controls.addWidget(
+            QLabel(self.t("analysis.characteristic.input_label"))
+        )
+        self.characteristic_input_combo = QComboBox()
+        self.characteristic_input_combo.currentIndexChanged.connect(
+            self.refresh_characteristic
+        )
+        characteristic_controls.addWidget(self.characteristic_input_combo, 1)
+        self.characteristic_reference_label = QLabel(
+            self.t("analysis.characteristic.reference_label")
+        )
+        characteristic_controls.addWidget(self.characteristic_reference_label)
+        self.characteristic_reference_record = QSpinBox()
+        self.characteristic_reference_record.setMinimum(1)
+        self.characteristic_reference_record.valueChanged.connect(
+            self.refresh_characteristic
+        )
+        characteristic_controls.addWidget(self.characteristic_reference_record)
+        self.characteristic_show_points = QCheckBox(
+            self.t("analysis.characteristic.show_points")
+        )
+        self.characteristic_show_points.setChecked(True)
+        self.characteristic_show_points.toggled.connect(
+            self.refresh_characteristic
+        )
+        characteristic_controls.addWidget(self.characteristic_show_points)
+        self.characteristic_show_all_records = QCheckBox(
+            self.t("analysis.characteristic.show_all_records")
+        )
+        self.characteristic_show_all_records.setChecked(False)
+        self.characteristic_show_all_records.toggled.connect(
+            self.refresh_characteristic
+        )
+        characteristic_controls.addWidget(
+            self.characteristic_show_all_records
+        )
+        self.characteristic_show_all_button = QPushButton(
+            self.t("analysis.plot.show_all")
+        )
+        self.characteristic_show_all_button.setToolTip(
+            self.t("analysis.plot.navigation_tooltip")
+        )
+        self.characteristic_show_all_button.setEnabled(False)
+        characteristic_controls.addWidget(
+            self.characteristic_show_all_button
+        )
+        characteristic_layout.addLayout(characteristic_controls)
+
+        self.characteristic_context = QLabel()
+        self.characteristic_context.setWordWrap(True)
+        self.characteristic_context.setStyleSheet(
+            "QLabel { background:#eef4f8; border:1px solid #b9cbd8; "
+            "border-radius:4px; padding:7px; }"
+        )
+        characteristic_layout.addWidget(self.characteristic_context)
+        self.characteristic_plot = CharacteristicPlot(
+            language_manager=self.language
+        )
+        self.characteristic_show_all_button.clicked.connect(
+            self.characteristic_plot.reset_view
+        )
+        self.characteristic_plot.viewChanged.connect(
+            self.characteristic_show_all_button.setEnabled
+        )
+        self.characteristic_plot.recordActivated.connect(
+            self.open_plot_record
+        )
+        characteristic_layout.addWidget(self.characteristic_plot, 1)
+        self.tabs.addTab(
+            self.characteristic_tab,
+            self.t("analysis.tab.characteristic"),
+        )
+
         self.tolerance_tab = QWidget()
         tolerance_layout = QVBoxLayout(self.tolerance_tab)
         tolerance_controls = QHBoxLayout()
@@ -321,7 +405,7 @@ class ResultAnalysisDialog(QDialog):
                 if source.get("kind") == initial_source_kind:
                     self.source_combo.setCurrentIndex(index)
                     break
-        self.tabs.setCurrentIndex(max(0, min(4, int(initial_tab))))
+        self.tabs.setCurrentIndex(max(0, min(5, int(initial_tab))))
         self.refresh_analysis()
 
     def show_information(self):
@@ -331,6 +415,7 @@ class ResultAnalysisDialog(QDialog):
             self.records_tab: "records",
             self.overview_tab: "overview",
             self.plot_tab: "plot",
+            self.characteristic_tab: "characteristic",
             self.tolerance_tab: "tolerance",
             self.sensitivity_tab: "sensitivity",
         }
@@ -386,6 +471,51 @@ class ResultAnalysisDialog(QDialog):
             None,
         )
 
+    def selected_characteristic_input_mapping(self):
+        neuron_id = self.characteristic_input_combo.currentData()
+        source = self.current_source()
+        if not source or neuron_id is None:
+            return None
+        return next(
+            (
+                mapping for mapping in source["inputs"]
+                if mapping["neuron"].id == neuron_id
+            ),
+            None,
+        )
+
+    def populate_characteristic_inputs(self):
+        source = self.current_source()
+        previous = self.characteristic_input_combo.currentData()
+        self.characteristic_input_combo.blockSignals(True)
+        self.characteristic_input_combo.clear()
+        if source:
+            for mapping in source["inputs"]:
+                if mapping.get("data_type") == "binary":
+                    continue
+                unit = str(mapping.get("unit") or "").strip()
+                label = mapping["column_name"]
+                if unit:
+                    label += f" [{unit}]"
+                self.characteristic_input_combo.addItem(
+                    label,
+                    mapping["neuron"].id,
+                )
+        index = self.characteristic_input_combo.findData(previous)
+        self.characteristic_input_combo.setCurrentIndex(
+            index if index >= 0 else (0 if self.characteristic_input_combo.count() else -1)
+        )
+        self.characteristic_input_combo.blockSignals(False)
+
+        record_count = len(source["records"]) if source else 0
+        self.characteristic_reference_record.blockSignals(True)
+        self.characteristic_reference_record.setRange(1, max(1, record_count))
+        self.characteristic_reference_record.setValue(
+            min(self.characteristic_reference_record.value(), max(1, record_count))
+        )
+        self.characteristic_reference_record.setEnabled(record_count > 0)
+        self.characteristic_reference_record.blockSignals(False)
+
     def populate_output_combo(self):
         source = self.current_source()
         previous = self.output_combo.currentData()
@@ -404,11 +534,12 @@ class ResultAnalysisDialog(QDialog):
         self.update_output_selection_options()
 
     def update_output_selection_options(self):
-        tab = self.tabs.currentIndex()
-        self.output_combo.setVisible(tab != 0)
-        self.output_selector_label.setVisible(tab != 0)
+        current_tab = self.tabs.currentWidget()
+        show_selector = current_tab is not self.records_tab
+        self.output_combo.setVisible(show_selector)
+        self.output_selector_label.setVisible(show_selector)
         if self.output_combo.count():
-            specific = tab in (3, 4)
+            specific = current_tab in (self.tolerance_tab, self.sensitivity_tab)
             self.output_combo.model().item(0).setEnabled(not specific)
             self.output_combo.view().setRowHidden(0, specific)
             if specific:
@@ -421,12 +552,16 @@ class ResultAnalysisDialog(QDialog):
     def tab_changed(self, index):
         self.update_output_selection_options()
         self.refresh_plot_and_tolerance()
-        if index == 4:
+        current_tab = self.tabs.widget(index)
+        if current_tab is self.characteristic_tab:
+            self.refresh_characteristic()
+        if current_tab is self.sensitivity_tab:
             self.refresh_sensitivity()
 
     def output_changed(self, index=None):
         self.refresh_overview_tables()
         self.refresh_plot_and_tolerance()
+        self.refresh_characteristic()
         self.refresh_sensitivity()
 
     def source_information(self, source):
@@ -584,6 +719,7 @@ class ResultAnalysisDialog(QDialog):
             return
         self.current_result = self.calculate(source)
         self.populate_output_combo()
+        self.populate_characteristic_inputs()
         self.results_by_source[id(source)] = self.current_result
         self.tabs.setTabText(
             0,
@@ -597,10 +733,336 @@ class ResultAnalysisDialog(QDialog):
         self.populate_records_table()
         self.refresh_overview_tables()
         self.refresh_plot_and_tolerance()
+        self.refresh_characteristic()
         self.refresh_sensitivity()
 
+    @staticmethod
+    def characteristic_input_range(source, mapping):
+        values = [
+            float(record[mapping["column_index"]])
+            for record in source["records"]
+        ]
+        calibration = TrainingDataIO.normalize_calibration(
+            mapping.get("calibration")
+        )
+        if (
+            calibration["mode"] in {"minmax_0_1", "minmax_minus1_1"}
+            and calibration["source_max"] > calibration["source_min"]
+        ):
+            return calibration["source_min"], calibration["source_max"]
+        minimum = min(values)
+        maximum = max(values)
+        if math.isclose(minimum, maximum):
+            padding = max(1.0, abs(minimum) * 0.1)
+            return minimum - padding, maximum + padding
+        return minimum, maximum
+
+    @staticmethod
+    def limited_characteristic_points(points, maximum_points=2000):
+        """Begrenzt nur die Punktdarstellung reproduzierbar über die X-Achse."""
+
+        points = sorted(points, key=lambda point: (point[0], point[1]))
+        if len(points) <= maximum_points:
+            return points
+        if maximum_points <= 1:
+            return points[:1]
+        last_index = len(points) - 1
+        indices = {
+            round(index * last_index / (maximum_points - 1))
+            for index in range(maximum_points)
+        }
+        return [points[index] for index in sorted(indices)]
+
+    @staticmethod
+    def similar_characteristic_records(
+        source,
+        input_mapping,
+        reference_index,
+        maximum_points=30,
+    ):
+        """Findet lokal vergleichbare Datensätze über die übrigen Eingänge."""
+
+        other_inputs = [
+            mapping for mapping in source["inputs"]
+            if mapping["neuron"].id != input_mapping["neuron"].id
+        ]
+        if not other_inputs:
+            return []
+        records = source["records"]
+        reference_record = records[reference_index]
+        dimensions = []
+        for mapping in other_inputs:
+            column_index = mapping["column_index"]
+            values = [float(record[column_index]) for record in records]
+            span = max(values) - min(values)
+            if span > 1e-12:
+                dimensions.append((column_index, span))
+        if not dimensions:
+            return [
+                (index, 0.0, 1.0)
+                for index in range(len(records))
+                if index != reference_index
+            ][:maximum_points]
+
+        candidates = []
+        for index, record in enumerate(records):
+            if index == reference_index:
+                continue
+            squared_distance = sum(
+                (
+                    (float(record[column_index])
+                     - float(reference_record[column_index])) / span
+                ) ** 2
+                for column_index, span in dimensions
+            ) / len(dimensions)
+            candidates.append((index, math.sqrt(squared_distance)))
+        candidates.sort(key=lambda item: (item[1], item[0]))
+        selected = candidates[:maximum_points]
+        if not selected:
+            return []
+        smallest_distance = selected[0][1]
+        greatest_distance = selected[-1][1]
+        distance_span = greatest_distance - smallest_distance
+        return [
+            (
+                index,
+                distance,
+                1.0 if distance_span <= 1e-12
+                else 0.25 + 0.75 * (
+                    1.0 - (distance - smallest_distance) / distance_span
+                ),
+            )
+            for index, distance in selected
+        ]
+
+    @staticmethod
+    def characteristic_axis_label(mapping):
+        unit = str(mapping.get("unit") or "").strip()
+        return (
+            f"{mapping['column_name']} [{unit}]"
+            if unit else mapping["column_name"]
+        )
+
+    def refresh_characteristic(self, _value=None):
+        """Berechnet den eindimensionalen Schnitt durch die Netzfunktion."""
+
+        if self.tabs.currentWidget() is not self.characteristic_tab:
+            return
+        source = self.current_source()
+        input_mapping = self.selected_characteristic_input_mapping()
+        output_mapping = self.selected_output_mapping()
+        if not source or not source["records"]:
+            self.characteristic_context.setText(
+                self.t("analysis.characteristic.no_records")
+            )
+            self.characteristic_plot.set_data([], [])
+            return
+        if input_mapping is None:
+            self.characteristic_context.setText(
+                self.t("analysis.characteristic.no_analog_input")
+            )
+            self.characteristic_plot.set_data([], [])
+            return
+        if output_mapping is None:
+            self.characteristic_context.setText(
+                self.t("analysis.output_required")
+            )
+            self.characteristic_plot.set_data([], [])
+            return
+
+        multiple_inputs = len(source["inputs"]) > 1
+        self.characteristic_reference_label.setVisible(multiple_inputs)
+        self.characteristic_reference_record.setVisible(multiple_inputs)
+        self.characteristic_show_points.setVisible(not multiple_inputs)
+        self.characteristic_show_all_records.setVisible(multiple_inputs)
+        self.characteristic_explanation.setText(
+            self.t(
+                "analysis.characteristic.explanation"
+                if multiple_inputs
+                else "analysis.characteristic.explanation_single"
+            )
+        )
+
+        reference_number = min(
+            max(1, self.characteristic_reference_record.value()),
+            len(source["records"]),
+        )
+        reference_record = source["records"][reference_number - 1]
+        minimum, maximum = self.characteristic_input_range(
+            source,
+            input_mapping,
+        )
+        sample_count = 201
+        curve_points = []
+        snapshots = {
+            neuron: self.neuron_runtime_snapshot(neuron)
+            for neuron in self.network.get_neurons()
+        }
+        try:
+            for index in range(sample_count):
+                raw_input = minimum + (
+                    maximum - minimum
+                ) * index / (sample_count - 1)
+                self.network.reset_runtime_values()
+                for mapping in source["inputs"]:
+                    raw_value = (
+                        raw_input
+                        if mapping["neuron"].id == input_mapping["neuron"].id
+                        else reference_record[mapping["column_index"]]
+                    )
+                    mapping["neuron"].input_value = TrainingDataIO.scale_value(
+                        raw_value,
+                        mapping["calibration"],
+                        translator=self.t,
+                    )
+                self.network.forward_pass()
+                raw_output = TrainingDataIO.unscale_value(
+                    output_mapping["neuron"].output_value,
+                    output_mapping["calibration"],
+                    translator=self.t,
+                )
+                curve_points.append((raw_input, raw_output))
+        finally:
+            for neuron, values in snapshots.items():
+                for name, value in values.items():
+                    setattr(neuron, name, value)
+                neuron.update()
+
+        if multiple_inputs:
+            show_all_records = self.characteristic_show_all_records.isChecked()
+            similar_records = self.similar_characteristic_records(
+                source,
+                input_mapping,
+                reference_number - 1,
+                maximum_points=30,
+            )
+            displayed_points = [
+                (
+                    float(source["records"][index][input_mapping["column_index"]]),
+                    float(source["records"][index][output_mapping["column_index"]]),
+                )
+                for index, _distance, _strength in similar_records
+            ]
+            displayed_point_records = [
+                index + 1 for index, _distance, _strength in similar_records
+            ]
+            point_strengths = [
+                strength
+                for _index, _distance, strength in similar_records
+            ]
+            background_points = (
+                [
+                    (
+                        float(record[input_mapping["column_index"]]),
+                        float(record[output_mapping["column_index"]]),
+                    )
+                    for index, record in enumerate(source["records"])
+                    if index != reference_number - 1
+                ]
+                if show_all_records else []
+            )
+            background_point_records = (
+                [
+                    index + 1
+                    for index in range(len(source["records"]))
+                    if index != reference_number - 1
+                ]
+                if show_all_records else []
+            )
+            reference_point = (
+                float(reference_record[input_mapping["column_index"]]),
+                float(reference_record[output_mapping["column_index"]]),
+            )
+            point_legend = self.t("analysis.characteristic.legend_similar")
+            background_legend = (
+                self.t("analysis.characteristic.legend_all_records")
+                if show_all_records else ""
+            )
+            reference_legend = self.t(
+                "analysis.characteristic.legend_reference", record=reference_number
+            )
+        else:
+            all_data_points = [
+                (
+                    float(record[input_mapping["column_index"]]),
+                    float(record[output_mapping["column_index"]]),
+                    index + 1,
+                )
+                for index, record in enumerate(source["records"])
+            ]
+            displayed_entries = (
+                self.limited_characteristic_points(all_data_points)
+                if self.characteristic_show_points.isChecked()
+                else []
+            )
+            displayed_points = [
+                (x_value, y_value)
+                for x_value, y_value, _record in displayed_entries
+            ]
+            displayed_point_records = [
+                record for _x_value, _y_value, record in displayed_entries
+            ]
+            point_legend = self.t("analysis.characteristic.legend_points")
+            point_strengths = None
+            background_points = []
+            background_point_records = []
+            background_legend = ""
+            reference_point = None
+            reference_legend = ""
+        self.characteristic_plot.set_data(
+            curve_points,
+            displayed_points,
+            self.characteristic_axis_label(input_mapping),
+            self.characteristic_axis_label(output_mapping),
+            point_legend,
+            reference_point,
+            reference_legend,
+            point_strengths,
+            background_points,
+            background_legend,
+            displayed_point_records,
+            background_point_records,
+            reference_number if multiple_inputs else None,
+            str(source.get("kind") or "data"),
+            str(input_mapping.get("unit") or ""),
+            str(output_mapping.get("unit") or ""),
+        )
+
+        context = self.t(
+            "analysis.characteristic.context"
+            if multiple_inputs
+            else "analysis.characteristic.context_single",
+            input=input_mapping["column_name"],
+            output=output_mapping["column_name"],
+            record=reference_number,
+        )
+        if multiple_inputs:
+            context += " " + self.t(
+                "analysis.characteristic.all_records"
+                if self.characteristic_show_all_records.isChecked()
+                else "analysis.characteristic.similar_points",
+                record=reference_number,
+                count=(
+                    len(source["records"])
+                    if self.characteristic_show_all_records.isChecked()
+                    else len(displayed_points)
+                ),
+            )
+        elif len(displayed_points) < len(all_data_points):
+            context += " " + self.t(
+                "analysis.characteristic.points_limited",
+                shown=len(displayed_points),
+                total=len(all_data_points),
+            )
+        elif displayed_points:
+            context += " " + self.t(
+                "analysis.characteristic.points_all",
+                total=len(displayed_points),
+            )
+        self.characteristic_context.setText(context)
+
     def refresh_sensitivity(self):
-        if self.tabs.currentIndex() != 4:
+        if self.tabs.currentWidget() is not self.sensitivity_tab:
             return
         source = self.current_source()
         mapping = self.selected_output_mapping()
@@ -967,7 +1429,15 @@ class ResultAnalysisDialog(QDialog):
             'All outputs in one plot. Colors identify outputs; units are shown in the legend. Click a point to open its record.')
 
     def rows_for_selected_output(self):
+        source = self.current_source()
         mapping = self.selected_output_mapping()
+        if (
+            mapping is None
+            and self.output_combo.currentData() is None
+            and source is not None
+            and len(source["outputs"]) == 1
+        ):
+            mapping = source["outputs"][0]
         if mapping is None or not self.current_result:
             return [], None
         return (
@@ -980,11 +1450,19 @@ class ResultAnalysisDialog(QDialog):
 
     def refresh_plot_and_tolerance(self):
         all_outputs = self.output_combo.currentData() is None
-        self.output_legend.setVisible(all_outputs and self.tabs.currentIndex() == 2)
+        source = self.current_source()
+        combined_outputs = bool(
+            all_outputs
+            and source is not None
+            and len(source["outputs"]) > 1
+        )
+        self.output_legend.setVisible(
+            combined_outputs and self.tabs.currentWidget() is self.plot_tab
+        )
         for widget in (self.plot_tolerance_label, self.plot_tolerance_spin,
                        self.plot_tolerance_mode, self.show_tolerance_checkbox):
-            widget.setVisible(not all_outputs)
-        if all_outputs:
+            widget.setVisible(not combined_outputs)
+        if combined_outputs:
             self.refresh_combined_plot()
             return
         rows, mapping = self.rows_for_selected_output()

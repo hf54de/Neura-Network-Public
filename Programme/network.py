@@ -181,6 +181,27 @@ class NeuralNetwork(QObject):
                 "eine Verbindung in derselben Richtung."
             )
 
+        restriction = self.connection_restriction(
+            connection.source_neuron,
+            connection.target_neuron,
+        )
+        if restriction == "self":
+            raise ValueError(
+                "Ein Neuron kann nicht mit sich selbst verbunden werden."
+            )
+        if restriction == "output_source":
+            raise ValueError(
+                "Ausgangsneuronen dürfen keine ausgehenden Verbindungen besitzen."
+            )
+        if restriction == "input_target":
+            raise ValueError(
+                "Eingangsneuronen dürfen keine eingehenden Verbindungen besitzen."
+            )
+        if restriction == "cycle":
+            raise ValueError(
+                "Die Verbindung würde eine gerichtete Schleife erzeugen."
+            )
+
         self.connections[connection.id] = connection
 
         self.connection_added.emit(connection)
@@ -295,6 +316,40 @@ class NeuralNetwork(QObject):
                 return True
 
         return False
+
+    def connection_restriction(self, source_neuron, target_neuron):
+        """Liefert den Grund, weshalb eine neue Verbindung unzulässig ist."""
+
+        if source_neuron is target_neuron:
+            return "self"
+        if source_neuron.neuron_type == NeuronType.OUTPUT:
+            return "output_source"
+        if target_neuron.neuron_type == NeuronType.INPUT:
+            return "input_target"
+
+        # Eine neue Kante source -> target erzeugt genau dann einen Zyklus,
+        # wenn source über bestehende Verbindungen bereits von target aus
+        # erreichbar ist. Die Bildschirmposition und Neuronen-ID sind dafür
+        # bewusst ohne Bedeutung.
+        outgoing_targets = {}
+        for connection in self.connections.values():
+            outgoing_targets.setdefault(
+                connection.source_neuron,
+                [],
+            ).append(connection.target_neuron)
+
+        pending = [target_neuron]
+        visited = set()
+        while pending:
+            neuron = pending.pop()
+            if neuron is source_neuron:
+                return "cycle"
+            if neuron in visited:
+                continue
+            visited.add(neuron)
+            pending.extend(outgoing_targets.get(neuron, ()))
+
+        return None
 
     def get_reachable_neurons_from_inputs(self):
         """

@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from numberformat import format_number as format_display_number
+from numberformat import linear_axis_ticks, linear_axis_label
 from language import LanguageManager
 from trainingcomparison import metric_curve_key, metric_chart_title
 
@@ -357,10 +358,11 @@ class TrainingHistoryChart(QWidget):
             (
                 index / 5,
                 10.0 ** (y_minimum + (index / 5) * y_span)
-                if logarithmic
-                else y_minimum + (index / 5) * y_span
             )
             for index in range(6)
+        ] if logarithmic else [
+            ((value - y_minimum) / y_span, value)
+            for value in linear_axis_ticks(y_minimum, y_maximum)
         ]
 
         grid_pen = QPen(QColor(225, 230, 235), 1.0)
@@ -382,6 +384,9 @@ class TrainingHistoryChart(QWidget):
                 ),
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                 self.format_value(error_value)
+                if logarithmic else linear_axis_label(
+                    error_value, self.language.current_language
+                )
             )
 
         for epoch_value in self.integer_ticks(x_minimum, x_maximum):
