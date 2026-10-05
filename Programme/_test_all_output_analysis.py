@@ -12,25 +12,36 @@ from trainingdataio import TrainingDataIO
 class Neuron:
     def __init__(self, id):
         self.id = id
+        self.update_count = 0
     def __getattr__(self, name):
         return 0.0
     def update(self):
-        pass
+        self.update_count += 1
+
+class Trainer:
+    def __init__(self):
+        self.visual_updates_enabled = True
 
 class Network:
     def __init__(self):
         self.nodes = [Neuron(i) for i in range(5)]
         self.calls = 0
+        self.trainer = Trainer()
     def get_neurons(self):
         return self.nodes
     def reset_runtime_values(self):
         for n in self.nodes:
             n.input_value = n.output_value = 0.0
+            if self.trainer.visual_updates_enabled:
+                n.update()
     def forward_pass(self):
         self.calls += 1
         a, b = [n.input_value for n in self.nodes[:2]]
         for n, value in zip(self.nodes[2:], (a + 3*b, 4*a, 0)):
             n.output_value = value
+        if self.trainer.visual_updates_enabled:
+            for n in self.nodes:
+                n.update()
 
 def main():
     app = QApplication.instance() or QApplication([])
@@ -49,16 +60,38 @@ def main():
     dialog.sources = [source]
     dialog.populate_output_combo()
     dialog.populate_characteristic_inputs()
+    for neuron in network.nodes:
+        neuron.update_count = 0
     dialog.current_result = dialog.calculate(source)
+    assert network.trainer.visual_updates_enabled
+    assert all(neuron.update_count == 1 for neuron in network.nodes)
     network.calls = 0
+    for neuron in network.nodes:
+        neuron.update_count = 0
     values = dialog.calculate_all_sensitivities(source)
     assert network.calls == 2 * 2 * 2, network.calls
+    assert network.trainer.visual_updates_enabled
+    assert all(neuron.update_count == 1 for neuron in network.nodes)
     assert all(abs(a-b)<1e-7 for (_,a),b in zip(values[2], (25,75)))
     assert all(abs(a-b)<1e-7 for (_,a),b in zip(values[3], (100,0)))
     assert values[4] == [('Channel 0',0),('Channel 1',0)]
     assert network.nodes[0].input_value == 0
     dialog.resize(930,720)
     dialog.show()
+    app.processEvents()
+    dialog.begin_analysis_progress(100, 'analysis.progress.records')
+    dialog.update_analysis_progress(50, force=True)
+    assert dialog.analysis_progress_row.isVisible()
+    assert dialog.analysis_progress_row.layout().spacing() == 10
+    assert '50' in dialog.analysis_progress_text.text(), repr(
+        dialog.analysis_progress_text.text()
+    )
+    dialog.finish_analysis_progress()
+    assert not dialog.analysis_progress_row.isVisible()
+    large_source = dict(source)
+    large_source['records'] = source['records'] * 50
+    dialog.calculate(large_source)
+    assert not dialog.analysis_progress_row.isVisible()
     out = Path('../.tmp_analysis_qa');out.mkdir(exist_ok=True)
     dialog.tabs.setCurrentIndex(2)
     app.processEvents()
@@ -66,6 +99,20 @@ def main():
     assert len(dialog.plot.rows) == 6
     assert len({r['plot_color'] for r in dialog.plot.rows}) == 3
     assert dialog.output_legend.isVisible()
+    assert dialog.show_tolerance_checkbox.isVisible()
+    assert dialog.plot_tolerance_spin.isVisible()
+    assert dialog.plot_tolerance_mode.isVisible()
+    assert dialog.plot_tolerance_mode.currentData() == 'percent'
+    assert not dialog.plot_tolerance_mode.isEnabled()
+    dialog.show_tolerance_checkbox.setChecked(True)
+    dialog.plot_tolerance_spin.setValue(7.5)
+    assert dialog.plot.show_tolerance and dialog.plot.tolerance_percent
+    assert dialog.plot.tolerance == 7.5
+    mappings[3]['unit'] = '%'
+    dialog.refresh_plot_and_tolerance()
+    assert dialog.plot_tolerance_mode.isEnabled()
+    mappings[3]['unit'] = '°C'
+    dialog.refresh_plot_and_tolerance()
     dialog.grab().save(str(out/'combined-plot.png'))
     expected_tabs = [
         dialog.records_tab,

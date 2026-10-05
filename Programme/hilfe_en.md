@@ -180,7 +180,7 @@ Weights and biases can be initialized before a new run. **Automatic by activatio
 - **Error limit:** desired mean epoch error.
 - **Maximum epochs:** safety limit for the run.
 - **Suggest Settings:** create a conservative starting suggestion from network size, activation functions, and assigned training data. The suggestion can be applied or discarded and does not guarantee a successful run.
-- **Monitor data:** update the network visibly during training. When cleared, the canvas remains frozen while result fields, epoch count, elapsed time, and the error curve continue to update. This avoids the additional graphical work and makes training faster. The canvas is refreshed when monitoring is enabled again or the training window is closed.
+- **Monitor data:** update the network visibly during training. When cleared, the canvas remains frozen while result fields, epoch count, elapsed time, and the error curve continue to update. This avoids the additional graphical work and makes training faster. A new training run always starts with monitoring cleared; it can then be enabled deliberately. The canvas is refreshed when monitoring is enabled again or the training window is closed.
 - **Error curve:** show or hide the curve.
 
 Training targets are **1 Epoch**, a fixed **Count**, or **Until Error Limit**.
@@ -198,9 +198,11 @@ Training targets are **1 Epoch**, a fixed **Count**, or **Until Error Limit**.
 
 The error curve's Y axis can be linear or logarithmic. Full, compact, and minimized views change only the display, not the training state.
 
-**Chart metric** at the top of Results switches between mean epoch error (MSE) and maximum individual error in internal network values. Both curves are recorded during training and saved with the run; long curves are compressed as before. Switching is possible during training and changes neither training calculations nor the MSE stopping threshold. Epochs and elapsed time share a row to preserve window and chart height. Training History offers the same metric selection. Comparison runs without the selected curve remain selected but are not drawn; a dash and the tooltip “No curve available” identify them. When continuing an older run, its maximum-error curve begins with the newly trained epochs.
+**Chart metric** at the top of Results switches between mean epoch error (MSE), maximum individual error in internal network values, and the **network characteristic**. MSE and maximum individual error are recorded during training and saved with the run. The stopping threshold applies only to MSE. For the network characteristic, select an input, output, and reference record; only the selected input is varied. It shows the current network state, is calculated only while selected, and changes neither training nor weights or biases. Comparison runs without the selected curve remain selected but are not drawn and are marked “No curve available.” When continuing an older run, its maximum-error curve begins with the newly trained epochs.
 
-**Compare runs…** in **Error Curve** opens a compact selection of earlier runs with run number, date, epoch count, and maximum individual error at the saved end of the run. Checkboxes show or hide up to three comparison curves while training continues. When three runs are selected, uncheck one before choosing another. The color legend is placed in the top row between the comparison button and the Y-axis controls to preserve chart height. The current run remains bold blue; reference curves use thinner lines in other colors and extend only to the current epoch. Click a run in the legend to hide it. Meaningful comparisons require unchanged training data and scaling; runs are matched using the training file recorded in history. Training History remains available for managing and restoring runs.
+**Compare runs…** in **Error Curve** opens a compact selection of earlier runs with run number, date, epoch count, and maximum individual error at the saved end of the run. Checkboxes show or hide up to three comparison curves while training continues. When three runs are selected, uncheck one before choosing another. The color legend is placed in the top row between the comparison button and the Y-axis controls to preserve chart height. The current run remains bold blue; reference curves use thinner lines in other colors and extend to the current epoch by default. Click a run in the legend to hide it. Meaningful comparisons require unchanged training data and scaling; runs are matched using the training file recorded in history. Training History remains available for managing and restoring runs.
+
+**Show complete runs** is placed directly beside **Compare runs…** and can be enabled before any comparison run is selected. It extends every later selected comparison run to its saved final epoch. The longest visible run then determines the epoch axis. When cleared, comparison curves end at the current epoch. If all comparison runs are cleared, the current run is shown over its complete duration again.
 
 The minimized view leaves the canvas visible and acts as a small training controller. It shows the run number, current epoch, elapsed time, selected target, and the **Live** setting. It also contains **New**, **Continue**, **Stop**, **Full View**, and **Compact View**. These controls operate the same training run as the full window.
 
@@ -213,16 +215,23 @@ The analysis window compares target and actual values for training data or separ
 - record comparison,
 - error analysis,
 - target/actual chart,
+- network characteristic,
 - tolerance check,
 - influence analysis.
 
 Test data must use the same column structure and assignment as training data. Testing does not change weights or biases.
+
+For large data sets, record comparison and influence analysis show a progress bar during calculation and remove it when complete. Background network drawing remains frozen during these calculations to reduce run time. Information about the selected data source is visible before the calculation starts.
+
+The target/actual chart can display one output or **All Outputs**. The combined view also supports a tolerance band. When output units differ, it uses a unit-independent percentage tolerance and keeps the unsuitable selection disabled.
 
 # 22. Exploring the Network
 
 The experiment window changes external input values in their original units and immediately performs a forward calculation.
 
 Binary inputs are switched; analog inputs use number fields or sliders. **Show Intermediate Values** also refreshes calculations in the Properties panel. Analog outputs show their raw and internal values. For binary outputs, intermediate values can be displayed in addition to the interpreted 0/1 decision.
+
+Allowed ranges use three aligned columns for minimum, separator, and maximum. Normal limits use at most two decimal places; very small values below 0.01 retain suitable precision. The window height follows its content and does not need to be enlarged unnecessarily.
 
 The colored support indicator estimates whether the current input combination is well represented by similar training records. It is not a target value and is not proof that an output is correct. Experimenting does not change weights or the saved training state.
 
@@ -242,13 +251,13 @@ The **(i) button** to the left of **Show All** displays this introduction at any
 
 Binary inputs and binary-array cells can be switched only in Explore mode. In Edit mode, mouse clicks are reserved for editing the layout.
 
-In the **Design** menu, **Show Grid** displays a layout grid. **Grid Spacing…** sets its spacing between 5 and 200 pixels. The setting is stored with the project, but the grid is visible only in Edit mode and is automatically hidden while exploring.
+In the **Design** menu, **Show Grid** displays a layout grid. **Grid Spacing…** sets its spacing between 5 and 200 pixels. **Snap to Grid** aligns elements while they are inserted, moved, or resized; it also applies to groups, backgrounds, and line endpoints. The option works while the grid is visible and is stored with the project. The grid is automatically hidden while exploring. Positions in older projects remain unchanged until an element is edited.
 
 Right-click an empty area and use **Add Element** to add individual inputs, outputs, a binary input array, a background graphic, a comment, or a graphical shape. **Add all inputs and outputs** adds every neuron card that is not yet visible in one step without creating duplicates. Elements can later be removed from the layout without deleting their neurons from the project. Removal requires confirmation.
 
 ### Input and output cards
 
-Analog input cards contain the value in its original unit and a slider. Binary inputs contain an On/Off switch. Output cards can display an analog bar, a semicircular gauge, or a binary decision. For analog outputs, the scale limits come from the assigned calibration. For each binary output, its own context menu controls whether only the decision or also the numerical network value and interpreted 0/1 state are shown.
+Analog input cards contain a compact centered value field in the original unit and a slider. Binary inputs contain an On/Off switch. Output cards can display an analog bar, a semicircular gauge, or a binary decision. Analog bars and gauges show endpoints from **0%** to **100%**. Long names and units adapt to the card size and remain available in full as a tooltip. Analog values normally use at most two decimal places; values below 0.01 retain additional required digits. For each binary output, its own context menu controls whether only the decision or also the numerical network value and interpreted 0/1 state are shown.
 
 Cards can be resized. Their background color can be set individually or transferred to a selected group. Several selected input cards or output cards can also receive a common size and alignment.
 
@@ -260,7 +269,7 @@ If the training data define a two-dimensional binary input array, it can be inse
 
 A picture can be loaded from a file, dragged into the window, or pasted from the clipboard. When the layout is saved, NeuronNetz copies it into the project area and stores its position and size. Selecting the picture and pressing **Delete** performs the same confirmed removal as the menu command.
 
-Comments provide freely placeable explanatory text with configurable font, alignment, text color, background, and frame. Lines, rectangles, and ellipses can be used to group or connect parts of the presentation. Their line color, width, and optional transparent or colored fill are stored in the layout. A line can show an arrowhead at its end; **Reverse arrow direction** moves it to the opposite endpoint. These graphical elements remain behind the interactive input and output cards.
+Comments provide freely placeable explanatory text with configurable font, alignment, text color, background, and frame. Lines, rectangles, and ellipses can be used to group or connect parts of the presentation. Their line color, width, and optional transparent or colored fill are stored in the layout. A line can show an arrowhead at its end; **Reverse arrow direction** moves it to the opposite endpoint. A categorized symbol library also includes logical symbols. The same selection is used when inserting a symbol and when choosing **Change symbol…** from its context menu. These graphical elements remain behind the interactive input and output cards.
 
 ### Selecting, arranging, and navigating
 
@@ -321,6 +330,8 @@ Relative references inside a structured project folder make the complete project
 **Project Description** stores formatted text directly in the project. Selected text can immediately be changed in font, size, bold, italic, and underline. When a selection contains mixed formatting, the controls do not show a misleading single value. Tabs, line breaks, indentation, and inserted mathematical notation are preserved.
 
 **Project Overview** summarizes structure, data, and training state. **Project Workflow** guides the user through important steps.
+
+**Check Network…** displays structure, data assignment, and any findings in a modal check window. A recheck button is unnecessary there because the project cannot change while the window is open. After editing the project, open the check again from the Network menu.
 
 The project report can be exported as a Word or PDF document. Language and file format follow the selected settings or save dialog.
 

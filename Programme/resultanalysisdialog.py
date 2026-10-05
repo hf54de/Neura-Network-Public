@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: resultanalysisdialog.py
 # Zweck: Analysiert und vergleicht Ergebnisse aus Trainings- und Testdaten.
-# Letzte Änderung: 23.08.2026
+# Letzte Änderung: 03.10.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -12,12 +12,23 @@ import math
 from math import log10
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QMarginsF, QRectF, Qt, QUrl
+from PySide6.QtCore import (
+    QByteArray,
+    QBuffer,
+    QEventLoop,
+    QIODevice,
+    QMarginsF,
+    QRectF,
+    Qt,
+    QTimer,
+    QUrl,
+)
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontDatabase, QImage, QPageLayout, QPainter, QPen, QTextDocument
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QApplication,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -28,6 +39,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QSpinBox,
     QTabWidget,
@@ -99,6 +111,19 @@ class ResultAnalysisDialog(QDialog):
             "border-radius: 4px; padding: 7px; }"
         )
         layout.addWidget(self.source_note)
+
+        self.analysis_progress_row = QWidget()
+        analysis_progress_layout = QHBoxLayout(self.analysis_progress_row)
+        analysis_progress_layout.setContentsMargins(0, 0, 0, 0)
+        analysis_progress_layout.setSpacing(10)
+        self.analysis_progress = QProgressBar()
+        self.analysis_progress.setTextVisible(False)
+        self.analysis_progress.setMinimumHeight(20)
+        self.analysis_progress_text = QLabel()
+        analysis_progress_layout.addWidget(self.analysis_progress, 1)
+        analysis_progress_layout.addWidget(self.analysis_progress_text)
+        self.analysis_progress_row.hide()
+        layout.addWidget(self.analysis_progress_row)
 
         information_layout = QHBoxLayout()
         self.output_legend = QLabel()
@@ -397,16 +422,18 @@ class ResultAnalysisDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-        self.source_combo.currentIndexChanged.connect(self.refresh_analysis)
-        self.output_combo.currentIndexChanged.connect(self.output_changed)
-        self.tabs.currentChanged.connect(self.tab_changed)
         if initial_source_kind:
             for index, source in enumerate(self.sources):
                 if source.get("kind") == initial_source_kind:
                     self.source_combo.setCurrentIndex(index)
                     break
         self.tabs.setCurrentIndex(max(0, min(5, int(initial_tab))))
-        self.refresh_analysis()
+        self.source_combo.currentIndexChanged.connect(self.refresh_analysis)
+        self.output_combo.currentIndexChanged.connect(self.output_changed)
+        self.tabs.currentChanged.connect(self.tab_changed)
+        # Start only after exec() has made the dialog visible so the progress
+        # bar can be painted during the first evaluation as well.
+        QTimer.singleShot(0, self.refresh_analysis)
 
     def show_information(self):
         """Zeigt die Erklärung zum aktuell sichtbaren Analyseregister."""
@@ -575,6 +602,59 @@ class ResultAnalysisDialog(QDialog):
         text += "\n" + self.t("analysis.network_unchanged")
         return text
 
+    def begin_analysis_progress(self, total, text_key):
+        """Blendet für umfangreiche synchrone Auswertungen Fortschritt ein."""
+        total = max(0, int(total))
+        self._analysis_progress_visible = total >= 100
+        self._analysis_progress_interval = max(1, total // 100)
+        if not self._analysis_progress_visible:
+            return
+        self._analysis_progress_text_key = text_key
+        self.analysis_progress.setRange(0, max(1, total))
+        self.analysis_progress.setValue(0)
+        self.update_analysis_progress_text(0)
+        self.analysis_progress_row.show()
+        QApplication.processEvents(
+            QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents
+        )
+
+    def update_analysis_progress_text(self, value):
+        maximum = max(1, self.analysis_progress.maximum())
+        percentage = round(int(value) / maximum * 100)
+        text = self.t(self._analysis_progress_text_key)
+        text = text.replace("%v", str(int(value)))
+        text = text.replace("%m", str(maximum))
+        text = text.replace("%p", str(percentage))
+        self.analysis_progress_text.setText(text)
+
+    def update_analysis_progress(self, value, force=False):
+        if not getattr(self, "_analysis_progress_visible", False):
+            return
+        value = int(value)
+        if not force and value % self._analysis_progress_interval:
+            return
+        self.analysis_progress.setValue(value)
+        self.update_analysis_progress_text(value)
+        # Nur die Fortschrittsanzeige unmittelbar neu zeichnen. Ein globales
+        # processEvents() würde bei jedem Schritt das gesamte Fenster und die
+        # dahinterliegende Oberfläche neu aufbauen.
+        self.analysis_progress.repaint()
+        self.analysis_progress_text.repaint()
+
+    def finish_analysis_progress(self):
+        if not getattr(self, "_analysis_progress_visible", False):
+            return
+        self.analysis_progress.setValue(self.analysis_progress.maximum())
+        self.update_analysis_progress_text(self.analysis_progress.maximum())
+        self.analysis_progress_row.hide()
+        self._analysis_progress_visible = False
+        self.layout().activate()
+        self.updateGeometry()
+        self.update()
+        QApplication.processEvents(
+            QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents
+        )
+
     @staticmethod
     def neuron_runtime_snapshot(neuron):
         names = (
@@ -587,11 +667,35 @@ class ResultAnalysisDialog(QDialog):
         )
         return {name: getattr(neuron, name) for name in names}
 
+    def reset_runtime_values_silently(self):
+        """Setzt Laufzeitwerte zurück, ohne Grafikaktualisierungen anzufordern."""
+        for neuron in self.network.get_neurons():
+            neuron.input_value = 0.0
+            neuron.sum_value = 0.0
+            neuron.output_value = 0.0
+            neuron.target_value = 0.0
+            neuron.error_value = 0.0
+            neuron.delta_value = 0.0
+            neuron.external_input_value = None
+            neuron.external_input_is_raw = False
+            neuron.external_input_is_binary = False
+            neuron.external_input_unit = ""
+            neuron.external_output_value = None
+            neuron.external_target_value = None
+            neuron.external_output_is_raw = False
+            neuron.external_output_is_binary = False
+            neuron.external_output_unit = ""
+
     def calculate(self, source):
         snapshots = {
             neuron: self.neuron_runtime_snapshot(neuron)
             for neuron in self.network.get_neurons()
         }
+        trainer = getattr(self.network, "trainer", None)
+        previous_visual_updates = (
+            getattr(trainer, "visual_updates_enabled", True)
+            if trainer is not None else None
+        )
         rows = []
         internal_squared_sum = 0.0
         internal_absolute_sum = 0.0
@@ -605,10 +709,17 @@ class ResultAnalysisDialog(QDialog):
             "binary_count": 0,
             "binary_errors": 0,
         })
+        record_count = len(source["records"])
+        self.begin_analysis_progress(
+            record_count,
+            "analysis.progress.records",
+        )
+        if trainer is not None:
+            trainer.visual_updates_enabled = False
 
         try:
             for record_number, record in enumerate(source["records"], start=1):
-                self.network.reset_runtime_values()
+                self.reset_runtime_values_silently()
                 targets = {}
                 for mapping in source["inputs"]:
                     mapping["neuron"].input_value = TrainingDataIO.scale_value(
@@ -682,11 +793,16 @@ class ResultAnalysisDialog(QDialog):
                         "is_binary": is_binary,
                         "binary_error": binary_error,
                     })
+                self.update_analysis_progress(record_number)
         finally:
             for neuron, values in snapshots.items():
                 for name, value in values.items():
                     setattr(neuron, name, value)
+            if trainer is not None:
+                trainer.visual_updates_enabled = previous_visual_updates
+            for neuron in snapshots:
                 neuron.update()
+            self.finish_analysis_progress()
 
         count = len(rows)
         rows.sort(key=lambda row: row["internal_absolute"], reverse=True)
@@ -717,6 +833,7 @@ class ResultAnalysisDialog(QDialog):
         source = self.current_source()
         if not source:
             return
+        self.source_note.setText(self.source_information(source))
         self.current_result = self.calculate(source)
         self.populate_output_combo()
         self.populate_characteristic_inputs()
@@ -729,7 +846,6 @@ class ResultAnalysisDialog(QDialog):
                 else "analysis.tab.records"
             )
         )
-        self.source_note.setText(self.source_information(source))
         self.populate_records_table()
         self.refresh_overview_tables()
         self.refresh_plot_and_tolerance()
@@ -927,6 +1043,7 @@ class ResultAnalysisDialog(QDialog):
                 for name, value in values.items():
                     setattr(neuron, name, value)
                 neuron.update()
+            self.finish_analysis_progress()
 
         if multiple_inputs:
             show_all_records = self.characteristic_show_all_records.isChecked()
@@ -1090,8 +1207,21 @@ class ResultAnalysisDialog(QDialog):
             neuron: self.neuron_runtime_snapshot(neuron)
             for neuron in self.network.get_neurons()
         }
+        trainer = getattr(self.network, "trainer", None)
+        previous_visual_updates = (
+            getattr(trainer, "visual_updates_enabled", True)
+            if trainer is not None else None
+        )
         outputs = source['outputs']
         effects = {int(m['neuron'].id): [] for m in outputs}
+        total_steps = len(source["inputs"]) * len(source["records"])
+        completed_steps = 0
+        self.begin_analysis_progress(
+            total_steps,
+            "analysis.progress.sensitivity",
+        )
+        if trainer is not None:
+            trainer.visual_updates_enabled = False
         try:
             for input_mapping in source["inputs"]:
                 values = [
@@ -1108,7 +1238,7 @@ class ResultAnalysisDialog(QDialog):
                 step = max(observed_range, configured_range, 1.0) * 0.01
                 total_effect = {int(m['neuron'].id): 0.0 for m in outputs}
                 for record in source["records"]:
-                    self.network.reset_runtime_values()
+                    self.reset_runtime_values_silently()
                     for current in source["inputs"]:
                         raw_value = float(record[current["column_index"]])
                         current["neuron"].input_value = TrainingDataIO.scale_value(
@@ -1133,13 +1263,19 @@ class ResultAnalysisDialog(QDialog):
                         neuron_id = int(m['neuron'].id)
                         changed = TrainingDataIO.unscale_value(m['neuron'].output_value, m['calibration'], translator=self.t)
                         total_effect[neuron_id] += abs(changed - baseline[neuron_id])
+                    completed_steps += 1
+                    self.update_analysis_progress(completed_steps)
                 for neuron_id in effects:
                     effects[neuron_id].append((input_mapping['column_name'], total_effect[neuron_id] / max(1, len(source['records']))))
         finally:
             for neuron, values in snapshots.items():
                 for name, value in values.items():
                     setattr(neuron, name, value)
+            if trainer is not None:
+                trainer.visual_updates_enabled = previous_visual_updates
+            for neuron in snapshots:
                 neuron.update()
+            self.finish_analysis_progress()
         normalized = {}
         for neuron_id, values in effects.items():
             total = sum(value for _name, value in values)
@@ -1461,9 +1597,10 @@ class ResultAnalysisDialog(QDialog):
         )
         for widget in (self.plot_tolerance_label, self.plot_tolerance_spin,
                        self.plot_tolerance_mode, self.show_tolerance_checkbox):
-            widget.setVisible(not combined_outputs)
+            widget.setVisible(True)
         if combined_outputs:
             self.refresh_combined_plot()
+            self.configure_combined_plot_tolerance()
             return
         rows, mapping = self.rows_for_selected_output()
         if mapping is None:
@@ -1527,8 +1664,89 @@ class ResultAnalysisDialog(QDialog):
     def tolerance_key(self, mapping):
         return ("output", int(mapping["neuron"].id))
 
+    @staticmethod
+    def combined_tolerance_key():
+        return ("all_outputs", -1)
+
+    def combined_output_context(self):
+        source = self.current_source()
+        if (
+            self.output_combo.currentData() is not None
+            or source is None
+            or len(source["outputs"]) <= 1
+        ):
+            return None
+        analog_outputs = [
+            mapping for mapping in source["outputs"]
+            if mapping.get("data_type") != "binary"
+        ]
+        analog_ids = {
+            int(mapping["neuron"].id) for mapping in analog_outputs
+        }
+        rows = [
+            row for row in (self.current_result or {}).get("rows", [])
+            if int(row["neuron_id"]) in analog_ids
+        ]
+        units = {
+            str(mapping.get("unit") or "").strip()
+            for mapping in analog_outputs
+        }
+        return {
+            "outputs": analog_outputs,
+            "rows": rows,
+            "same_unit": len(units) <= 1,
+            "unit": next(iter(units), ""),
+        }
+
+    def configure_combined_plot_tolerance(self):
+        context = self.combined_output_context()
+        enabled = bool(context and context["outputs"])
+        self.show_tolerance_checkbox.setEnabled(enabled)
+        self.plot_tolerance_spin.setEnabled(enabled)
+        self.plot_tolerance_mode.setEnabled(
+            enabled and context["same_unit"]
+        )
+        if not enabled:
+            self.plot.set_tolerance(0.0, False)
+            return
+
+        if not context["same_unit"]:
+            percent_index = self.plot_tolerance_mode.findData("percent")
+            self.plot_tolerance_mode.blockSignals(True)
+            self.plot_tolerance_mode.setCurrentIndex(percent_index)
+            self.plot_tolerance_mode.blockSignals(False)
+
+        key = self.combined_tolerance_key()
+        if key not in self.tolerances:
+            targets = [float(row["target"]) for row in context["rows"]]
+            span = max(targets) - min(targets) if targets else 0.0
+            self.tolerances[key] = (
+                5.0 if context["unit"] == "%" else max(span * 0.05, 0.0)
+            )
+        self.plot_tolerance_mode_changed()
+
     def plot_tolerance_mode_changed(self, _index=None):
         rows, mapping = self.rows_for_selected_output()
+        combined = self.combined_output_context()
+        if combined is not None:
+            mode = self.plot_tolerance_mode.currentData()
+            percent = mode in ("percent", "range_percent")
+            key = self.combined_tolerance_key()
+            unit = combined["unit"] if combined["same_unit"] else ""
+            context = self.t("analysis.output_all")
+            if unit:
+                context += f" in {unit}"
+            label = self.t("analysis.plot.tolerance_label").rstrip().rstrip(":")
+            self.plot_tolerance_label.setText(f"{label} ({context}):")
+            self.plot_tolerance_spin.blockSignals(True)
+            self.plot_tolerance_spin.setSuffix(" %" if percent else (f" {unit}" if unit else ""))
+            self.plot_tolerance_spin.setValue(
+                self.plot_percent_values.get(key, 5.0)
+                if percent else self.tolerances.get(key, 0.0)
+            )
+            self.plot_tolerance_spin.blockSignals(False)
+            self.update_plot_tolerance()
+            return
         if mapping is None:
             return
         percent = self.plot_tolerance_mode.currentData() in ("percent", "range_percent")
@@ -1546,6 +1764,26 @@ class ResultAnalysisDialog(QDialog):
 
     def update_plot_tolerance(self, _checked=None):
         rows, mapping = self.rows_for_selected_output()
+        combined = self.combined_output_context()
+        if combined is not None:
+            rows = combined["rows"]
+            key = self.combined_tolerance_key()
+            mode = self.plot_tolerance_mode.currentData()
+            percent = mode in ("percent", "range_percent")
+            tolerance = (
+                self.plot_percent_values.get(key, 5.0)
+                if percent else float(self.tolerances.get(key, 0.0))
+            )
+            if mode == "range_percent":
+                targets = [float(row["target"]) for row in rows]
+                span = max(targets) - min(targets) if targets else 0.0
+                tolerance = span * tolerance / 100.0
+            self.plot.set_tolerance(
+                tolerance,
+                self.show_tolerance_checkbox.isChecked() and bool(rows),
+                percent=mode == "percent",
+            )
+            return
         if mapping is None:
             self.plot.set_tolerance(0.0, False)
             return
@@ -1566,6 +1804,17 @@ class ResultAnalysisDialog(QDialog):
 
     def plot_tolerance_changed(self, value):
         rows, mapping = self.rows_for_selected_output()
+        combined = self.combined_output_context()
+        if combined is not None:
+            key = self.combined_tolerance_key()
+            if self.plot_tolerance_mode.currentData() in (
+                "percent", "range_percent"
+            ):
+                self.plot_percent_values[key] = float(value)
+            else:
+                self.tolerances[key] = float(value)
+            self.update_plot_tolerance()
+            return
         if mapping is None or mapping.get("data_type") == "binary":
             return
         if self.plot_tolerance_mode.currentData() in ("percent", "range_percent"):

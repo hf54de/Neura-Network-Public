@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: trainingdialog.py
 # Zweck: Steuert Trainingsläufe, Parameter, Status und Bedienung des Trainingsfensters.
-# Letzte Änderung: 09.09.2026
+# Letzte Änderung: 04.10.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -156,6 +156,9 @@ class TrainingDialog(QDialog):
         self.comparison_popup = None
         self.comparison_run_ids = set()
         self.comparison_runs = []
+        self.comparison_full_length = bool(
+            self.training_settings.get("comparison_full_length", False)
+        )
 
         # Begrenzte Ereignisverarbeitung hält die Stop-Taste
         # funktionsfähig, ohne in jedem Datensatz die komplette
@@ -1049,6 +1052,22 @@ class TrainingDialog(QDialog):
         self.comparison_button.setToolTip(text("training.comparison.hint"))
         self.comparison_button.clicked.connect(self.show_comparison_runs)
         self.error_chart_controls_layout.addWidget(self.comparison_button)
+        self.comparison_full_length_checkbox = QCheckBox(
+            text("training.comparison.full_length")
+        )
+        self.comparison_full_length_checkbox.setFont(comparison_font)
+        self.comparison_full_length_checkbox.setToolTip(
+            text("training.comparison.full_length_tip")
+        )
+        self.comparison_full_length_checkbox.setChecked(
+            self.comparison_full_length
+        )
+        self.comparison_full_length_checkbox.toggled.connect(
+            self.set_comparison_full_length
+        )
+        self.error_chart_controls_layout.addWidget(
+            self.comparison_full_length_checkbox
+        )
         self.error_chart_controls_layout.addStretch(
             1
         )
@@ -1163,6 +1182,9 @@ class TrainingDialog(QDialog):
         self.error_chart.set_scale_mode(
             self.error_chart_scale.currentData()
         )
+        self.error_chart.set_full_comparison_runs(
+            self.comparison_full_length
+        )
         self.error_chart_layout.addWidget(
             self.error_chart
         )
@@ -1204,7 +1226,7 @@ class TrainingDialog(QDialog):
         self.training_characteristic_reference.valueChanged.connect(
             self.training_characteristic_selection_changed
         )
-        self.error_chart_controls_layout.insertWidget(1, self.comparison_legend)
+        self.error_chart_controls_layout.insertWidget(3, self.comparison_legend)
 
         self.error_chart_start = QLabel(
             text("training.chart.start_error", value="–"),
@@ -1723,7 +1745,20 @@ class TrainingDialog(QDialog):
         self.left_training_layout.invalidate()
         self.left_training_container.updateGeometry()
         self.left_training_layout.activate()
-        target_height = self.left_training_container.sizeHint().height()
+        plateau_height = 0
+        if not self.plateau_warning_container.isHidden():
+            plateau_height = (
+                self.plateau_warning_container.sizeHint().height()
+                + max(0, self.result_layout.verticalSpacing())
+            )
+        target_height = (
+            self.left_training_container.sizeHint().height()
+            - plateau_height
+        )
+        target_height = max(
+            self.error_chart_group.minimumSizeHint().height(),
+            target_height,
+        )
         if target_height <= 0:
             return
         self.error_chart_group.setMinimumHeight(target_height)
@@ -2434,6 +2469,7 @@ class TrainingDialog(QDialog):
             "monitor_training_data": True,
             "show_error_chart": True,
             "error_chart_scale": "linear",
+            "comparison_full_length": False,
             "training_target_mode": "epochs"
         }
 
@@ -2498,6 +2534,7 @@ class TrainingDialog(QDialog):
             "error_chart_scale": str(
                 self.error_chart_scale.currentData()
             ),
+            "comparison_full_length": bool(self.comparison_full_length),
             "training_target_mode": self.training_target_mode
         }
 
@@ -2683,6 +2720,7 @@ class TrainingDialog(QDialog):
     def start_selected_training(self):
         """Startet bewusst einen neuen Lauf mit dem gewählten Trainingsziel."""
 
+        self.monitor_training_data.setChecked(False)
         maximum_epochs, stop_at_limit = self.selected_training_target()
         self.execute_training(maximum_epochs, stop_at_limit)
 
@@ -2705,6 +2743,7 @@ class TrainingDialog(QDialog):
             )
         ):
             return
+        self.monitor_training_data.setChecked(False)
         maximum_epochs, stop_at_limit = self.selected_training_target()
         self.execute_training(
             maximum_epochs,
@@ -3214,6 +3253,12 @@ class TrainingDialog(QDialog):
         self.comparison_legend.setToolTip(legend_tip)
         self.comparison_legend.setVisible(bool(selected))
 
+    def set_comparison_full_length(self, enabled):
+        """Schaltet alle gewählten Referenzkurven zwischen Ausschnitt und Gesamtlauf."""
+
+        self.comparison_full_length = bool(enabled)
+        self.error_chart.set_full_comparison_runs(self.comparison_full_length)
+
     def hide_comparison_run(self, run_id):
         self.apply_comparison_selection(self.comparison_run_ids - {int(run_id)})
         if self.comparison_popup is not None:
@@ -3228,6 +3273,7 @@ class TrainingDialog(QDialog):
         self.training_characteristic_controls.setVisible(characteristic_visible)
         for widget in (
             self.comparison_button,
+            self.comparison_full_length_checkbox,
             self.error_chart_info_button,
             self.error_chart_y_axis_label,
             self.error_chart_scale,
@@ -4179,13 +4225,22 @@ class TrainingDialog(QDialog):
         self.plateau_history = []
         self.plateau_warning_detected = False
         self.plateau_warning_dismissed = False
-        self.plateau_warning_container.setVisible(False)
+        self.set_plateau_warning_visible(False)
+
+    def set_plateau_warning_visible(self, visible):
+        """Blendet den Hinweis ein und verteilt den verfügbaren Platz neu."""
+
+        visible = bool(visible)
+        if self.plateau_warning_container.isHidden() == (not visible):
+            return
+        self.plateau_warning_container.setVisible(visible)
+        self.schedule_training_layout_resize()
 
     def dismiss_plateau_warning(self):
         """Schließt den Plateauhinweis für den aktuellen Trainingslauf."""
 
         self.plateau_warning_dismissed = True
-        self.plateau_warning_container.setVisible(False)
+        self.set_plateau_warning_visible(False)
 
     def update_plateau_detection(
         self,
@@ -4205,16 +4260,16 @@ class TrainingDialog(QDialog):
         self.plateau_history = self.plateau_history[-300:]
 
         if self.plateau_warning_dismissed:
-            self.plateau_warning_container.setVisible(False)
+            self.set_plateau_warning_visible(False)
             return
 
         if self.plateau_warning_detected:
-            self.plateau_warning_container.setVisible(True)
+            self.set_plateau_warning_visible(True)
             return
 
         window = 250
         if len(self.plateau_history) < window:
-            self.plateau_warning_container.setVisible(False)
+            self.set_plateau_warning_visible(False)
             return
 
         _, old_mean, old_maximum = self.plateau_history[-window]
@@ -4237,7 +4292,7 @@ class TrainingDialog(QDialog):
 
         if plateau_detected:
             self.plateau_warning_detected = True
-            self.plateau_warning_container.setVisible(True)
+            self.set_plateau_warning_visible(True)
 
     def reject(self):
         """Verhindert ein unbeabsichtigtes Schließen während eines Laufes."""
@@ -5086,7 +5141,7 @@ class TrainingDialog(QDialog):
         self.plateau_warning_dismissed = bool(
             state.get("plateau_warning_dismissed", False)
         )
-        self.plateau_warning_container.setVisible(
+        self.set_plateau_warning_visible(
             self.plateau_warning_detected
             and not self.plateau_warning_dismissed
         )

@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: projectoverviewdialog.py
 # Zweck: Zeigt Projektübersicht und ausführliche Projektprüfung.
-# Letzte Änderung: 24.08.2026
+# Letzte Änderung: 04.10.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -106,9 +105,6 @@ class ProjectCheckDialog(QDialog):
         main_layout.addWidget(self.scroll_area, 1)
 
         button_layout = QHBoxLayout()
-        self.recheck_button = QPushButton(self.t("project_check.recheck"))
-        self.recheck_button.clicked.connect(self.refresh)
-        button_layout.addWidget(self.recheck_button)
         button_layout.addStretch(1)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.button(QDialogButtonBox.StandardButton.Close).setText(

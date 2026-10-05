@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: graphicalexperimentdialog.py
 # Zweck: Stellt ein frei gestaltbares grafisches Bedienpult für Netzwerkexperimente bereit.
-# Letzte Änderung: 08.09.2026
+# Letzte Änderung: 05.10.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -101,6 +101,22 @@ class ToolbarIcons(SharedToolbarIcons):
         )
 
 
+def format_application_output_value(value):
+    """Formatiert analoge Kachelwerte kompakt und erhält sehr kleine Werte."""
+
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if not math.isfinite(number):
+        return str(number)
+    if number == 0.0:
+        return "0"
+    if abs(number) < 0.01:
+        return format_number(number, 5)
+    return f"{number:.2f}".rstrip("0").rstrip(".")
+
+
 def show_yellow_information_dialog(parent, title, text, close_text, scrollable=False, rich_text=False):
     """Zeigt einen einheitlichen, gut lesbaren Informationsdialog an."""
 
@@ -189,17 +205,15 @@ class CompactInputSpinBox(QDoubleSpinBox):
     """Zeigt Rohwerte kompakt an, behält intern aber ihre Genauigkeit."""
 
     def textFromValue(self, value):
-        text = super().textFromValue(value)
+        number = float(value)
+        if number == 0.0:
+            text = "0"
+        elif abs(number) < 0.01:
+            text = f"{number:.{self.decimals()}f}".rstrip("0").rstrip(".")
+        else:
+            text = f"{number:.2f}".rstrip("0").rstrip(".")
         decimal_point = self.locale().decimalPoint()
-        if decimal_point in text:
-            integer, fraction = text.split(decimal_point, 1)
-            fraction = fraction[:2].rstrip("0")
-            text = (
-                integer + decimal_point + fraction
-                if fraction
-                else integer
-            )
-        return text
+        return text.replace(".", decimal_point)
 
 
 class CenteredCheckMarkBox(QCheckBox):
@@ -344,6 +358,7 @@ class CompactInputDial(QSlider):
         self.display_maximum = float(display_maximum)
         self.unit = str(unit or "")
         self.foreground_color = QColor("#333333")
+        self.setProperty("nn_max_font_size", 10.0)
         self.setMinimumHeight(64)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
@@ -351,10 +366,26 @@ class CompactInputDial(QSlider):
         self.foreground_color = QColor(color)
         self.update()
 
+    def visible_bottom(self):
+        """Liefert die durch alle Elternwidgets tatsächlich sichtbare Unterkante."""
+
+        bottom = float(self.height())
+        ancestor = self.parentWidget()
+        while ancestor is not None:
+            top_in_ancestor = self.mapTo(ancestor, QPoint(0, 0)).y()
+            bottom = min(
+                bottom,
+                float(ancestor.contentsRect().bottom() + 1 - top_in_ancestor),
+            )
+            ancestor = ancestor.parentWidget()
+        return max(0.0, bottom)
+
     def _geometry(self):
         label_height = max(16.0, float(self.fontMetrics().height()) + 2.0)
         label_gap = 3.0
-        vertical_margin = 4.0
+        # Etwas mehr Abstand hält die Prozentangaben auch bei kleinen Karten
+        # vollständig oberhalb des unteren Kartenrahmens.
+        vertical_margin = 8.0
         available_width = max(20.0, self.width() - 16.0)
         available_height = max(
             20.0,
@@ -491,25 +522,39 @@ class CompactInputDial(QSlider):
 
         painter.setPen(self.foreground_color)
         label_height = max(16.0, float(painter.fontMetrics().height()) + 2.0)
-        label_top = center.y() + 3.0
+        visible_bottom = self.visible_bottom()
+        label_top = min(
+            center.y() + 3.0,
+            visible_bottom - 10.0 - label_height,
+        )
+        label_top = max(0.0, label_top)
+        label_margin = 8.0
+        label_gap = 8.0
+        label_center = self.width() / 2.0
         painter.drawText(
             QRectF(
-                rect.left(),
+                label_margin,
                 label_top,
-                rect.width() / 2.0,
+                max(1.0, label_center - label_margin - label_gap / 2.0),
                 label_height,
             ),
-            Qt.AlignmentFlag.AlignLeft,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             "0 %",
         )
         painter.drawText(
             QRectF(
-                rect.center().x(),
+                label_center + label_gap / 2.0,
                 label_top,
-                rect.width() / 2.0,
+                max(
+                    1.0,
+                    self.width()
+                    - label_margin
+                    - label_center
+                    - label_gap / 2.0,
+                ),
                 label_height,
             ),
-            Qt.AlignmentFlag.AlignRight,
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
             "100 %",
         )
 
@@ -855,13 +900,8 @@ class CompactVerticalOutputPage(QWidget):
     def __init__(self, minimum, maximum, unit, card, parent=None):
         super().__init__(parent)
         self.card = card
-        suffix = f" {unit}" if unit else ""
-        self.maximum_label = QLabel(
-            f"{format_number(maximum, 5)}{suffix}", self
-        )
-        self.minimum_label = QLabel(
-            f"{format_number(minimum, 5)}{suffix}", self
-        )
+        self.maximum_label = QLabel("100 %", self)
+        self.minimum_label = QLabel("0 %", self)
         for label in (self.maximum_label, self.minimum_label):
             label.setProperty("nn_max_font_size", 10.0)
             label.setAlignment(
@@ -931,6 +971,7 @@ class CompactOutputGauge(QWidget):
         self.value = self.minimum
         self.unit = str(unit or "")
         self.foreground_color = QColor("#333333")
+        self.setProperty("nn_max_font_size", 10.0)
         self.setMinimumHeight(64)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
@@ -942,12 +983,26 @@ class CompactOutputGauge(QWidget):
         self.foreground_color = QColor(color)
         self.update()
 
+    def visible_bottom(self):
+        """Liefert die durch alle Elternwidgets tatsächlich sichtbare Unterkante."""
+
+        bottom = float(self.height())
+        ancestor = self.parentWidget()
+        while ancestor is not None:
+            top_in_ancestor = self.mapTo(ancestor, QPoint(0, 0)).y()
+            bottom = min(
+                bottom,
+                float(ancestor.contentsRect().bottom() + 1 - top_in_ancestor),
+            )
+            ancestor = ancestor.parentWidget()
+        return max(0.0, bottom)
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         label_height = max(16.0, float(self.fontMetrics().height()) + 2.0)
         label_gap = 3.0
-        vertical_margin = 4.0
+        vertical_margin = 8.0
         available_width = max(20.0, self.width() - 16.0)
         available_height = max(
             20.0,
@@ -1059,25 +1114,42 @@ class CompactOutputGauge(QWidget):
         painter.drawEllipse(center, hub_radius * 0.36, hub_radius * 0.36)
 
         painter.setPen(self.foreground_color)
-        label_top = rect.center().y() + 3.0
+        visible_bottom = self.visible_bottom()
+        label_top = min(
+            rect.center().y() + 3.0,
+            visible_bottom - 10.0 - label_height,
+        )
+        label_top = max(0.0, label_top)
+        label_margin = 8.0
+        horizontal_label_gap = 8.0
+        label_center = self.width() / 2.0
         painter.drawText(
             QRectF(
-                rect.left(),
+                label_margin,
                 label_top,
-                rect.width() / 2.0,
+                max(
+                    1.0,
+                    label_center - label_margin - horizontal_label_gap / 2.0,
+                ),
                 label_height,
             ),
-            Qt.AlignmentFlag.AlignLeft,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             "0 %",
         )
         painter.drawText(
             QRectF(
-                rect.center().x(),
+                label_center + horizontal_label_gap / 2.0,
                 label_top,
-                rect.width() / 2.0,
+                max(
+                    1.0,
+                    self.width()
+                    - label_margin
+                    - label_center
+                    - horizontal_label_gap / 2.0,
+                ),
                 label_height,
             ),
-            Qt.AlignmentFlag.AlignRight,
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
             "100 %",
         )
 
@@ -1139,12 +1211,33 @@ class ExperimentCard(QFrame):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self.resize_responsive_input_editor()
         for page in self.findChildren(CompactVerticalInputPage):
             page.update_positions()
             QTimer.singleShot(0, page.update_positions)
         for page in self.findChildren(CompactVerticalOutputPage):
             page.update_positions()
             QTimer.singleShot(0, page.update_positions)
+
+    def resize_responsive_input_editor(self):
+        """Hält das gestapelte Eingabefeld kompakt und mittig."""
+
+        editor = getattr(self, "responsive_input_editor", None)
+        if (
+            editor is None
+            or not getattr(self, "responsive_input_stacked", False)
+        ):
+            return
+
+        desired_width = editor.fontMetrics().horizontalAdvance(editor.text()) + 28
+        outer_layout = self.layout()
+        if outer_layout is not None:
+            margins = outer_layout.contentsMargins()
+            horizontal_margins = margins.left() + margins.right()
+        else:
+            horizontal_margins = 16
+        available_width = max(1, self.width() - horizontal_margins)
+        editor.setFixedWidth(max(64, min(available_width, desired_width)))
 
     def prepare_responsive_layout(self, width, height):
         """Ordnet den Inhalt hoher Eingabekarten übersichtlich untereinander an."""
@@ -1283,20 +1376,50 @@ class ExperimentCard(QFrame):
         name = getattr(self, "responsive_input_name", None)
         editor = getattr(self, "responsive_input_editor", None)
         if grid is not None and name is not None and editor is not None:
-            stacked = float(height) >= 78.0
+            name_text = getattr(name, "full_text", name.text())
+            required_width = (
+                name.fontMetrics().horizontalAdvance(str(name_text))
+                + editor.fontMetrics().horizontalAdvance(editor.text())
+                + max(0, grid.horizontalSpacing())
+                + 28
+            )
+            width_requires_stacking = float(width) < float(required_width)
+            stacked = bool(
+                float(height) >= 78.0
+                or (width_requires_stacking and float(height) >= 62.0)
+            )
             if stacked != getattr(self, "responsive_input_stacked", None):
                 self.responsive_input_stacked = stacked
                 if stacked:
                     grid.addWidget(name, 0, 0, 1, 2)
+                    editor.setSizePolicy(
+                        QSizePolicy.Policy.Fixed,
+                        QSizePolicy.Policy.Fixed,
+                    )
+                    if hasattr(editor, "setAlignment"):
+                        editor.setAlignment(Qt.AlignmentFlag.AlignCenter)
                     grid.addWidget(
-                        editor, 1, 0, 1, 2, Qt.AlignmentFlag.AlignCenter
+                        editor,
+                        1,
+                        0,
+                        1,
+                        2,
+                        Qt.AlignmentFlag.AlignCenter,
                     )
                 else:
                     grid.addWidget(name, 0, 0, 1, 1)
+                    editor.setSizePolicy(
+                        QSizePolicy.Policy.Preferred,
+                        QSizePolicy.Policy.Fixed,
+                    )
+                    if hasattr(editor, "setAlignment"):
+                        editor.setAlignment(Qt.AlignmentFlag.AlignCenter)
                     grid.addWidget(
                         editor, 0, 1, 1, 1, Qt.AlignmentFlag.AlignCenter
                     )
                 grid.invalidate()
+            if stacked:
+                self.resize_responsive_input_editor()
             return stacked
 
         grid = getattr(self, "responsive_output_grid", None)
@@ -1304,21 +1427,39 @@ class ExperimentCard(QFrame):
         value = getattr(self, "responsive_output_value", None)
         if grid is None or name is None or value is None:
             return False
+        name_text = getattr(name, "full_text", name.text())
+        value_text = getattr(value, "full_text", value.text())
+        required_width = (
+            name.fontMetrics().horizontalAdvance(str(name_text))
+            + value.fontMetrics().horizontalAdvance(str(value_text))
+            + max(0, grid.horizontalSpacing())
+            + 20
+        )
+        width_requires_stacking = float(width) < float(required_width)
         stacked = bool(
             (
                 getattr(self, "responsive_output_bar_mode", False)
                 or getattr(self, "responsive_output_pointer_mode", False)
             )
-            and float(height) >= 78.0
+            and (
+                float(height) >= 78.0
+                or (width_requires_stacking and float(height) >= 62.0)
+            )
         )
         if stacked != getattr(self, "responsive_output_stacked", None):
             self.responsive_output_stacked = stacked
             if stacked:
                 grid.addWidget(name, 0, 0, 1, 2)
-                grid.addWidget(value, 1, 0, 1, 2, Qt.AlignmentFlag.AlignCenter)
+                value.setAlignment(
+                    Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
+                )
+                grid.addWidget(value, 1, 0, 1, 2)
             else:
                 grid.addWidget(name, 0, 0, 1, 1)
-                grid.addWidget(value, 0, 1, 1, 1, Qt.AlignmentFlag.AlignRight)
+                value.setAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+                )
+                grid.addWidget(value, 0, 1, 1, 1)
             grid.invalidate()
         return stacked
 
@@ -1389,7 +1530,18 @@ class ExperimentCard(QFrame):
             if isinstance(widget, ElidedLabel):
                 widget.update_elided_text()
 
+        input_editor = getattr(self, "responsive_input_editor", None)
+        if input_editor is not None:
+            if hasattr(input_editor, "setAlignment"):
+                input_editor.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            if getattr(self, "responsive_input_stacked", False):
+                input_editor.setSizePolicy(
+                    QSizePolicy.Policy.Fixed,
+                    QSizePolicy.Policy.Fixed,
+                )
+
         self.scale_layout(self.layout(), factor)
+        self.resize_responsive_input_editor()
         self.updateGeometry()
         self.update()
 
@@ -2512,10 +2664,14 @@ class ElidedLabel(QLabel):
 
     def __init__(self, text="", parent=None):
         super().__init__(parent)
-        self.full_text = str(text)
-        self.setToolTip(self.full_text)
         self.setMinimumWidth(0)
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.setText(text)
+
+    def setText(self, text):
+        """Speichert den vollständigen Text und zeigt bei Bedarf Auslassungspunkte."""
+        self.full_text = str(text)
+        self.setToolTip(self.full_text)
         self.update_elided_text()
 
     def resizeEvent(self, event):
@@ -3438,10 +3594,38 @@ class ResizableBackgroundItem(QGraphicsPixmapItem):
             pixmap_width = max(1.0, float(self.pixmap().width()))
             delta = event.scenePos().x() - self.resize_start.x()
             new_scale = self.start_scale + delta / pixmap_width
+            dialog = self.history_dialog()
+            if (
+                dialog is not None
+                and hasattr(dialog, "grid_snap_active")
+                and dialog.grid_snap_active()
+            ):
+                target_right = self.pos().x() + pixmap_width * new_scale
+                snapped_right = dialog.snap_scene_position(
+                    QPointF(target_right, self.pos().y())
+                ).x()
+                new_scale = (snapped_right - self.pos().x()) / pixmap_width
             self.setScale(max(0.05, min(10.0, new_scale)))
             event.accept()
             return
         super().mouseMoveEvent(event)
+        dialog = self.history_dialog()
+        if (
+            dialog is not None
+            and hasattr(dialog, "grid_snap_active")
+            and dialog.grid_snap_active()
+        ):
+            raw_position = QPointF(self.pos())
+            snapped_position = dialog.snap_scene_position(raw_position)
+            correction = snapped_position - raw_position
+            if not correction.isNull() and self.scene() is not None:
+                for item in self.scene().selectedItems():
+                    if (
+                        isinstance(item, DesignShapeItem)
+                        and not item.locked
+                    ):
+                        item.setPos(item.pos() + correction)
+            self.setPos(snapped_position)
 
     def mouseReleaseEvent(self, event):
         was_group_drag = self.group_drag_proxy is not None
@@ -4106,6 +4290,7 @@ class DesignShapeItem(QGraphicsItem):
         self.whole_move_start_position = QPointF()
         self.endpoint_group_moving = False
         self.endpoint_drag_start_position = QPointF()
+        self.endpoint_drag_anchor_position = QPointF()
         self.group_endpoint_start_positions = {}
         self.resize_start = QPointF()
         self.resize_start_size = (self.item_width, self.item_height)
@@ -4123,6 +4308,16 @@ class DesignShapeItem(QGraphicsItem):
 
     def is_connector(self):
         return self.shape_type in ("line", "curve")
+
+    def history_dialog(self):
+        views = self.scene().views() if self.scene() is not None else []
+        return views[0].window() if views else None
+
+    def snapped_scene_position(self, position):
+        dialog = self.history_dialog()
+        if dialog is not None and hasattr(dialog, "snap_scene_position"):
+            return dialog.snap_scene_position(position)
+        return QPointF(position)
 
     def connector_path(self):
         path = QPainterPath(self.line_start)
@@ -4316,6 +4511,7 @@ class DesignShapeItem(QGraphicsItem):
         if len(candidates) < 2:
             return False
         self.endpoint_drag_start_position = QPointF(scene_position)
+        self.endpoint_drag_anchor_position = QPointF(clicked_position)
         self.group_endpoint_start_positions = candidates
         for item, _other_endpoint in candidates:
             item.endpoint_group_moving = True
@@ -4323,7 +4519,10 @@ class DesignShapeItem(QGraphicsItem):
         return True
 
     def move_group_endpoints(self, scene_position):
-        delta = scene_position - self.endpoint_drag_start_position
+        raw_delta = scene_position - self.endpoint_drag_start_position
+        anchor_target = self.endpoint_drag_anchor_position + raw_delta
+        snapped_anchor = self.snapped_scene_position(anchor_target)
+        delta = snapped_anchor - self.endpoint_drag_anchor_position
         for (item, endpoint), start_position in self.group_endpoint_start_positions.items():
             if item.scene() is self.scene():
                 item.set_endpoint_scene_position(endpoint, start_position + delta)
@@ -4333,6 +4532,7 @@ class DesignShapeItem(QGraphicsItem):
             item.endpoint_group_moving = False
             item.update()
         self.group_endpoint_start_positions = {}
+        self.endpoint_drag_anchor_position = QPointF()
 
     def paint(self, painter, option, widget=None):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -4542,7 +4742,9 @@ class DesignShapeItem(QGraphicsItem):
             return
         if self.line_endpoint is not None:
             self.prepareGeometryChange()
-            point = QPointF(event.pos())
+            point = self.mapFromScene(
+                self.snapped_scene_position(event.scenePos())
+            )
             if self.line_endpoint == "control_1":
                 self.control_point_1 = point
                 self.update()
@@ -4576,6 +4778,22 @@ class DesignShapeItem(QGraphicsItem):
                 )
             self.prepareGeometryChange()
             start_width, start_height = self.resize_start_size
+
+            dialog = self.history_dialog()
+            if (
+                dialog is not None
+                and hasattr(dialog, "grid_snap_active")
+                and dialog.grid_snap_active()
+            ):
+                target_corner = self.mapToScene(
+                    QPointF(start_width + delta.x(), start_height + delta.y())
+                )
+                snapped_corner = dialog.snap_scene_position(target_corner)
+                local_corner = self.mapFromScene(snapped_corner)
+                delta = QPointF(
+                    local_corner.x() - start_width,
+                    local_corner.y() - start_height,
+                )
 
             if (
                 self.shape_type == "icon"
@@ -4611,6 +4829,26 @@ class DesignShapeItem(QGraphicsItem):
         if not self.moving:
             self.begin_whole_move()
         super().mouseMoveEvent(event)
+        dialog = self.history_dialog()
+        if (
+            dialog is not None
+            and hasattr(dialog, "grid_snap_active")
+            and dialog.grid_snap_active()
+        ):
+            raw_position = QPointF(self.pos())
+            snapped_position = dialog.snap_scene_position(raw_position)
+            correction = snapped_position - raw_position
+            if not correction.isNull() and self.scene() is not None:
+                for item in self.scene().selectedItems():
+                    if item is self:
+                        continue
+                    if isinstance(item, DesignShapeItem) and not item.locked:
+                        item.setPos(item.pos() + correction)
+                    elif isinstance(item, ResizableBackgroundItem) and not item.locked:
+                        item.setPos(item.pos() + correction)
+                    elif isinstance(item, MovableCardProxy) and not item.locked:
+                        item.setPos(item.pos() + correction)
+            self.setPos(snapped_position)
         self.update_selected_endpoints()
 
     def mouseReleaseEvent(self, event):
@@ -4981,6 +5219,24 @@ class MovableCardProxy(QGraphicsProxyWidget):
         if not self.resize_start_sizes:
             return
         delta = scene_position - self.resize_start_scene_position
+        dialog = self.history_dialog()
+        if (
+            dialog is not None
+            and hasattr(dialog, "grid_snap_active")
+            and dialog.grid_snap_active()
+            and self in self.resize_start_sizes
+        ):
+            start_width, start_height = self.resize_start_sizes[self]
+            start_top_left = self.mapToScene(QPointF(0.0, 0.0))
+            target_corner = QPointF(
+                start_top_left.x() + start_width + delta.x(),
+                start_top_left.y() + start_height + delta.y(),
+            )
+            snapped_corner = dialog.snap_scene_position(target_corner)
+            delta = QPointF(
+                snapped_corner.x() - start_top_left.x() - start_width,
+                snapped_corner.y() - start_top_left.y() - start_height,
+            )
         for item, (width, height) in self.resize_start_sizes.items():
             item.set_card_size(width + delta.x(), height + delta.y())
 
@@ -5039,6 +5295,18 @@ class MovableCardProxy(QGraphicsProxyWidget):
         )
         delta.setX(max(minimum_dx, min(maximum_dx, delta.x())))
         delta.setY(max(minimum_dy, min(maximum_dy, delta.y())))
+        dialog = self.history_dialog()
+        anchor_start = self.drag_start_positions.get(self)
+        if (
+            anchor_start is not None
+            and dialog is not None
+            and hasattr(dialog, "grid_snap_active")
+            and dialog.grid_snap_active()
+        ):
+            snapped_anchor = dialog.snap_scene_position(anchor_start + delta)
+            delta = snapped_anchor - anchor_start
+            delta.setX(max(minimum_dx, min(maximum_dx, delta.x())))
+            delta.setY(max(minimum_dy, min(maximum_dy, delta.y())))
         for item, start in self.drag_start_positions.items():
             item.setPos(start + delta)
         for (shape, endpoint), start in self.attached_endpoint_start_positions.items():
@@ -5299,6 +5567,7 @@ class GraphicalExperimentDialog(QDialog):
         self.background_relative_path = ""
         self.background_color = "#f5f5f5"
         self.grid_enabled = False
+        self.grid_snap_enabled = False
         self.grid_spacing = 20
         self.grid_item = None
         self.edit_mode = True
@@ -5613,6 +5882,17 @@ class GraphicalExperimentDialog(QDialog):
         )
         self.grid_visible_action.setIcon(ToolbarIcons.icon("grid"))
         self.grid_visible_action.setCheckable(True)
+        self.grid_snap_action = self.design_menu.addAction(
+            self.tr("Am Raster einrasten", "Snap to grid")
+        )
+        self.grid_snap_action.setIcon(ToolbarIcons.icon("grid"))
+        self.grid_snap_action.setCheckable(True)
+        self.grid_snap_action.setToolTip(
+            self.tr(
+                "Wirksam, wenn das Raster angezeigt wird.",
+                "Active while the grid is visible.",
+            )
+        )
         self.grid_spacing_action = self.design_menu.addAction(
             self.tr("Rasterabstand…", "Grid spacing…")
         )
@@ -5657,6 +5937,7 @@ class GraphicalExperimentDialog(QDialog):
             lambda: self.request_existing_element_placement(self.network_view_card)
         )
         self.grid_visible_action.toggled.connect(self.set_grid_enabled)
+        self.grid_snap_action.toggled.connect(self.set_grid_snap_enabled)
         self.grid_spacing_action.triggered.connect(self.choose_grid_spacing)
         self.default_layout_action.triggered.connect(self.reset_to_default_layout)
         self.arrange_menu = QMenu(self)
@@ -5709,6 +5990,7 @@ class GraphicalExperimentDialog(QDialog):
         self.top_design_menu.addAction(self.background_color_action)
         self.top_design_menu.addMenu(self.card_color_menu)
         self.top_design_menu.addAction(self.grid_visible_action)
+        self.top_design_menu.addAction(self.grid_snap_action)
         self.top_design_menu.addAction(self.grid_spacing_action)
         self.top_design_menu.addSeparator()
         self.top_design_menu.addAction(self.default_layout_action)
@@ -6112,7 +6394,7 @@ class GraphicalExperimentDialog(QDialog):
 
     def snapped_placement_position(self, position):
         point = QPointF(position)
-        if self.grid_enabled and self.grid_spacing > 0:
+        if self.grid_snap_active():
             spacing = float(self.grid_spacing)
             point.setX(round(point.x() / spacing) * spacing)
             point.setY(round(point.y() / spacing) * spacing)
@@ -6160,9 +6442,14 @@ class GraphicalExperimentDialog(QDialog):
         if not self.placement_items:
             return
         delta = QPointF(scene_position) - self.placement_origin
+        anchor = self.placement_items[0]
+        anchor_start = self.placement_start_positions.get(anchor)
+        if anchor_start is not None:
+            anchor_target = anchor_start + delta
+            delta += self.snapped_placement_position(anchor_target) - anchor_target
         for item, start in self.placement_start_positions.items():
             if item.scene() is self.scene:
-                item.setPos(self.snapped_placement_position(start + delta))
+                item.setPos(start + delta)
 
     def clear_element_placement_state(self):
         self.placement_items = []
@@ -6363,10 +6650,14 @@ class GraphicalExperimentDialog(QDialog):
             return
         self.begin_history_action()
         proxy.setVisible(True)
+        explicit_position = position is not None
         if position is None:
             position = getattr(proxy, "saved_design_position", None)
         if position is None:
             position = self.view.mapToScene(self.view.viewport().rect().center())
+            explicit_position = True
+        if explicit_position:
+            position = self.snap_scene_position(position)
         proxy.setPos(position)
         self.scene.clearSelection()
         proxy.setSelected(True)
@@ -6455,7 +6746,11 @@ class GraphicalExperimentDialog(QDialog):
         self.scene.addItem(item)
         if not isinstance(data, dict) or "layer" not in data:
             item.setZValue(self.next_design_layer())
-        item.setPos(position)
+        item.setPos(
+            self.snap_scene_position(position)
+            if record_history and not self.restoring_history
+            else position
+        )
         item.set_editable(self.edit_mode)
         self.shape_items.append(item)
         if record_history and not self.restoring_history:
@@ -6853,7 +7148,7 @@ class GraphicalExperimentDialog(QDialog):
             return
         self.begin_history_action()
         proxy = self.create_comment_card(data)
-        proxy.setPos(position)
+        proxy.setPos(self.snap_scene_position(position))
         self.scene.clearSelection()
         proxy.setSelected(True)
         self.finish_history_action()
@@ -6952,6 +7247,7 @@ class GraphicalExperimentDialog(QDialog):
         menu = QMenu(self)
         menu.addAction(self.background_color_action)
         menu.addAction(self.grid_visible_action)
+        menu.addAction(self.grid_snap_action)
         menu.addAction(self.grid_spacing_action)
         menu.addSeparator()
         menu.addAction(self.default_layout_action)
@@ -7755,6 +8051,10 @@ class GraphicalExperimentDialog(QDialog):
             editor.valueChanged.connect(
                 lambda _value, target=editor: target.setToolTip(target.text())
             )
+            editor.valueChanged.connect(
+                lambda _value, target=card:
+                target.resize_responsive_input_editor()
+            )
             editor.valueChanged.connect(self.input_state_changed)
         top.addWidget(editor, 0, 1, Qt.AlignmentFlag.AlignCenter)
         card.responsive_input_grid = top
@@ -7848,14 +8148,7 @@ class GraphicalExperimentDialog(QDialog):
         top.setColumnStretch(0, 1)
         top.setColumnStretch(1, 1)
         name = ElidedLabel(str(mapping.get("name") or mapping["neuron"].name), card)
-        value_label = QLabel("–", card)
-        # Für die kompakte Zwischenwertanzeige muss das Layout die Breite des
-        # vollständigen Namens kennen. ElidedLabel darf hier nicht schon durch
-        # seine zunächst kleine Widgetbreite auf "..." reduziert werden.
-        name.setProperty(
-            "nn_base_minimum_width",
-            name.fontMetrics().horizontalAdvance(name.full_text) + 2,
-        )
+        value_label = ElidedLabel("–", card)
         value_label.setProperty(
             "nn_base_minimum_width",
             value_label.fontMetrics().horizontalAdvance("-0.000000") + 2,
@@ -7965,14 +8258,8 @@ class GraphicalExperimentDialog(QDialog):
         bar_layout.addWidget(bar)
         range_layout = QHBoxLayout()
         range_layout.setContentsMargins(0, 0, 0, 0)
-        minimum_label = QLabel(
-            f"{format_number(minimum, 5)}{(' ' + unit) if unit else ''}",
-            bar_page,
-        )
-        maximum_label = QLabel(
-            f"{format_number(maximum, 5)}{(' ' + unit) if unit else ''}",
-            bar_page,
-        )
+        minimum_label = QLabel("0 %", bar_page)
+        maximum_label = QLabel("100 %", bar_page)
         minimum_label.setProperty("nn_max_font_size", 10.0)
         maximum_label.setProperty("nn_max_font_size", 10.0)
         range_layout.addWidget(minimum_label)
@@ -8427,8 +8714,12 @@ class GraphicalExperimentDialog(QDialog):
                 controls["value"].setText(
                     f"{format_number(display_value, 6)}"
                     if controls.get("binary")
-                    else f"{format_number(raw_value, 5)}{(' ' + unit) if unit else ''}"
+                    else f"{format_application_output_value(raw_value)}"
+                    f"{(' ' + unit) if unit else ''}"
                 )
+                card = controls.get("card")
+                if isinstance(card, ExperimentCard) and not controls.get("binary"):
+                    card.prepare_responsive_layout(card.width(), card.height())
                 minimum, maximum = self.display_range(mapping)
                 ratio = 0.0 if maximum <= minimum else (raw_value - minimum) / (maximum - minimum)
                 binary = mapping.get("data_type") == "binary"
@@ -8532,6 +8823,7 @@ class GraphicalExperimentDialog(QDialog):
         self.load_image_action.setEnabled(self.edit_mode)
         self.background_color_action.setEnabled(self.edit_mode)
         self.grid_visible_action.setEnabled(self.edit_mode)
+        self.grid_snap_action.setEnabled(self.edit_mode)
         self.grid_spacing_action.setEnabled(self.edit_mode)
         self.default_layout_action.setEnabled(self.edit_mode)
         for menu in (
@@ -8888,6 +9180,26 @@ class GraphicalExperimentDialog(QDialog):
             self.grid_item.set_spacing(self.grid_spacing)
             self.grid_item.setVisible(self.grid_enabled and self.edit_mode)
             self.grid_item.update()
+        if hasattr(self, "grid_snap_action"):
+            self.grid_snap_action.setEnabled(self.edit_mode and self.grid_enabled)
+
+    def grid_snap_active(self):
+        return bool(
+            self.edit_mode
+            and self.grid_enabled
+            and self.grid_snap_enabled
+            and self.grid_spacing > 0
+        )
+
+    def snap_scene_position(self, position):
+        point = QPointF(position)
+        if not self.grid_snap_active():
+            return point
+        spacing = float(self.grid_spacing)
+        return QPointF(
+            round(point.x() / spacing) * spacing,
+            round(point.y() / spacing) * spacing,
+        )
 
     def set_grid_enabled(self, enabled, record=True):
         enabled = bool(enabled)
@@ -8898,6 +9210,16 @@ class GraphicalExperimentDialog(QDialog):
             self.begin_history_action()
         self.grid_enabled = enabled
         self.update_grid_visibility()
+        if record:
+            self.finish_history_action()
+
+    def set_grid_snap_enabled(self, enabled, record=True):
+        enabled = bool(enabled)
+        if enabled == self.grid_snap_enabled:
+            return
+        if record:
+            self.begin_history_action()
+        self.grid_snap_enabled = enabled
         if record:
             self.finish_history_action()
 
@@ -9097,10 +9419,16 @@ class GraphicalExperimentDialog(QDialog):
             )
             self.scene.setBackgroundBrush(QColor(self.background_color))
             self.grid_enabled = bool(document.get("grid_enabled", False))
+            self.grid_snap_enabled = bool(
+                document.get("grid_snap_enabled", self.grid_enabled)
+            )
             self.grid_spacing = max(5, int(document.get("grid_spacing", 20)))
             self.grid_visible_action.blockSignals(True)
             self.grid_visible_action.setChecked(self.grid_enabled)
             self.grid_visible_action.blockSignals(False)
+            self.grid_snap_action.blockSignals(True)
+            self.grid_snap_action.setChecked(self.grid_snap_enabled)
+            self.grid_snap_action.blockSignals(False)
             self.update_grid_visibility()
             background = document.get("background")
             if not isinstance(background, dict) or snapshot["pixmap"] is None:
@@ -9228,7 +9556,7 @@ class GraphicalExperimentDialog(QDialog):
                 "locked": proxy.locked,
             }
         return {
-            "version": 9,
+            "version": 10,
             "cards": cards,
             "input_values": {
                 str(mapping["neuron"].id): float(
@@ -9243,6 +9571,7 @@ class GraphicalExperimentDialog(QDialog):
             "background": background,
             "background_color": self.background_color,
             "grid_enabled": self.grid_enabled,
+            "grid_snap_enabled": self.grid_snap_enabled,
             "grid_spacing": self.grid_spacing,
             "output_displays": {
                 self.card_key("output", mapping): controls["display_mode"]
@@ -9329,10 +9658,16 @@ class GraphicalExperimentDialog(QDialog):
         self.background_color = str(document.get("background_color", "#f5f5f5"))
         self.scene.setBackgroundBrush(QColor(self.background_color))
         self.grid_enabled = bool(document.get("grid_enabled", False))
+        self.grid_snap_enabled = bool(
+            document.get("grid_snap_enabled", self.grid_enabled)
+        )
         self.grid_spacing = max(5, int(document.get("grid_spacing", 20)))
         self.grid_visible_action.blockSignals(True)
         self.grid_visible_action.setChecked(self.grid_enabled)
         self.grid_visible_action.blockSignals(False)
+        self.grid_snap_action.blockSignals(True)
+        self.grid_snap_action.setChecked(self.grid_snap_enabled)
+        self.grid_snap_action.blockSignals(False)
         self.update_grid_visibility()
         input_displays = document.get("input_displays", {})
         for _proxy, controls, mapping in self.input_cards:

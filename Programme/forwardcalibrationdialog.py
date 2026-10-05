@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: forwardcalibrationdialog.py
 # Zweck: Ermöglicht interaktive Experimente und Vorwärtsberechnungen mit Rohwerten.
-# Letzte Änderung: 24.08.2026
+# Letzte Änderung: 03.10.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -37,6 +37,42 @@ from graphicalexperimentdialog import (
 from numberformat import format_number
 from language import LanguageManager
 from settings import Settings
+
+
+def format_range_value(value):
+    """Formatiert Bereichsgrenzen kompakt mit höchstens zwei Dezimalstellen."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+
+    if math.isfinite(number) and number != 0.0 and abs(number) < 0.01:
+        mantissa, exponent = f"{number:.2e}".split("e")
+        mantissa = mantissa.rstrip("0").rstrip(".")
+        return f"{mantissa}e{int(exponent):+d}"
+
+    if math.isfinite(number):
+        return f"{number:.2f}".rstrip("0").rstrip(".")
+
+    return str(number)
+
+
+def create_range_labels(minimum, maximum, font):
+    """Erzeugt getrennte Beschriftungen für die drei Bereichsspalten."""
+    minimum_label = QLabel(str(minimum))
+    separator_label = QLabel("…")
+    maximum_label = QLabel(str(maximum))
+    for label in (minimum_label, separator_label, maximum_label):
+        label.setFont(font)
+
+    minimum_label.setAlignment(
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+    )
+    separator_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    maximum_label.setAlignment(
+        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+    )
+    return minimum_label, separator_label, maximum_label
 
 
 class CompactDoubleSpinBox(QDoubleSpinBox):
@@ -259,7 +295,7 @@ class ForwardCalibrationDialog(QDialog):
 
     calculation_updated = Signal()
 
-    SHARED_COLUMN_WIDTHS = (95, 130, 105, 75, 115)
+    SHARED_COLUMN_WIDTHS = (95, 130, 105, 75)
     VALUE_COLUMN_MINIMUM = 130
 
     def __init__(
@@ -370,13 +406,14 @@ class ForwardCalibrationDialog(QDialog):
         self.input_layout.addWidget(
             QLabel(self.language.text("forward.column.scaling")), 0, 3
         )
-        self.input_layout.addWidget(
-            QLabel(self.language.text("forward.column.allowed_range")), 0, 4
+        input_range_header = QLabel(
+            self.language.text("forward.column.allowed_range")
         )
+        input_range_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.input_layout.addWidget(input_range_header, 0, 4, 1, 3)
         self.input_layout.addWidget(
-            QLabel(self.language.text("forward.column.slider")), 0, 5
+            QLabel(self.language.text("forward.column.slider")), 0, 7
         )
-
         for row, mapping in enumerate(self.input_columns, start=1):
             self.input_layout.setRowMinimumHeight(row, 22)
             is_binary = mapping.get("data_type") == "binary"
@@ -450,14 +487,11 @@ class ForwardCalibrationDialog(QDialog):
             calibration_label = QLabel(
                 self.format_calibration(mapping["calibration"])
             )
-            range_label = QLabel(
-                self.language.text(
-                    "forward.allowed_range",
-                    minimum=format_number(minimum, 7) if not is_binary else "0",
-                    maximum=format_number(maximum, 7) if not is_binary else "1"
-                )
+            range_labels = create_range_labels(
+                format_range_value(minimum) if not is_binary else "0",
+                format_range_value(maximum) if not is_binary else "1",
+                self.fixed_font,
             )
-            range_label.setFont(self.fixed_font)
 
             self.input_layout.addWidget(
                 QLabel(mapping["neuron"].name), row, 0
@@ -465,8 +499,18 @@ class ForwardCalibrationDialog(QDialog):
             self.input_layout.addWidget(raw_display_widget, row, 1)
             self.input_layout.addWidget(internal_label, row, 2)
             self.input_layout.addWidget(calibration_label, row, 3)
-            self.input_layout.addWidget(range_label, row, 4)
-            self.input_layout.addWidget(slider_display_widget, row, 5)
+            self.input_layout.addWidget(
+                range_labels[0], row, 4,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            )
+            self.input_layout.addWidget(
+                range_labels[1], row, 5, Qt.AlignmentFlag.AlignCenter,
+            )
+            self.input_layout.addWidget(
+                range_labels[2], row, 6,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            )
+            self.input_layout.addWidget(slider_display_widget, row, 7)
 
             widget_data = {
                     "mapping": mapping,
@@ -545,13 +589,14 @@ class ForwardCalibrationDialog(QDialog):
         self.output_layout.addWidget(
             QLabel(self.language.text("forward.column.scaling")), 0, 3
         )
-        self.output_layout.addWidget(
-            QLabel(self.language.text("forward.column.allowed_range")), 0, 4
+        output_range_header = QLabel(
+            self.language.text("forward.column.allowed_range")
         )
+        output_range_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.output_layout.addWidget(output_range_header, 0, 4, 1, 3)
         self.output_layout.addWidget(
-            self.create_quality_header(), 0, 5
+            self.create_quality_header(), 0, 7
         )
-
         for row, mapping in enumerate(self.output_columns, start=1):
             self.output_layout.setRowMinimumHeight(row, 20)
             is_binary = mapping.get("data_type") == "binary"
@@ -596,14 +641,11 @@ class ForwardCalibrationDialog(QDialog):
             display_container_layout.setSpacing(6)
             display_container_layout.addWidget(quality_led)
             display_container_layout.addWidget(display_widget, 1)
-            range_label = QLabel(
-                self.language.text(
-                    "forward.allowed_range",
-                    minimum=format_number(minimum, 4),
-                    maximum=format_number(maximum, 4)
-                )
+            range_labels = create_range_labels(
+                format_range_value(minimum),
+                format_range_value(maximum),
+                self.fixed_font,
             )
-            range_label.setFont(self.fixed_font)
 
             self.output_layout.addWidget(
                 QLabel(mapping["neuron"].name), row, 0
@@ -611,8 +653,18 @@ class ForwardCalibrationDialog(QDialog):
             self.output_layout.addWidget(raw_label, row, 1)
             self.output_layout.addWidget(internal_label, row, 2)
             self.output_layout.addWidget(calibration_label, row, 3)
-            self.output_layout.addWidget(range_label, row, 4)
-            self.output_layout.addWidget(display_container, row, 5)
+            self.output_layout.addWidget(
+                range_labels[0], row, 4,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            )
+            self.output_layout.addWidget(
+                range_labels[1], row, 5, Qt.AlignmentFlag.AlignCenter,
+            )
+            self.output_layout.addWidget(
+                range_labels[2], row, 6,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            )
+            self.output_layout.addWidget(display_container, row, 7)
 
             self.output_widgets.append(
                 {
@@ -628,6 +680,18 @@ class ForwardCalibrationDialog(QDialog):
                 }
             )
 
+        self.range_minimum_width = max(
+            self.range_column_content_width(self.input_layout, 4),
+            self.range_column_content_width(self.output_layout, 4),
+        )
+        self.range_separator_width = max(
+            self.range_column_content_width(self.input_layout, 5),
+            self.range_column_content_width(self.output_layout, 5),
+        )
+        self.range_maximum_width = max(
+            self.range_column_content_width(self.input_layout, 6),
+            self.range_column_content_width(self.output_layout, 6),
+        )
         self.apply_shared_column_layout(self.input_layout)
         self.apply_shared_column_layout(self.output_layout)
 
@@ -1131,6 +1195,11 @@ class ForwardCalibrationDialog(QDialog):
     def fit_window_to_content(self):
         if self.isMaximized() or self.isFullScreen():
             return
+        # Release the previous content height while an optional view change
+        # is measured. The final height is fixed again below; the width stays
+        # freely resizable.
+        self.setMinimumHeight(0)
+        self.setMaximumHeight(16777215)
         self.update_compact_text_heights()
         self.main_layout.activate()
         for _pass in range(4):
@@ -1146,6 +1215,7 @@ class ForwardCalibrationDialog(QDialog):
                 max(420, screen.availableGeometry().height() - 60),
             )
         self.resize(self.width(), requested_height)
+        self.setFixedHeight(requested_height)
 
     def compact_visible_grid_groups(self):
         """Beendet Tabellen-Gruppen direkt nach ihrer letzten sichtbaren Zeile."""
@@ -1219,6 +1289,17 @@ class ForwardCalibrationDialog(QDialog):
                 + bottom_clearance
             )
 
+    @staticmethod
+    def range_column_content_width(layout, column):
+        """Ermittelt die kleinste gemeinsame Breite aus den angezeigten Werten."""
+        widths = []
+        for row in range(1, layout.rowCount()):
+            item = layout.itemAtPosition(row, column)
+            widget = item.widget() if item is not None else None
+            if widget is not None:
+                widths.append(widget.sizeHint().width())
+        return max(widths, default=1)
+
     def apply_shared_column_layout(self, layout):
         """Verwendet in Ein- und Ausgabe dasselbe horizontale Spaltenraster."""
 
@@ -1231,10 +1312,24 @@ class ForwardCalibrationDialog(QDialog):
                 if widget is not None:
                     widget.setFixedWidth(width)
 
-        layout.setColumnMinimumWidth(5, self.VALUE_COLUMN_MINIMUM)
-        layout.setColumnStretch(5, 1)
+        range_columns = (
+            (4, self.range_minimum_width),
+            (5, self.range_separator_width),
+            (6, self.range_maximum_width),
+        )
+        for column, width in range_columns:
+            layout.setColumnMinimumWidth(column, width)
+            layout.setColumnStretch(column, 0)
+            for row in range(1, layout.rowCount()):
+                item = layout.itemAtPosition(row, column)
+                widget = item.widget() if item is not None else None
+                if widget is not None:
+                    widget.setFixedWidth(width)
+
+        layout.setColumnMinimumWidth(7, self.VALUE_COLUMN_MINIMUM)
+        layout.setColumnStretch(7, 1)
         for row in range(layout.rowCount()):
-            item = layout.itemAtPosition(row, 5)
+            item = layout.itemAtPosition(row, 7)
             widget = item.widget() if item is not None else None
             if widget is not None:
                 widget.setMinimumWidth(self.VALUE_COLUMN_MINIMUM)

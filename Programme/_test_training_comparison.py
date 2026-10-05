@@ -244,6 +244,68 @@ class ComparisonTests(unittest.TestCase):
         delete(dialog)
         delete(parent)
 
+    def test_plateau_warning_reflows_chart_without_covering_controls(self):
+        parent, dialog = make_dialog()
+        dialog.available_window_size = lambda: (1900, 700)
+        dialog.resize_full_view()
+        dialog.show()
+        self.app.processEvents()
+        height_before = dialog.height()
+        chart_height_before = dialog.error_chart_group.height()
+
+        dialog.set_plateau_warning_visible(True)
+        self.app.processEvents()
+        self.app.processEvents()
+
+        self.assertEqual(dialog.height(), height_before)
+        self.assertLess(dialog.error_chart_group.height(), chart_height_before)
+        self.assertLess(
+            dialog.error_chart_group.geometry().bottom(),
+            dialog.training_control_group.geometry().top(),
+        )
+
+        dialog.close()
+        parent.close()
+        from shiboken6 import delete
+        delete(dialog)
+        delete(parent)
+
+    def test_new_training_disables_monitoring_but_continue_keeps_it(self):
+        parent, dialog = make_dialog()
+        dialog.show()
+        self.app.processEvents()
+        calls = []
+        dialog.execute_training = lambda *args, **kwargs: calls.append(
+            (args, kwargs)
+        )
+
+        dialog.monitor_training_data.setChecked(True)
+        dialog.start_selected_training()
+        self.assertFalse(dialog.monitor_training_data.isChecked())
+        self.assertEqual(len(calls), 1)
+
+        dialog.monitor_training_data.setChecked(True)
+        dialog.current_run_initial_state = {"compatible": True}
+        dialog.training_state_is_compatible = lambda _state: True
+        dialog.repeat_with_same_initialization()
+        self.assertFalse(dialog.monitor_training_data.isChecked())
+        self.assertEqual(len(calls), 2)
+
+        dialog.monitor_training_data.setChecked(True)
+        dialog.prepare_continuation_parameters = lambda: "continue"
+        dialog.current_run_completed_epochs = 0
+        dialog.maximum_epochs.setValue(10)
+        dialog.continue_selected_training()
+        self.assertTrue(dialog.monitor_training_data.isChecked())
+        self.assertEqual(len(calls), 3)
+
+        dialog.close()
+        parent.close()
+        self.app.processEvents()
+        from shiboken6 import delete
+        delete(dialog)
+        delete(parent)
+
     @classmethod
     def setUpClass(cls):
         cls.app = QApplication.instance() or QApplication([])
@@ -295,7 +357,12 @@ class ComparisonTests(unittest.TestCase):
             self.assertEqual(len(dialog.error_chart.comparison_runs), 3)
             self.app.processEvents()
             self.assertEqual(dialog.error_chart.height(), chart_height)
-            self.assertEqual(dialog.error_chart_controls_layout.indexOf(dialog.comparison_legend), 1)
+            self.assertEqual(
+                dialog.error_chart_controls_layout.indexOf(dialog.comparison_legend),
+                dialog.error_chart_controls_layout.indexOf(
+                    dialog.comparison_full_length_checkbox
+                ) + 1,
+            )
             self.assertGreaterEqual(dialog.comparison_legend.width(), dialog.comparison_legend.sizeHint().width())
             self.assertFalse(dialog.comparison_legend.wordWrap())
             popup.table.item(2, 0).setCheckState(Qt.CheckState.Unchecked)
@@ -347,6 +414,41 @@ class ComparisonTests(unittest.TestCase):
         self.assertFalse(dialog.stop_requested)
         dialog.hide()
         parent.hide()
+
+    def test_complete_comparison_runs_control_epoch_axis(self):
+        parent, dialog = make_dialog()
+        dialog.show()
+        for epoch in range(1, 101):
+            dialog.error_chart.add_point(epoch, 0.2 / epoch)
+
+        dialog.show_comparison_runs()
+        popup = dialog.comparison_popup
+        self.assertTrue(dialog.comparison_full_length_checkbox.isEnabled())
+        dialog.comparison_full_length_checkbox.setChecked(True)
+        self.assertTrue(dialog.comparison_full_length)
+        self.assertEqual(dialog.error_chart.visible_epoch_limit(), 100)
+
+        popup.table.item(0, 0).setCheckState(Qt.CheckState.Checked)
+        popup.table.item(1, 0).setCheckState(Qt.CheckState.Checked)
+        self.assertEqual(dialog.error_chart.visible_epoch_limit(), 5000)
+        self.assertTrue(dialog.get_training_settings()["comparison_full_length"])
+
+        dialog.comparison_full_length_checkbox.setChecked(False)
+        self.assertEqual(dialog.error_chart.visible_epoch_limit(), 100)
+        dialog.comparison_full_length_checkbox.setChecked(True)
+        self.assertEqual(dialog.error_chart.visible_epoch_limit(), 5000)
+
+        popup.table.item(0, 0).setCheckState(Qt.CheckState.Unchecked)
+        popup.table.item(1, 0).setCheckState(Qt.CheckState.Unchecked)
+        self.assertTrue(dialog.comparison_full_length_checkbox.isEnabled())
+        self.assertEqual(dialog.error_chart.visible_epoch_limit(), 100)
+        popup.hide()
+        dialog.close()
+        parent.close()
+        self.app.processEvents()
+        from shiboken6 import delete
+        delete(dialog)
+        delete(parent)
 
 
 if __name__ == "__main__":

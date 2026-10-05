@@ -34,6 +34,7 @@ class TrainingErrorChart(QWidget):
         self.language = language_manager or LanguageManager()
         self.points = []
         self.comparison_runs = []
+        self.show_full_comparison_runs = False
         self.maximum_points = []
         self.error_metric = "mse"
         self.error_limit = None
@@ -58,6 +59,26 @@ class TrainingErrorChart(QWidget):
             for run in runs
         ]
         self.update()
+
+    def set_full_comparison_runs(self, enabled):
+        """Zeigt Referenzkurven wahlweise vollständig oder bis zum aktuellen Lauf."""
+
+        self.show_full_comparison_runs = bool(enabled)
+        self.update()
+
+    def visible_epoch_limit(self, active_points=None):
+        """Liefert die letzte Epoche aller tatsächlich sichtbaren Kurven."""
+
+        active_points = list(active_points if active_points is not None else (
+            self.maximum_points if self.error_metric == "maximum" else self.points
+        ))
+        maximum_epoch = max(1, active_points[-1][0] if active_points else 1)
+        if self.show_full_comparison_runs:
+            maximum_epoch = max(
+                [maximum_epoch]
+                + [points[-1][0] for _run_id, points in self.comparison_runs if points]
+            )
+        return maximum_epoch
 
     def set_scale_mode(self, scale_mode):
         """Stellt die Y-Achse auf lineare oder logarithmische Anzeige."""
@@ -250,12 +271,18 @@ class TrainingErrorChart(QWidget):
             )
             return
 
-        maximum_epoch = max(
-            1,
-            active_points[-1][0]
-        )
+        current_epoch = max(1, active_points[-1][0])
+        maximum_epoch = self.visible_epoch_limit(active_points)
         comparison_curves = [
-            (run_id, clipped_curve(points, maximum_epoch, self.scale_mode == "logarithmic"))
+            (
+                run_id,
+                points if self.show_full_comparison_runs
+                else clipped_curve(
+                    points,
+                    current_epoch,
+                    self.scale_mode == "logarithmic",
+                ),
+            )
             for run_id, points in self.comparison_runs
         ]
         scale_points = list(active_points) + [

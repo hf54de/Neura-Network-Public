@@ -178,7 +178,7 @@ Für einen neuen Lauf können Gewichte und Bias neu initialisiert werden. Empfoh
 - **Fehlergrenze:** gewünschter mittlerer Epochenfehler.
 - **Maximale Epochen:** Sicherheitsgrenze des Laufes.
 - **Einstellungen vorschlagen:** aus Netzwerkgröße, Aktivierungsfunktionen und zugeordneten Trainingsdaten einen konservativen Startvorschlag erzeugen. Der Vorschlag kann übernommen oder verworfen werden und garantiert keinen erfolgreichen Lauf.
-- **Daten monitoren:** Netzwerk während des Trainings sichtbar aktualisieren. Ohne Haken bleibt die Netzwerkdarstellung bis zum Trainingsende eingefroren und das Training läuft mit maximaler Geschwindigkeit.
+- **Daten monitoren:** Netzwerk während des Trainings sichtbar aktualisieren. Ohne Haken bleibt die Netzwerkdarstellung bis zum Trainingsende eingefroren und das Training läuft mit maximaler Geschwindigkeit. Beim Start eines neuen Trainings ist die Option immer ausgeschaltet und kann anschließend bewusst aktiviert werden.
 - **Fehlerkurve:** Verlauf ein- oder ausblenden.
 
 Trainingsziele sind **1 Epoche**, eine feste **Anzahl** oder **Bis Fehlergrenze**.
@@ -196,9 +196,11 @@ Trainingsziele sind **1 Epoche**, eine feste **Anzahl** oder **Bis Fehlergrenze*
 
 Die Y-Achse der Fehlerkurve kann linear oder logarithmisch dargestellt werden. Voll-, Kompakt- und Minimalansicht verändern nur die Anzeige, nicht den Trainingszustand.
 
-**Kurvenanzeige** oben im Ergebnisrahmen wechselt zwischen mittlerem Epochenfehler (MSE) und maximalem Einzelfehler in internen Netzwerten. Beide Verläufe werden beim Training aufgezeichnet und mit dem Lauf gespeichert; lange Verläufe werden wie bisher verdichtet. Das Umschalten ist während des Trainings möglich und verändert weder die Trainingsrechnung noch die MSE-Fehlergrenze. Epochen und Laufzeit teilen sich eine Zeile, sodass die Fenster- und Diagrammhöhe erhalten bleiben. Auch in der Trainingshistorie lässt sich die Fehlergröße wählen. Vergleichsläufe ohne den gewählten Verlauf bleiben ausgewählt, werden aber nicht gezeichnet und mit einem Strich sowie dem Hinweis „Kein Verlauf vorhanden“ gekennzeichnet. Bei fortgesetzten alten Läufen beginnt die Maximalfehlerkurve erst mit den neu trainierten Epochen.
+**Kurvenanzeige** oben im Ergebnisrahmen wechselt zwischen mittlerem Epochenfehler (MSE), maximalem Einzelfehler in internen Netzwerten und **Netzkennlinie**. MSE und maximaler Einzelfehler werden beim Training aufgezeichnet und mit dem Lauf gespeichert. Die Fehlergrenze gilt ausschließlich für den MSE. Für die Netzkennlinie werden Eingang, Ausgang und Bezugsdatensatz gewählt; nur der ausgewählte Eingang wird verändert. Sie zeigt den aktuellen Netzstand, wird nur bei ausgewählter Ansicht berechnet und verändert weder Training noch Gewichte oder Bias-Werte. Vergleichsläufe ohne den gewählten Verlauf bleiben ausgewählt, werden aber nicht gezeichnet und mit „Kein Verlauf vorhanden“ gekennzeichnet. Bei fortgesetzten alten Läufen beginnt die Maximalfehlerkurve erst mit den neu trainierten Epochen.
 
-**Vergleichsläufe…** im Bereich **Fehlerverlauf** öffnet eine kompakte Auswahl früherer Läufe mit Laufnummer, Datum, Epochenzahl und maximalem Einzelfehler am gespeicherten Laufende. Häkchen blenden bis zu drei Vergleichskurven ein oder aus, während das Training weiterläuft. Bei drei ausgewählten Läufen muss zunächst einer abgewählt werden. Die farbige Legende steht platzsparend in der oberen Zeile zwischen Vergleichsauswahl und Y-Achse. Der aktuelle Lauf bleibt kräftig blau; Vergleichskurven erscheinen dünner in anderen Farben und reichen höchstens bis zur aktuellen Epoche. Ein Klick auf den Lauf in der Legende blendet ihn aus. Für einen aussagekräftigen Vergleich müssen Trainingsdaten und Skalierung unverändert sein; die Zuordnung erfolgt anhand der in der Historie gespeicherten Trainingsdatei. Die Trainingshistorie dient weiterhin zum Verwalten und Wiederherstellen der Läufe.
+**Vergleichsläufe…** im Bereich **Fehlerverlauf** öffnet eine kompakte Auswahl früherer Läufe mit Laufnummer, Datum, Epochenzahl und maximalem Einzelfehler am gespeicherten Laufende. Häkchen blenden bis zu drei Vergleichskurven ein oder aus, während das Training weiterläuft. Bei drei ausgewählten Läufen muss zunächst einer abgewählt werden. Die farbige Legende steht platzsparend in der oberen Zeile zwischen Vergleichsauswahl und Y-Achse. Der aktuelle Lauf bleibt kräftig blau; Vergleichskurven erscheinen dünner in anderen Farben und reichen standardmäßig bis zur aktuellen Epoche. Ein Klick auf den Lauf in der Legende blendet ihn aus. Für einen aussagekräftigen Vergleich müssen Trainingsdaten und Skalierung unverändert sein; die Zuordnung erfolgt anhand der in der Historie gespeicherten Trainingsdatei. Die Trainingshistorie dient weiterhin zum Verwalten und Wiederherstellen der Läufe.
+
+**Gesamten Verlauf anzeigen** steht direkt neben **Vergleichsläufe…** und kann bereits ohne ausgewählten Vergleichslauf aktiviert werden. Die Option verlängert jeden später gewählten Vergleichslauf bis zu seiner gespeicherten letzten Epoche. Der längste sichtbare Lauf bestimmt dann die Epochenachse. Ohne Haken enden die Vergleichskurven bei der aktuellen Epoche. Werden alle Vergleichsläufe abgewählt, erscheint der aktuelle Lauf wieder über seine vollständige bisherige Dauer.
 
 # 21. Test und Analyse
 
@@ -207,16 +209,23 @@ Das Analysefenster vergleicht Soll- und Istwerte für Trainings- oder getrennte 
 - Datensatzvergleich,
 - Fehlerauswertung,
 - Soll-Ist-Diagramm,
+- Netzkennlinie,
 - Toleranzprüfung,
 - Einflussanalyse.
 
 Testdaten müssen dieselbe Spaltenstruktur und Zuordnung wie die Trainingsdaten besitzen. Sie prüfen das Netz, verändern aber keine Gewichte oder Bias-Werte.
+
+Bei umfangreichen Datensätzen zeigen Datensatzvergleich und Einflussanalyse während der Berechnung einen Fortschrittsbalken, der nach Abschluss wieder verschwindet. Die Netzwerkzeichnung im Hintergrund bleibt dabei eingefroren, damit die Auswertung schneller läuft. Die Datenquelleninformation wird bereits vor der Berechnung angezeigt.
+
+Im Soll-Ist-Diagramm kann ein Ausgang oder **Alle Outputs** gewählt werden. Auch die gemeinsame Ansicht besitzt eine Toleranzanzeige. Bei unterschiedlichen Einheiten verwendet sie eine einheitenunabhängige prozentuale Toleranz; die nicht passende Auswahl bleibt gesperrt.
 
 # 22. Netzwerk erproben
 
 Beim Erproben werden äußere Eingabewerte in ihren ursprünglichen Einheiten verändert. Das Netz führt sofort eine Vorwärtsrechnung aus und zeigt die resultierenden Outputs.
 
 Binäre Inputs werden geschaltet, analoge Inputs über Zahlenfelder oder Regler verändert. **Zwischenwerte anzeigen** aktualisiert zusätzlich die Rechenwerte im Eigenschaftenfenster. Das Experiment verändert keine Gewichte und keinen gespeicherten Lernzustand.
+
+Wertebereiche stehen in drei sauber ausgerichteten Spalten für Minimum, Trennzeichen und Maximum. Übliche Grenzen werden mit höchstens zwei Nachkommastellen angezeigt; sehr kleine Werte unter 0,01 bleiben in geeigneter Genauigkeit erhalten. Die Fensterhöhe richtet sich nach dem Inhalt und muss nicht unnötig vergrößert werden.
 
 # 23. Anwendungsansicht
 
@@ -234,15 +243,15 @@ Der **(i)-Button** links neben **Alles zeigen** ruft diese Einführung jederzeit
 
 Binäre Eingänge und Zellen des binären Eingabe-Arrays lassen sich nur im Modus **Erproben** schalten. Im Bearbeitungsmodus dienen Mausklicks ausschließlich der Gestaltung.
 
-Im Menü **Gestaltung** blendet **Raster anzeigen** ein Hilfsraster ein. Über **Rasterabstand…** wird dessen Abstand zwischen 5 und 200 Pixeln festgelegt. Das Raster wird mit dem Projekt gespeichert und ist ausschließlich im Modus **Bearbeiten** sichtbar; beim Erproben wird es automatisch ausgeblendet.
+Im Menü **Gestaltung** blendet **Raster anzeigen** ein Hilfsraster ein. Über **Rasterabstand…** wird dessen Abstand zwischen 5 und 200 Pixeln festgelegt. **Am Raster einrasten** richtet Elemente beim Einfügen, Verschieben und Ändern der Größe am sichtbaren Raster aus; dies gilt auch für Gruppen, Hintergründe und Linienendpunkte. Die Option wird mit dem Projekt gespeichert. Beim Erproben wird das Raster automatisch ausgeblendet. Positionen älterer Projekte ändern sich erst, wenn ein Element bearbeitet wird.
 
 Mit einem Rechtsklick auf eine freie Stelle können einzelne Eingänge und Ausgänge, das binäre Eingabe-Array, eine Grafik, Kommentare sowie Linien, Rechtecke und Kreise eingefügt werden. **Alle Ein- und Ausgänge hinzufügen** ergänzt in einem Schritt sämtliche noch nicht sichtbaren Neuronenkacheln, ohne vorhandene Kacheln zu verdoppeln. Nicht benötigte Ein- und Ausgänge lassen sich aus der Gestaltung entfernen, ohne die zugehörigen Neuronen aus dem Projekt zu löschen.
 
-Analoge Eingänge besitzen Zahlenfeld und Regler, binäre Eingänge einen Ein-/Aus-Schalter. Analoge Ausgänge können als Balken oder Zeigerinstrument dargestellt werden. Bei jedem binären Ausgang kann im eigenen Kontextmenü individuell gewählt werden, ob nur die Entscheidung oder zusätzlich Zwischenwert und daraus abgeleiteter Zustand angezeigt werden.
+Analoge Eingänge besitzen ein kompaktes, zentriertes Zahlenfeld und einen Regler, binäre Eingänge einen Ein-/Aus-Schalter. Analoge Ausgänge können als Balken oder Zeigerinstrument dargestellt werden; beide Skalen zeigen **0 %** bis **100 %**. Lange Namen und Einheiten passen sich an die Kartengröße an und bleiben vollständig als Hinweis verfügbar. Analoge Werte werden mit höchstens zwei Nachkommastellen angezeigt, Werte unter 0,01 bei Bedarf genauer. Bei jedem binären Ausgang kann im eigenen Kontextmenü individuell gewählt werden, ob nur die Entscheidung oder zusätzlich Zwischenwert und daraus abgeleiteter Zustand angezeigt werden.
 
 ## Grafik, Kommentare und Formen
 
-Eine Grafik kann aus einer Datei geladen, per Drag-and-drop abgelegt oder aus der Zwischenablage eingefügt werden. Beim Speichern wird sie in den Projektbereich übernommen. Kommentare enthalten frei formatierbaren Erklärungstext. Linien, Rechtecke und Kreise besitzen einstellbare Linien-, Flächen- und Transparenzfarben und liegen hinter den Bedienkacheln. Linien können am Ende eine Pfeilspitze tragen; **Pfeilrichtung umkehren** setzt die Spitze auf das jeweils andere Linienende.
+Eine Grafik kann aus einer Datei geladen, per Drag-and-drop abgelegt oder aus der Zwischenablage eingefügt werden. Beim Speichern wird sie in den Projektbereich übernommen. Kommentare enthalten frei formatierbaren Erklärungstext. Linien, Rechtecke und Kreise besitzen einstellbare Linien-, Flächen- und Transparenzfarben und liegen hinter den Bedienkacheln. Linien können am Ende eine Pfeilspitze tragen; **Pfeilrichtung umkehren** setzt die Spitze auf das jeweils andere Linienende. Eine nach Kategorien gegliederte Symbolbibliothek enthält auch logische Symbole. Dieselbe Auswahl erscheint beim Einfügen und bei **Symbol ändern…** im Kontextmenü.
 
 ## Auswählen, anordnen und speichern
 
@@ -301,6 +310,8 @@ Relative Verweise innerhalb eines strukturierten Projektordners erleichtern das 
 **Projektbeschreibung** speichert formatierten Text direkt im Projekt. Markierter Text kann unmittelbar in Schriftart, Schriftgröße, Fett, Kursiv und Unterstrichen geändert werden. Enthält eine Markierung unterschiedliche Formatierungen, zeigen die Bedienelemente keinen irreführenden Einzelwert. Tabulatoren, Zeilenumbrüche, Einzüge und eingefügte mathematische Schreibweisen bleiben erhalten.
 
 **Projektübersicht** fasst Struktur, Daten und Trainingszustand zusammen. Der **Projektablauf** führt als Navigator durch wichtige Arbeitsschritte.
+
+**Netzwerk prüfen…** zeigt Struktur, Datenzuordnung und festgestellte Hinweise in einem modalen Prüfungsfenster. Eine Schaltfläche zum erneuten Prüfen ist dort nicht erforderlich, weil das Projekt während des geöffneten Fensters nicht geändert werden kann. Nach einer Änderung wird die Prüfung erneut über das Netzwerkmenü geöffnet.
 
 Der Projektbericht kann als Word- oder PDF-Dokument exportiert werden. Sprache und Dateiformat richten sich nach den gewählten Einstellungen beziehungsweise dem Speicherdialog.
 

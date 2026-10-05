@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: analysisplot.py
 # Zweck: Erstellt Diagramme für Test-, Analyse- und Vergleichsergebnisse.
-# Letzte Änderung: 04.08.2026
+# Letzte Änderung: 03.10.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
@@ -680,7 +680,9 @@ class CharacteristicPlot(QWidget):
         self.update()
 
     def plot_rect(self):
-        bottom_margin = 92 if self.compact_footer_active() else 112
+        # Keep the complete footer, including legend text, visibly clear of
+        # the rounded lower frame in both the training and analysis views.
+        bottom_margin = 100 if self.compact_footer_active() else 120
         return QRectF(
             76,
             36,

@@ -1555,6 +1555,9 @@ angezeigt.
 ## Daten monitoren
 
 Mit der Option **Daten monitoren** wird gesteuert, ob die grafische Netzwerkdarstellung während des Trainings aktualisiert wird.
+Beim Start eines neuen Trainingslaufes ist die Option grundsätzlich
+ausgeschaltet, damit das Training ohne unnötige Zeichenarbeit beginnt. Sie kann
+für den laufenden Trainingslauf jederzeit eingeschaltet werden.
 
 ### Aktiviert
 
@@ -1577,7 +1580,34 @@ Mit der Option **Daten monitoren** wird gesteuert, ob die grafische Netzwerkdars
 
 ## Fehlerkurve anzeigen
 
-**Kurvenanzeige** oben im Ergebnisrahmen wechselt zwischen mittlerem Epochenfehler (MSE) und maximalem Einzelfehler in internen Netzwerten. Beide Verläufe werden beim Training aufgezeichnet und mit dem Lauf gespeichert; lange Verläufe werden wie bisher verdichtet. Das Umschalten ist während des Trainings möglich und verändert weder die Trainingsrechnung noch die MSE-Fehlergrenze. Epochen und Laufzeit teilen sich eine Zeile, sodass die Fenster- und Diagrammhöhe erhalten bleiben. Auch in der Trainingshistorie lässt sich die Fehlergröße wählen. Vergleichsläufe ohne den gewählten Verlauf bleiben ausgewählt, werden aber nicht gezeichnet und mit einem Strich sowie dem Hinweis „Kein Verlauf vorhanden“ gekennzeichnet. Bei fortgesetzten alten Läufen beginnt die Maximalfehlerkurve erst mit den neu trainierten Epochen.
+**Kurvenanzeige** oben im Ergebnisrahmen wechselt zwischen mittlerem
+Epochenfehler (MSE), maximalem Einzelfehler in internen Netzwerten und der
+**Netzkennlinie**. MSE und maximaler Einzelfehler werden beim Training
+aufgezeichnet und mit dem Lauf gespeichert; lange Verläufe werden verdichtet.
+Die eingestellte Fehlergrenze bezieht sich ausschließlich auf den MSE.
+
+Für die Netzkennlinie werden Eingang, Ausgang und Bezugsdatensatz gewählt. Der
+gewählte Eingang wird verändert, während alle übrigen Eingänge die Werte des
+Bezugsdatensatzes behalten. Die Kennlinie zeigt den aktuellen Netzstand und
+wird nur berechnet, wenn diese Ansicht ausgewählt ist. Die Auswahl verändert
+weder das Training noch Gewichte oder Bias-Werte.
+
+Über **Vergleichsläufe…** können bis zu drei kompatible frühere Läufe zusätzlich
+angezeigt werden. Der aktuelle Lauf erscheint kräftig blau, Vergleichsläufe
+erscheinen dünner in den Farben der Legende. Ein Klick auf einen
+Legendeneintrag blendet dessen Kurve aus. Vergleichsläufe ohne den ausgewählten
+Verlauf bleiben ausgewählt, werden jedoch mit **Kein Verlauf vorhanden**
+gekennzeichnet. Bei fortgesetzten älteren Läufen beginnt die Kurve des
+maximalen Einzelfehlers erst mit den neu trainierten Epochen.
+
+Direkt neben **Vergleichsläufe…** schaltet **Gesamten Verlauf anzeigen**
+zwischen zwei Vergleichsarten um. Die Option ist auch ohne ausgewählten
+Vergleichslauf bedienbar und kann deshalb bereits vor dem Start eines weiteren
+Laufes vorbereitet werden. Ohne Haken enden Vergleichskurven bei der aktuellen
+Epoche des aktiven Laufes. Mit Haken reicht jeder Vergleichslauf bis zu seiner
+gespeicherten letzten Epoche; der längste sichtbare Lauf bestimmt die
+Epochenachse. Werden alle Vergleichsläufe abgewählt, zeigt die Achse wieder den
+aktuellen Lauf über seine vollständige bisherige Dauer.
 
 Mit **Fehlerkurve während des Trainings anzeigen** wird gesteuert,
 ob der mittlere Epochenfehler als Diagramm dargestellt wird.
@@ -1826,9 +1856,24 @@ Das vollständige Analysefenster kann auf zwei Wegen geöffnet werden:
   in der Werkzeugleiste
 
 Beide Wege öffnen dasselbe Fenster mit **Datensatzvergleich**, **Fehlerauswertung**,
-**Soll-Ist-Diagramm**, **Toleranzprüfung** und **Einflussanalyse**. Dabei werden
+**Soll-Ist-Diagramm**, **Netzkennlinie**, **Toleranzprüfung** und
+**Einflussanalyse**. Dabei werden
 die zugeordneten Daten mit dem aktuellen Netzwerk ausgewertet, ohne Gewichte
 oder Bias-Werte zu verändern.
+
+Bei umfangreichen Datenmengen zeigt das Fenster während des
+Datensatzvergleichs und der Einflussanalyse einen Fortschrittsbalken mit dem
+berechneten Anteil. Nach Abschluss verschwindet der Balken wieder. Während
+dieser Auswertungen wird die Netzwerkzeichnung im Hintergrund nicht
+aktualisiert; das verkürzt die Rechenzeit und ändert das Ergebnis nicht. Die
+Information zur gewählten Datenquelle ist bereits vor Beginn der Berechnung
+sichtbar.
+
+Im **Soll-Ist-Diagramm** kann ein einzelner Ausgang oder **Alle Outputs**
+gewählt werden. Auch für die gemeinsame Ansicht lässt sich ein Toleranzbereich
+anzeigen. Haben die Ausgänge unterschiedliche Einheiten, verwendet die
+gemeinsame Darstellung eine einheitenunabhängige prozentuale Toleranz; die
+nicht passende Auswahl ist dann gesperrt.
 
 Das Ergebnisfenster verwendet kompakte, am Inhalt ausgerichtete Spalten. Die
 Fehlerspalte wird nicht über die restliche Fensterbreite gestreckt, sodass das
@@ -1954,6 +1999,10 @@ Ergebnisse und die vollständigen Zahlenwerte bleiben unverändert verfügbar.
 
 Analoge Ausgänge sind wie die Eingänge gegliedert. Neben Roh- und Y-Wert stehen
 Skalierung, Trainingsdatenbereich und ein nicht bedienbarer Ergebnisbalken.
+Die Bereichsgrenzen stehen für alle Zeilen in getrennten, sauber ausgerichteten
+Spalten für Minimum, Trennzeichen und Maximum. Übliche Werte werden mit
+höchstens zwei Nachkommastellen dargestellt; bei Beträgen unter 0,01 bleibt
+die notwendige zusätzliche Genauigkeit erhalten.
 Eine farbige LED zeigt, wie gut die aktuelle Kombination der Eingaben durch
 ähnliche Trainingsfälle gestützt wird. Sie ist keine Sollwertanzeige und kein
 Beweis für die Richtigkeit des Ergebnisses. Der Info-Button neben **Anzeige**
@@ -1970,7 +2019,8 @@ Ein-/Aus-Schaltern und Entscheidungen zurück. Analoge Spalten bleiben beim
 Umschalten unverändert. Ein Hinweis kennzeichnet die Zwischenwerte deutlich
 als Experiment außerhalb der regulären binären Trainingsfälle.
 
-Das Fenster kann in der Breite verändert werden. Lange Dateipfade werden
+Das Fenster kann in der Breite verändert werden; seine Höhe richtet sich eng
+nach dem benötigten Inhalt. Lange Dateipfade werden
 gekürzt angezeigt und erscheinen vollständig als Tooltip. Die zuletzt
 verwendete Fensterbreite wird beim nächsten Öffnen wiederhergestellt.
 
@@ -2020,7 +2070,13 @@ Oberfläche wird bewusst auf **Bearbeiten** umgeschaltet.
 
 Im Menü **Gestaltung** blendet **Raster anzeigen** ein projektbezogenes
 Hilfsraster ein. **Rasterabstand…** legt den Abstand zwischen 5 und 200 Pixeln
-fest. Beim Wechsel zu **Erproben** wird das Raster automatisch ausgeblendet.
+fest. Mit **Am Raster einrasten** können Elemente beim Einfügen, Verschieben
+und Ändern ihrer Größe an diesem Raster ausgerichtet werden. Das gilt auch für
+gemeinsam verschobene Elemente, Hintergründe sowie Linienendpunkte. Die Option
+wirkt nur, wenn das Raster sichtbar ist, und wird mit dem Projekt gespeichert.
+Beim Wechsel zu **Erproben** wird das Raster automatisch ausgeblendet. Bereits
+gespeicherte Positionen älterer Projekte bleiben unverändert, bis ein Element
+bearbeitet wird.
 
 ### Ein- und Ausgänge auswählen
 
@@ -2051,6 +2107,12 @@ werden in der gespeicherten Einheit und innerhalb des aus den Trainingsdaten
 bekannten Bereichs eingegeben. Binäre Eingänge erscheinen als eindeutige
 Ein-/Aus-Schalter.
 
+Lange Namen und Einheiten werden abhängig von der Kartengröße umgebrochen oder
+gekürzt; der vollständige Text bleibt als Hinweis verfügbar. Das Zahlenfeld
+bleibt dabei kompakt und zentriert. Analoge Werte werden normalerweise mit
+höchstens zwei Nachkommastellen angezeigt. Werte mit einem Betrag kleiner als
+0,01 behalten zusätzliche notwendige Stellen.
+
 Jede Karte kann im Bearbeitungsmodus verschoben und am Griff unten rechts in
 der Größe verändert werden. Eine Mindestgröße verhindert, dass Beschriftung,
 Zahlenfeld oder Regler unlesbar werden. Über das Kontextmenü kann die
@@ -2060,9 +2122,10 @@ Kachelfarbe geändert oder eine Größe auf weitere gemeinsam markierte Karten
 ### Ausgangskarten
 
 Analoge Ausgänge können wahlweise als Balken oder als halbkreisförmiger Zeiger
-dargestellt werden. Unter der Skala stehen Minimum und Maximum aus der
-Ausgabeskalierung; die aktuelle Ausgabe erscheint als Rohwert mit Einheit.
-Größe und Kachelfarbe sind wie bei Eingängen einstellbar.
+dargestellt werden. Beide Anzeigen verwenden gut sichtbare Endmarken von
+**0 %** bis **100 %**; die aktuelle Ausgabe erscheint als kompakter Rohwert mit
+Einheit. Lange Texte passen sich wie bei Eingangskarten an die verfügbare
+Breite an. Größe und Kachelfarbe sind wie bei Eingängen einstellbar.
 
 Binäre Ausgänge zeigen kompakt **Ein** oder **Aus**. Mit **Zwischenwerte
 binärer Ausgänge anzeigen** wird stattdessen der kontinuierliche Y-Wert als
@@ -2105,6 +2168,11 @@ oder transparente Füllung sind einstellbar. Formen liegen hinter den Ein- und
 Ausgabekarten. Linien werden über ihre beiden Endpunkte verändert; Rechtecke
 und Ellipsen über Größe und Position. Linien können am Ende eine Pfeilspitze
 tragen. **Pfeilrichtung umkehren** setzt die Spitze auf das andere Linienende.
+
+Zusätzlich steht eine nach Kategorien gegliederte Symbolbibliothek mit
+allgemeinen, technischen und logischen Symbolen zur Verfügung. Dieselbe
+Auswahl erscheint beim Einfügen eines Symbols und bei **Symbol ändern…** im
+Kontextmenü. Farbe, Größe und Drehung können anschließend angepasst werden.
 
 Markierte Kommentare und Formen können mit **Strg+C** und **Strg+V** kopiert
 werden. Ein Bild in der Windows-Zwischenablage hat beim Einfügen Vorrang; wird
@@ -2169,7 +2237,10 @@ Geprüft werden unter anderem:
 - nicht erreichbare Neuronen
 - vorhandener Pfad von Input zu Output
 
-Fehler werden in einem Meldungsfenster angezeigt.
+Fehler und Hinweise werden im Prüfungsfenster angezeigt. Eine erneute Prüfung
+innerhalb desselben modalen Fensters ist nicht erforderlich, weil das Projekt
+währenddessen nicht verändert werden kann. Nach Änderungen wird die
+Projektprüfung einfach erneut über das Netzwerkmenü geöffnet.
 
 ---
 
