@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.0-beta.07 – 10.10.2026
+
+- improve speed during training
+
 ## 0.10.0-beta.06 – 02.10.2026
 
 - add live network characteristic plots to the training and analysis views

@@ -53,9 +53,10 @@ class NeuralNetwork(QObject):
 
     network_cleared = Signal()
 
-    def __init__(self):
+    def __init__(self, translator=None):
 
         super().__init__()
+        self.translator = translator
 
         self.neurons = {}
         self.connections = {}
@@ -69,6 +70,10 @@ class NeuralNetwork(QObject):
         )
         self._prepared_training_order = None
 
+    def _error_text(self, key, fallback, **values):
+        translator = getattr(self, "translator", None)
+        return translator(key, **values) if callable(translator) else fallback.format(**values)
+
     def prepare_training_calculation(self):
         """Prüft die feste Struktur einmal und merkt ihre Rechenreihenfolge."""
 
@@ -76,8 +81,7 @@ class NeuralNetwork(QObject):
         if not validation_result["valid"]:
             error_text = "\n".join(validation_result["errors"])
             raise ValueError(
-                "Das Netzwerk kann nicht trainiert werden:\n"
-                f"{error_text}"
+                self._error_text("calculation.error.train_invalid", "Das Netzwerk kann nicht trainiert werden:\n{value0}", value0=error_text)
             )
         self._prepared_training_order = tuple(self.get_topological_order())
 
@@ -100,12 +104,12 @@ class NeuralNetwork(QObject):
         self.clear_prepared_training_calculation()
         if not isinstance(neuron, Neuron):
             raise TypeError(
-                "Es können nur Objekte vom Typ Neuron hinzugefügt werden."
+                self._error_text("calculation.error.add_neuron_type", "Es können nur Objekte vom Typ Neuron hinzugefügt werden.")
             )
 
         if neuron.id in self.neurons:
             raise ValueError(
-                f"Die Neuronen-ID {neuron.id} ist bereits vorhanden."
+                self._error_text("calculation.error.neuron_id", "Die Neuronen-ID {value0} ist bereits vorhanden.", value0=neuron.id)
             )
 
         self.neurons[neuron.id] = neuron
@@ -121,7 +125,7 @@ class NeuralNetwork(QObject):
         self.clear_prepared_training_calculation()
         if not isinstance(neuron, Neuron):
             raise TypeError(
-                "Es können nur Objekte vom Typ Neuron entfernt werden."
+                self._error_text("calculation.error.remove_neuron_type", "Es können nur Objekte vom Typ Neuron entfernt werden.")
             )
 
         if neuron.id not in self.neurons:
@@ -150,26 +154,22 @@ class NeuralNetwork(QObject):
         self.clear_prepared_training_calculation()
         if not isinstance(connection, Connection):
             raise TypeError(
-                "Es können nur Objekte vom Typ Connection "
-                "hinzugefügt werden."
+                self._error_text("calculation.error.add_connection_type", "Es können nur Objekte vom Typ Connection hinzugefügt werden.")
             )
 
         if connection.id in self.connections:
             raise ValueError(
-                f"Die Verbindungs-ID {connection.id} "
-                "ist bereits vorhanden."
+                self._error_text("calculation.error.connection_id", "Die Verbindungs-ID {value0} ist bereits vorhanden.", value0=connection.id)
             )
 
         if connection.source_neuron.id not in self.neurons:
             raise ValueError(
-                "Das Startneuron ist nicht Bestandteil "
-                "des Netzwerkes."
+                self._error_text("calculation.error.source_missing", "Das Startneuron ist nicht Bestandteil des Netzwerkes.")
             )
 
         if connection.target_neuron.id not in self.neurons:
             raise ValueError(
-                "Das Zielneuron ist nicht Bestandteil "
-                "des Netzwerkes."
+                self._error_text("calculation.error.target_missing", "Das Zielneuron ist nicht Bestandteil des Netzwerkes.")
             )
 
         if self.connection_exists(
@@ -177,8 +177,7 @@ class NeuralNetwork(QObject):
             connection.target_neuron
         ):
             raise ValueError(
-                "Zwischen diesen Neuronen besteht bereits "
-                "eine Verbindung in derselben Richtung."
+                self._error_text("calculation.error.duplicate_connection", "Zwischen diesen Neuronen besteht bereits eine Verbindung in derselben Richtung.")
             )
 
         restriction = self.connection_restriction(
@@ -187,19 +186,19 @@ class NeuralNetwork(QObject):
         )
         if restriction == "self":
             raise ValueError(
-                "Ein Neuron kann nicht mit sich selbst verbunden werden."
+                self._error_text("calculation.error.self_connection", "Ein Neuron kann nicht mit sich selbst verbunden werden.")
             )
         if restriction == "output_source":
             raise ValueError(
-                "Ausgangsneuronen dürfen keine ausgehenden Verbindungen besitzen."
+                self._error_text("calculation.error.output_source", "Ausgangsneuronen dürfen keine ausgehenden Verbindungen besitzen.")
             )
         if restriction == "input_target":
             raise ValueError(
-                "Eingangsneuronen dürfen keine eingehenden Verbindungen besitzen."
+                self._error_text("calculation.error.input_target", "Eingangsneuronen dürfen keine eingehenden Verbindungen besitzen.")
             )
         if restriction == "cycle":
             raise ValueError(
-                "Die Verbindung würde eine gerichtete Schleife erzeugen."
+                self._error_text("calculation.error.cycle", "Die Verbindung würde eine gerichtete Schleife erzeugen.")
             )
 
         self.connections[connection.id] = connection
@@ -214,8 +213,7 @@ class NeuralNetwork(QObject):
         self.clear_prepared_training_calculation()
         if not isinstance(connection, Connection):
             raise TypeError(
-                "Es können nur Objekte vom Typ Connection "
-                "entfernt werden."
+                self._error_text("calculation.error.remove_connection_type", "Es können nur Objekte vom Typ Connection entfernt werden.")
             )
 
         if connection.id not in self.connections:
@@ -907,8 +905,7 @@ class NeuralNetwork(QObject):
                 )
 
                 raise ValueError(
-                    "Das Netzwerk kann nicht berechnet werden:\n"
-                    f"{error_text}"
+                    self._error_text("calculation.error.forward_invalid", "Das Netzwerk kann nicht berechnet werden:\n{value0}", value0=error_text)
                 )
 
             calculation_order = self.get_topological_order()
@@ -917,8 +914,7 @@ class NeuralNetwork(QObject):
             if neuron.neuron_type == NeuronType.INPUT:
                 if not math.isfinite(neuron.input_value):
                     raise ValueError(
-                        f"Input-Neuron {neuron.name} enthält keinen "
-                        "endlichen Eingangswert."
+                        self._error_text("calculation.error.input_nonfinite", "Input-Neuron {value0} enthält keinen endlichen Eingangswert.", value0=neuron.name)
                     )
 
                 neuron.sum_value = 0.0
@@ -947,9 +943,7 @@ class NeuralNetwork(QObject):
 
             if not math.isfinite(neuron.sum_value):
                 raise ValueError(
-                    f"Die Berechnung von Neuron {neuron.name} ist "
-                    "numerisch instabil geworden. Prüfen Sie Skalierung "
-                    "und Lernrate."
+                    self._error_text("calculation.error.sum_unstable", "Die Berechnung von Neuron {value0} ist numerisch instabil geworden. Prüfen Sie Skalierung und Lernrate.", value0=neuron.name)
                 )
 
             neuron.output_value = self.apply_activation(
@@ -959,8 +953,7 @@ class NeuralNetwork(QObject):
 
             if not math.isfinite(neuron.output_value):
                 raise ValueError(
-                    f"Neuron {neuron.name} hat keinen endlichen "
-                    "Ausgabewert erzeugt."
+                    self._error_text("calculation.error.output_nonfinite", "Neuron {value0} hat keinen endlichen Ausgabewert erzeugt.", value0=neuron.name)
                 )
 
             neuron.error_value = 0.0
@@ -1002,6 +995,8 @@ class NeuralNetwork(QObject):
                 - output_count
                 - connection_count
         """
+
+        translator = translator or self.translator
 
         def text(key, default, **values):
             if callable(translator):

@@ -203,7 +203,10 @@ class ComparisonTests(unittest.TestCase):
         expanded_height = dialog.left_training_container.sizeHint().height()
         self.assertGreater(expanded_height, collapsed_height)
         self.assertTrue(resize_calls)
-        self.assertEqual(dialog.error_chart_group.height(), expanded_height)
+        self.assertEqual(
+            dialog.error_chart_group.height(),
+            dialog.left_training_container.height(),
+        )
         self.assertLess(
             dialog.error_chart_group.geometry().bottom(),
             dialog.training_control_group.geometry().top(),
@@ -244,21 +247,43 @@ class ComparisonTests(unittest.TestCase):
         delete(dialog)
         delete(parent)
 
-    def test_plateau_warning_reflows_chart_without_covering_controls(self):
+    def test_plateau_warning_keeps_chart_filling_shared_row(self):
         parent, dialog = make_dialog()
         dialog.available_window_size = lambda: (1900, 700)
         dialog.resize_full_view()
         dialog.show()
         self.app.processEvents()
         height_before = dialog.height()
-        chart_height_before = dialog.error_chart_group.height()
 
         dialog.set_plateau_warning_visible(True)
         self.app.processEvents()
         self.app.processEvents()
 
         self.assertEqual(dialog.height(), height_before)
-        self.assertLess(dialog.error_chart_group.height(), chart_height_before)
+        self.assertEqual(
+            dialog.error_chart_group.height(),
+            dialog.left_training_container.height(),
+        )
+        self.assertLessEqual(
+            dialog.error_chart_group.geometry().top()
+            - dialog.result_group.geometry().bottom()
+            - 1,
+            dialog.content_layout.verticalSpacing(),
+        )
+        for metric in ('mse', 'maximum', 'characteristic'):
+            dialog.error_metric_combo.setCurrentIndex(
+                dialog.error_metric_combo.findData(metric)
+            )
+            self.app.processEvents()
+            chart = (
+                dialog.training_characteristic_plot
+                if metric == 'characteristic'
+                else dialog.error_chart
+            )
+            self.assertLessEqual(
+                chart.geometry().bottom(),
+                dialog.error_chart_group.contentsRect().bottom(),
+            )
         self.assertLess(
             dialog.error_chart_group.geometry().bottom(),
             dialog.training_control_group.geometry().top(),
@@ -269,6 +294,129 @@ class ComparisonTests(unittest.TestCase):
         from shiboken6 import delete
         delete(dialog)
         delete(parent)
+
+    def test_plateau_warning_fills_shared_row_on_tall_window(self):
+        parent, dialog = make_dialog()
+        dialog.available_window_size = lambda: (1900, 1000)
+        dialog.resize_full_view()
+        dialog.show()
+        self.app.processEvents()
+
+        dialog.set_plateau_warning_visible(True)
+        self.app.processEvents()
+        self.app.processEvents()
+
+        self.assertEqual(
+            dialog.error_chart_group.height(),
+            dialog.left_training_container.height(),
+        )
+        self.assertLessEqual(
+            dialog.error_chart_group.geometry().top()
+            - dialog.result_group.geometry().bottom()
+            - 1,
+            dialog.content_layout.verticalSpacing(),
+        )
+        self.assertLessEqual(
+            dialog.training_control_group.geometry().top()
+            - dialog.error_chart_group.geometry().bottom()
+            - 1,
+            dialog.content_layout.verticalSpacing(),
+        )
+
+        dialog.close()
+        parent.close()
+        self.app.processEvents()
+        from shiboken6 import delete
+        delete(dialog)
+        delete(parent)
+
+    def test_xavier_plateau_hint_requires_zero_bias_and_tanh_or_sigmoid(self):
+        parent, dialog = make_dialog()
+        base_text = dialog.language.text("training.plateau_warning.text")
+        hint_text = dialog.language.text(
+            "training.plateau_warning.xavier_hint"
+        )
+
+        dialog.current_run_started_with_zero_biases = True
+        dialog.update_plateau_warning_text()
+        self.assertEqual(dialog.plateau_warning_label.text(), base_text)
+
+        hidden = Neuron(3, 150, 0, "Hidden")
+        hidden.neuron_type = NeuronType.HIDDEN
+        hidden.activation_function = "Tanh"
+        dialog.network.add_neuron(hidden)
+        state = dialog.capture_training_state()
+        self.assertTrue(dialog.training_state_uses_zero_biases(state))
+
+        dialog.current_run_started_with_zero_biases = True
+        dialog.update_plateau_warning_text()
+        self.assertIn(hint_text, dialog.plateau_warning_label.text())
+
+        hidden.bias = 0.1
+        self.assertFalse(
+            dialog.training_state_uses_zero_biases(
+                dialog.capture_training_state()
+            )
+        )
+        dialog.current_run_started_with_zero_biases = False
+        dialog.update_plateau_warning_text()
+        self.assertEqual(dialog.plateau_warning_label.text(), base_text)
+
+        hidden.bias = 0.0
+        hidden.activation_function = "ReLU"
+        dialog.current_run_started_with_zero_biases = True
+        dialog.update_plateau_warning_text()
+        self.assertEqual(dialog.plateau_warning_label.text(), base_text)
+
+        dialog.close()
+        parent.close()
+        self.app.processEvents()
+        from shiboken6 import delete
+        delete(dialog)
+        delete(parent)
+
+    def test_plateau_warning_is_not_blocked_below_quarter_maximum_error(self):
+        parent, dialog = make_dialog()
+        hidden = Neuron(3, 150, 0, "Hidden")
+        hidden.neuron_type = NeuronType.HIDDEN
+        hidden.activation_function = "Tanh"
+        dialog.network.add_neuron(hidden)
+        dialog.current_run_started_with_zero_biases = True
+        dialog.error_limit.setValue(0.001)
+
+        for epoch in range(1, 251):
+            dialog.update_plateau_detection(epoch, 0.0075, 0.177)
+
+        self.assertTrue(dialog.plateau_warning_detected)
+        self.assertFalse(dialog.plateau_warning_container.isHidden())
+        self.assertIn(
+            dialog.language.text("training.plateau_warning.xavier_hint"),
+            dialog.plateau_warning_label.text(),
+        )
+
+        dialog.close()
+        parent.close()
+        self.app.processEvents()
+        from shiboken6 import delete
+        delete(dialog)
+        delete(parent)
+
+    def test_bias_zero_is_described_as_standard(self):
+        for language in ("de", "en"):
+            manager = LanguageManager(language)
+            label = manager.text("training.initialization.bias_zero")
+            help_text = manager.text("training.info.initialization.text")
+            self.assertIn(
+                "Standard" if language == "de" else "standard",
+                label,
+            )
+            self.assertIn("Xavier/Glorot", help_text)
+            self.assertIn(
+                "Neues Training mit gleicher Initialisierung"
+                if language == "de"
+                else "New training with same initialization",
+                help_text,
+            )
 
     def test_new_training_disables_monitoring_but_continue_keeps_it(self):
         parent, dialog = make_dialog()

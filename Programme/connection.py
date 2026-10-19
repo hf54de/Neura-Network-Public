@@ -341,7 +341,21 @@ class Connection(QGraphicsPathItem):
         die sichtbare Gewichtsanzeige.
         """
 
+        self.set_weight(value, update_display=True)
+
+    def set_weight(self, value, update_display=True):
+        """Setzt das Gewicht und aktualisiert die Grafik bei Bedarf."""
+
         self._weight = float(value)
+
+        # Ein unsichtbares Grafikelement benötigt während des Trainings
+        # weder neue Linienfarben noch einen laufend neu gesetzten
+        # Gewichtstext. EditorScene gleicht beides beim Einblenden ab.
+        if update_display and self.isVisible():
+            self.refresh_weight_display()
+
+    def refresh_weight_display(self):
+        """Gleicht die sichtbare Verbindung mit dem Gewichtswert ab."""
 
         self.update_weight_pen()
         self.update_weight_text()

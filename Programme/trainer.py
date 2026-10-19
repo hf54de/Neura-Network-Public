@@ -57,7 +57,7 @@ class BackpropagationTrainer:
             or self.learning_rate <= 0.0
         ):
             raise ValueError(
-                "Die Lernrate muss größer als null sein."
+                self._error_text("calculation.error.learning_rate", "Die Lernrate muss größer als null sein.")
             )
 
         self.target_values = {}
@@ -68,6 +68,10 @@ class BackpropagationTrainer:
         self.visual_updates_enabled = True
         self.connection_velocities = {}
         self.bias_velocities = {}
+
+    def _error_text(self, key, fallback, **values):
+        translator = getattr(self.network, "translator", None)
+        return translator(key, **values) if callable(translator) else fallback.format(**values)
 
     def set_learning_rate(
         self,
@@ -86,7 +90,7 @@ class BackpropagationTrainer:
             or learning_rate <= 0.0
         ):
             raise ValueError(
-                "Die Lernrate muss größer als null sein."
+                self._error_text("calculation.error.learning_rate", "Die Lernrate muss größer als null sein.")
             )
 
         self.learning_rate = learning_rate
@@ -97,7 +101,7 @@ class BackpropagationTrainer:
         momentum = float(momentum)
         if not math.isfinite(momentum) or not 0.0 <= momentum <= 0.99:
             raise ValueError(
-                "Das Momentum muss zwischen 0 und 0,99 liegen."
+                self._error_text("calculation.error.momentum", "Das Momentum muss zwischen 0 und 0,99 liegen.")
             )
         self.momentum = momentum
 
@@ -214,8 +218,7 @@ class BackpropagationTrainer:
             dict
         ):
             raise TypeError(
-                "Die Sollwerte müssen als Dictionary "
-                "übergeben werden."
+                self._error_text("calculation.error.targets_type", "Die Sollwerte müssen als Dictionary übergeben werden.")
             )
 
         output_neurons = self.network.get_output_neurons()
@@ -248,8 +251,7 @@ class BackpropagationTrainer:
             )
 
             raise ValueError(
-                "Für folgende Output-Neuronen fehlt "
-                f"ein Sollwert: {missing_text}"
+                self._error_text("calculation.error.targets_missing", "Für folgende Output-Neuronen fehlt ein Sollwert: {value0}", value0=missing_text)
             )
 
         if unknown_output_ids:
@@ -261,9 +263,7 @@ class BackpropagationTrainer:
             )
 
             raise ValueError(
-                "Sollwerte wurden für unbekannte oder "
-                "nicht als Output definierte Neuronen "
-                f"angegeben: {unknown_text}"
+                self._error_text("calculation.error.targets_unknown", "Sollwerte wurden für unbekannte oder nicht als Output definierte Neuronen angegeben: {value0}", value0=unknown_text)
             )
 
         resolved_targets = {}
@@ -275,8 +275,7 @@ class BackpropagationTrainer:
 
             if not math.isfinite(target_value):
                 raise ValueError(
-                    f"Der Sollwert für {neuron.name} ist keine "
-                    "endliche Zahl."
+                    self._error_text("calculation.error.target_nonfinite", "Der Sollwert für {value0} ist keine endliche Zahl.", value0=neuron.name)
                 )
 
             resolved_targets[neuron.id] = target_value
@@ -307,8 +306,7 @@ class BackpropagationTrainer:
             )
 
             raise ValueError(
-                "Backpropagation ist nicht möglich:\n"
-                f"{error_text}"
+                self._error_text("calculation.error.backpropagation", "Backpropagation ist nicht möglich:\n{value0}", value0=error_text)
             )
 
         self.target_values = self._resolve_output_targets(
@@ -352,9 +350,7 @@ class BackpropagationTrainer:
                 )
             ):
                 raise ValueError(
-                    f"Das Training ist bei Output-Neuron {neuron.name} "
-                    "numerisch instabil geworden. Prüfen Sie Skalierung "
-                    "und Lernrate."
+                    self._error_text("calculation.error.output_unstable", "Das Training ist bei Output-Neuron {value0} numerisch instabil geworden. Prüfen Sie Skalierung und Lernrate.", value0=neuron.name)
                 )
 
             self.error_values[
@@ -414,9 +410,7 @@ class BackpropagationTrainer:
                 )
             ):
                 raise ValueError(
-                    f"Das Training ist bei Hidden-Neuron {neuron.name} "
-                    "numerisch instabil geworden. Prüfen Sie Skalierung "
-                    "und Lernrate."
+                    self._error_text("calculation.error.hidden_unstable", "Das Training ist bei Hidden-Neuron {value0} numerisch instabil geworden. Prüfen Sie Skalierung und Lernrate.", value0=neuron.name)
                 )
 
             self.error_values[
@@ -452,7 +446,7 @@ class BackpropagationTrainer:
 
         if not self.delta_values:
             raise ValueError(
-                "Es wurden noch keine Deltas berechnet."
+                self._error_text("calculation.error.no_deltas", "Es wurden noch keine Deltas berechnet.")
             )
 
         connection_updates = {}
@@ -496,9 +490,7 @@ class BackpropagationTrainer:
                 )
             ):
                 raise ValueError(
-                    "Das Training wurde abgebrochen, bevor ein ungültiges "
-                    f"Gewicht für Verbindung {connection.id} übernommen "
-                    "werden konnte. Prüfen Sie Skalierung und Lernrate."
+                    self._error_text("calculation.error.weight_unstable", "Das Training wurde abgebrochen, bevor ein ungültiges Gewicht für Verbindung {value0} übernommen werden konnte. Prüfen Sie Skalierung und Lernrate.", value0=connection.id)
                 )
 
         for neuron in self.network.get_neurons():
@@ -530,9 +522,7 @@ class BackpropagationTrainer:
                 )
             ):
                 raise ValueError(
-                    "Das Training wurde abgebrochen, bevor ein ungültiger "
-                    f"Bias für Neuron {neuron.name} übernommen werden "
-                    "konnte. Prüfen Sie Skalierung und Lernrate."
+                    self._error_text("calculation.error.bias_unstable", "Das Training wurde abgebrochen, bevor ein ungültiger Bias für Neuron {value0} übernommen werden konnte. Prüfen Sie Skalierung und Lernrate.", value0=neuron.name)
                 )
 
         # Der Schnappschuss entsteht vor der Parameteränderung. Dadurch kann
@@ -589,11 +579,9 @@ class BackpropagationTrainer:
         } if self.capture_step_details else None
 
         for connection in self.network.get_connections():
-            connection.weight = (
-                connection.weight
-                + connection_updates[
-                    connection.id
-                ]
+            connection.set_weight(
+                connection.weight + connection_updates[connection.id],
+                update_display=self.visual_updates_enabled
             )
             self.connection_velocities[connection.id] = (
                 0.0 if self.momentum == 0.0

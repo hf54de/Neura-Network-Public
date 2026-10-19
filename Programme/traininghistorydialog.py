@@ -512,7 +512,10 @@ class TrainingHistoryDialog(QDialog):
         self.language = language_manager or LanguageManager()
         self.t = self.language.text
         self.training_history = deepcopy(training_history)
-        self.restorable_run_ids = set(restorable_run_ids or ())
+        self.restorable_run_ids = set(restorable_run_ids or ()) - {
+            entry.get("run_id") for entry in self.training_history
+            if entry.get("invalidated_reason")
+        }
         self.active_run_id = active_run_id
         self.restore_run_id = None
         self.renumber_runs()
@@ -760,6 +763,8 @@ class TrainingHistoryDialog(QDialog):
             self.table.insertRow(row)
             is_active = entry["run_id"] == self.active_run_id
             run_text = str(entry["run_id"])
+            if entry.get("invalidated_reason"):
+                run_text += f" – {self.t('history.invalid')}"
             if is_active:
                 run_text += f" – {self.t('history.active')}"
             values = (
@@ -869,7 +874,10 @@ class TrainingHistoryDialog(QDialog):
                 item.setData(original_role, original_text)
             missing = self.chart.error_metric == "maximum" and not run.get("maximum_error_curve_points")
             item.setText(original_text + (" –" if missing else ""))
-            item.setToolTip(self.t("training.metric.unavailable") if missing else "")
+            reason = run.get("invalidated_reason")
+            item.setToolTip(self.t("history.invalid." + reason) if reason else (
+                self.t("training.metric.unavailable") if missing else ""
+            ))
         self.delete_button.setEnabled(bool(selected_ids))
         self.restore_button.setEnabled(
             len(selected_ids) == 1
@@ -919,8 +927,11 @@ class TrainingHistoryDialog(QDialog):
         ]
         self.renumber_runs()
         if active_run_deleted:
-            if self.training_history:
-                self.active_run_id = self.training_history[-1]["run_id"]
+            remaining = [entry for entry in self.training_history
+                         if entry["run_id"] in self.restorable_run_ids
+                         and not entry.get("invalidated_reason")]
+            if remaining:
+                self.active_run_id = remaining[-1]["run_id"]
                 self.restore_run_id = self.active_run_id
             else:
                 self.active_run_id = None
@@ -937,7 +948,10 @@ class TrainingHistoryDialog(QDialog):
 
         run_id = next(iter(selected_ids))
 
-        if run_id not in self.restorable_run_ids:
+        if run_id not in self.restorable_run_ids or any(
+            entry["run_id"] == run_id and entry.get("invalidated_reason")
+            for entry in self.training_history
+        ):
             return
 
         self.active_run_id = run_id
@@ -1005,7 +1019,8 @@ class TrainingHistoryDialog(QDialog):
                             entry["end_error"],
                             entry["maximum_absolute_error"],
                             entry["elapsed_seconds"],
-                            entry["status_text"]
+                            self.t("history.invalid") if entry.get("invalidated_reason")
+                            else entry["status_text"]
                         )
                     )
 

@@ -29,6 +29,14 @@ class TrainingDataIO:
 
     FILE_VERSION = 5
 
+    DATA_ORIGINS = (
+        "unspecified",
+        "empirical",
+        "formula",
+        "simulation",
+        "mixed"
+    )
+
     DATA_TYPES = (
         "analog",
         "binary"
@@ -282,6 +290,7 @@ class TrainingDataIO:
         return {
             "version": cls.FILE_VERSION,
             "name": str(name),
+            "data_origin": "unspecified",
             "columns": columns,
             "records": []
         }
@@ -368,9 +377,10 @@ class TrainingDataIO:
 
     @classmethod
     def save(cls, file_path, document, translator=None):
-        cls.validate(document, translator)
+        stored_document = cls.prepare_document(document)
+        cls.validate(stored_document, translator)
 
-        write_json_atomic(file_path, document)
+        write_json_atomic(file_path, stored_document)
 
     @classmethod
     def load(cls, file_path, translator=None):
@@ -407,11 +417,14 @@ class TrainingDataIO:
         )
 
         if version == cls.FILE_VERSION:
-            return document
+            prepared = copy.deepcopy(document)
+            prepared.setdefault("data_origin", "unspecified")
+            return prepared
 
         if version in (2, 3, 4):
             converted = copy.deepcopy(document)
             converted["version"] = cls.FILE_VERSION
+            converted.setdefault("data_origin", "unspecified")
 
             columns = converted.get("columns")
 
@@ -521,6 +534,7 @@ class TrainingDataIO:
                     "Trainingsdaten"
                 )
             ),
+            "data_origin": "unspecified",
             "columns": columns,
             "records": records
         }
@@ -555,6 +569,17 @@ class TrainingDataIO:
                     translator,
                     "data.validation.invalid_name",
                     "Die Trainingsdaten enthalten keinen gültigen Namen."
+                )
+            )
+
+        data_origin = document.get("data_origin", "unspecified")
+
+        if data_origin not in cls.DATA_ORIGINS:
+            raise ValueError(
+                cls.translated(
+                    translator,
+                    "data.validation.invalid_origin",
+                    "Die Herkunft der Trainingsdaten ist ungültig."
                 )
             )
 

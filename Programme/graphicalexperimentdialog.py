@@ -7,6 +7,7 @@
 # -------------------------------------------------------------------------------------------------
 import json
 import math
+from applicationcurve import CurvePlot, CurveController
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -86,6 +87,7 @@ from toolbaricons import ToolbarIcons as SharedToolbarIcons
 
 from numberformat import format_number
 from trainingdataio import TrainingDataIO
+from atomicjson import write_json_atomic
 from activationfunctions import ActivationFunctions
 
 
@@ -1301,7 +1303,11 @@ class ExperimentCard(QFrame):
                                 Qt.AlignmentFlag.AlignCenter,
                             )
                 elif tall:
-                    binary_grid.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+                    # Das Raster muss die volle Kartenbreite behalten. Eine
+                    # zentrierte Rasterbreite würde sich nach einem zuvor
+                    # gekürzten Namen richten und beim Vergrößern nicht mehr
+                    # auf den vollständigen Text anwachsen.
+                    binary_grid.setAlignment(Qt.AlignmentFlag(0))
                     binary_grid.setVerticalSpacing(0)
                     binary_grid.setRowMinimumHeight(1, 10)
                     binary_name.setMinimumWidth(28)
@@ -1593,6 +1599,20 @@ class ExperimentCard(QFrame):
         else:
             painter.setPen(Qt.PenStyle.NoPen)
         painter.drawPath(path)
+
+
+class CharacteristicCard(ExperimentCard):
+    """Resizable characteristic card using the shared design appearance."""
+
+    def __init__(self, translator, settings):
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(3, 3, 3, 3)
+        self.plot = CurvePlot(translator, settings, self)
+        layout.addWidget(self.plot)
+
+    def content_scale_for_size(self, width, height):
+        return 1.0  # Grow the plotting area, keep axis labels legible.
 
 
 class SimplifiedNetworkCard(ExperimentCard):
@@ -5560,6 +5580,7 @@ class GraphicalExperimentDialog(QDialog):
         self.input_cards = []
         self.output_cards = []
         self.comment_cards = []
+        self.curves = CurveController(self, CharacteristicCard, MovableCardProxy, calculate_forward_snapshot)
         self.shape_items = []
         self.input_array_card = None
         self.network_view_card = None
@@ -5601,13 +5622,13 @@ class GraphicalExperimentDialog(QDialog):
         # gesammelt nach dem aktuellen Maus-/Tastaturereignis ausgeführt.
         self.calculation_timer = QTimer(self)
         self.calculation_timer.setSingleShot(True)
-        self.calculation_timer.setInterval(20)
+        self.calculation_timer.setInterval(16)
         self.calculation_timer.timeout.connect(self.perform_calculation)
-        # Während ein Regler gezogen wird, wird höchstens etwa 25-mal pro
+        # Während ein Regler gezogen wird, wird höchstens etwa 60-mal pro
         # Sekunde mit dem jeweils neuesten Wert gerechnet. Das hält sowohl die
         # Mausbedienung als auch die Netzwerkanzeige sichtbar flüssig.
         self.drag_calculation_timer = QTimer(self)
-        self.drag_calculation_timer.setInterval(40)
+        self.drag_calculation_timer.setInterval(16)
         self.drag_calculation_timer.timeout.connect(
             self.perform_pending_drag_calculation
         )
@@ -5832,6 +5853,10 @@ class GraphicalExperimentDialog(QDialog):
             self.tr("Vereinfachte Netzwerkansicht", "Simplified network view")
         )
         self.network_view_action.setIcon(ToolbarIcons.icon("network_layout"))
+        self.characteristic_action = self.add_elements_menu.addAction(
+            self.tr("Netzkennlinie", "Network characteristic")
+        )
+        self.characteristic_action.triggered.connect(self.curves.add)
         self.add_elements_menu.addSeparator()
         self.add_comment_design_action = self.add_elements_menu.addAction(
             self.tr("Kommentar", "Comment")
@@ -6697,7 +6722,7 @@ class GraphicalExperimentDialog(QDialog):
     def remove_elements_from_design(self, proxies, confirm=True):
         targets = [
             proxy for proxy in proxies
-            if proxy.card_role in ("input", "output", "input_array", "network_view")
+            if proxy.card_role in ("input", "output", "input_array", "network_view", "characteristic")
             and not proxy.locked
         ]
         if not targets:
@@ -6781,6 +6806,7 @@ class GraphicalExperimentDialog(QDialog):
 
     def design_elements(self, visible_only=False):
         elements = list(self.shape_items) + list(self.comment_cards)
+        elements.extend(self.curves.proxies)
         elements.extend(proxy for proxy, _controls, _mapping in self.input_cards)
         elements.extend(proxy for proxy, _controls, _mapping in self.output_cards)
         if self.input_array_card is not None:
@@ -7436,6 +7462,14 @@ class GraphicalExperimentDialog(QDialog):
         input_values_action = output_values_action = None
         binary_intermediate_action = None
         rename_array_action = None
+        characteristic_settings_action = None
+        if proxy.card_role == "characteristic":
+            menu.addSeparator()
+            menu.addAction(self.copy_shapes_action)
+            characteristic_settings_action = menu.addAction(
+                self.tr("Kennlinie einstellen…", "Configure characteristic…")
+            )
+            characteristic_settings_action.setEnabled(not proxy.locked)
         if proxy.card_role == "comment":
             menu.addSeparator()
             menu.addAction(self.copy_shapes_action)
@@ -7444,7 +7478,7 @@ class GraphicalExperimentDialog(QDialog):
             delete_action = menu.addAction(self.tr("Kommentar löschen", "Delete comment"))
             delete_action.setIcon(ToolbarIcons.icon("delete"))
             delete_action.setEnabled(not proxy.locked)
-        elif proxy.card_role in ("input", "output", "input_array", "network_view"):
+        elif proxy.card_role in ("input", "output", "input_array", "network_view", "characteristic"):
             menu.addSeparator()
             if proxy.card_role == "input_array":
                 rename_array_action = menu.addAction(
@@ -7456,7 +7490,7 @@ class GraphicalExperimentDialog(QDialog):
             )
             remove_action.setIcon(ToolbarIcons.icon("delete"))
             remove_action.setEnabled(any(
-                item.card_role in ("input", "output", "input_array", "network_view")
+                item.card_role in ("input", "output", "input_array", "network_view", "characteristic")
                 and not item.locked
                 for item in self.selected_card_proxies()
             ))
@@ -7560,7 +7594,9 @@ class GraphicalExperimentDialog(QDialog):
             )
             pointer_action.setChecked(controls["display_mode"] == "pointer")
         selected = menu.exec(global_position)
-        if selected == front_action:
+        if characteristic_settings_action is not None and selected == characteristic_settings_action:
+            self.curves.configure(proxy)
+        elif selected == front_action:
             selected_elements = [
                 element for element in self.design_elements(visible_only=True)
                 if element.isSelected()
@@ -7729,7 +7765,8 @@ class GraphicalExperimentDialog(QDialog):
         )
         can_paste = has_copied_elements or has_image
         self.copy_shapes_action.setEnabled(
-            self.edit_mode and bool(selected_shapes or selected_comments)
+            self.edit_mode and bool(selected_shapes or selected_comments or
+                                    any(p.card_role == "characteristic" for p in selected))
         )
         self.paste_clipboard_action.setEnabled(self.edit_mode and can_paste)
         if has_copied_elements:
@@ -8683,8 +8720,9 @@ class GraphicalExperimentDialog(QDialog):
         if error is not None:
             self.status_label.setText(error)
             return
-        if pending is not None or request_number != self.forward_request_number:
-            return
+        # One worker completes requests in order. Display each finished result
+        # even while a newer request is pending, so slow networks do not freeze
+        # the outputs and working point until the slider is released.
         sums, values = result
         for neuron in self.network.get_neurons():
             if neuron.id not in values:
@@ -8693,6 +8731,7 @@ class GraphicalExperimentDialog(QDialog):
             neuron.output_value = values[neuron.id]
             if str(neuron.neuron_type.value).casefold() == "input":
                 neuron.input_value = values[neuron.id]
+        self.curves.update_outputs(values)
         self.update_forward_result_widgets()
 
     def update_forward_result_widgets(self):
@@ -8793,6 +8832,8 @@ class GraphicalExperimentDialog(QDialog):
             proxy.set_editable(self.edit_mode)
             controls["card"].setEnabled(True)
         for proxy in self.comment_cards:
+            proxy.set_editable(self.edit_mode)
+        for proxy in self.curves.proxies:
             proxy.set_editable(self.edit_mode)
         for item in self.shape_items:
             item.set_editable(self.edit_mode)
@@ -8974,10 +9015,12 @@ class GraphicalExperimentDialog(QDialog):
             item for item in self.scene.selectedItems()
             if isinstance(item, MovableCardProxy) and item.card_role == "comment"
         ]
-        if not shapes and not comments:
+        curves = [p for p in self.selected_card_proxies() if p.card_role == "characteristic"]
+        if not shapes and not comments and not curves:
             return
         payload = {
             "version": 1,
+            "characteristics": [self.curves.data(p) for p in curves],
             "shapes": [item.to_data() for item in shapes],
             "comments": [
                 self.comment_data_for_proxy(proxy) for proxy in comments
@@ -9003,17 +9046,22 @@ class GraphicalExperimentDialog(QDialog):
                 )
                 shapes = payload.get("shapes", [])
                 comments = payload.get("comments", [])
+                curves = payload.get("characteristics", [])
             except (UnicodeDecodeError, ValueError, AttributeError):
                 shapes = []
                 comments = []
+                curves = []
+            valid_curves = [data for data in curves if isinstance(data, dict)] if isinstance(curves, list) else []
             valid_shapes = [data for data in shapes if isinstance(data, dict)]
             valid_comments = [
                 data for data in comments if isinstance(data, dict)
             ]
-            if valid_shapes or valid_comments:
+            if valid_shapes or valid_comments or valid_curves:
                 self.begin_history_action()
                 self.scene.clearSelection()
                 pasted_items = []
+                for data in valid_curves:
+                    pasted_items.append(self.curves.create(data))
                 for data in valid_shapes:
                     copied = dict(data)
                     item = self.add_shape(
@@ -9125,7 +9173,7 @@ class GraphicalExperimentDialog(QDialog):
             if proxy.card_role == "comment" and proxy in self.comment_cards:
                 self.scene.removeItem(proxy)
                 self.comment_cards.remove(proxy)
-            elif proxy.card_role in ("input", "output", "input_array", "network_view"):
+            elif proxy.card_role in ("input", "output", "input_array", "network_view", "characteristic"):
                 proxy.saved_design_position = QPointF(proxy.pos())
                 proxy.setVisible(False)
                 proxy.setSelected(False)
@@ -9387,6 +9435,7 @@ class GraphicalExperimentDialog(QDialog):
                         proxy, cards.get(self.card_key(role, mapping))
                     )
             self.restore_comments(document.get("comments", []))
+            self.curves.restore(document.get("characteristics", []))
             self.restore_shapes(document.get("shapes", []))
             if self.input_array_card is not None:
                 self.apply_card_geometry(
@@ -9556,7 +9605,8 @@ class GraphicalExperimentDialog(QDialog):
                 "locked": proxy.locked,
             }
         return {
-            "version": 10,
+            "version": 11,
+            "characteristics": [self.curves.data(p) for p in self.curves.proxies if p.isVisible()],
             "cards": cards,
             "input_values": {
                 str(mapping["neuron"].id): float(
@@ -9618,9 +9668,7 @@ class GraphicalExperimentDialog(QDialog):
         }
         try:
             self.layout_file.parent.mkdir(parents=True, exist_ok=True)
-            self.layout_file.write_text(
-                json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            write_json_atomic(self.layout_file, document)
         except OSError:
             QMessageBox.warning(
                 self,
@@ -9688,6 +9736,7 @@ class GraphicalExperimentDialog(QDialog):
                     proxy, cards.get(self.card_key(role, mapping))
                 )
         self.restore_comments(document.get("comments", []))
+        self.curves.restore(document.get("characteristics", []))
         self.restore_shapes(document.get("shapes", []))
         if self.input_array_card is not None:
             array_geometry = document.get("input_array_element")
@@ -9769,10 +9818,7 @@ class GraphicalExperimentDialog(QDialog):
                 "width": int(self.width()),
                 "height": int(self.height()),
             }
-            self.layout_file.write_text(
-                json.dumps(document, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+            write_json_atomic(self.layout_file, document)
         except (OSError, ValueError):
             pass
 
@@ -9805,6 +9851,7 @@ class GraphicalExperimentDialog(QDialog):
     def stop_forward_executor(self):
         """Beendet den Rechendienst beim Schließen des Fensters ohne Wartezeit."""
 
+        self.curves.close()
         input_array_proxy = getattr(self, "input_array_card", None)
         input_array_card = (
             input_array_proxy.widget()

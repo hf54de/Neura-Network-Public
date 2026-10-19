@@ -70,7 +70,7 @@ class EditorScene(QGraphicsScene):
         self.t = self.language.text
 
         # Fachliches Netzwerkmodell
-        self.network = NeuralNetwork()
+        self.network = NeuralNetwork(translator=self.t)
 
         # Nächste freie Neuronen-ID
         self.next_id = 1
@@ -82,6 +82,7 @@ class EditorScene(QGraphicsScene):
         self.next_comment_id = 1
 
         # Darstellungsoption für Gewichtsanzeigen.
+        self.connections_visible = True
         self.weight_labels_visible = True
         self.focused_neuron_id = None
 
@@ -294,7 +295,7 @@ class EditorScene(QGraphicsScene):
             raise
 
         self.addItem(connection)
-        self.apply_connection_focus()
+        self._apply_connection_visibility(connection)
 
         if mark_as_modified:
             self.scene_content_changed.emit()
@@ -325,12 +326,29 @@ class EditorScene(QGraphicsScene):
 
         self.apply_connection_focus()
 
-        if visible:
+        if visible and self.connections_visible:
             Connection.request_scene_weight_label_layout(
                 self
             )
 
         self.update()
+
+    def set_connections_visible(self, visible):
+        """Blendet alle Verbindungen aus, ohne das Netzwerk zu verändern."""
+
+        visible = bool(visible)
+        if self.connections_visible == visible:
+            self.apply_connection_focus()
+            return
+
+        self.connections_visible = visible
+        if not visible:
+            self.cancel_connection()
+            self.focused_neuron_id = None
+            for connection in self.network.get_connections():
+                connection.setSelected(False)
+
+        self.apply_connection_focus()
 
     def set_weight_visualization_enabled(
         self,
@@ -1222,6 +1240,8 @@ class EditorScene(QGraphicsScene):
     def focus_connections_for_neuron(self, neuron):
         """Zeigt ausschließlich die direkten Verbindungen eines Neurons."""
 
+        if not self.connections_visible:
+            return
         self.focused_neuron_id = neuron.id
         self.apply_connection_focus()
 
@@ -1234,20 +1254,38 @@ class EditorScene(QGraphicsScene):
     def apply_connection_focus(self):
         """Wendet den aktuellen, rein visuellen Verbindungsfilter erneut an."""
 
-        focused_id = self.focused_neuron_id
         for connection in self.network.get_connections():
-            visible = (
+            self._apply_connection_visibility(connection)
+        if self.connections_visible and self.weight_labels_visible:
+            Connection.request_scene_weight_label_layout(self)
+        self.update()
+
+    def _apply_connection_visibility(self, connection):
+        """Wendet die globale Anzeige und den optionalen Fokus einzeln an."""
+
+        focused_id = self.focused_neuron_id
+        visible = (
+            self.connections_visible
+            and (
                 focused_id is None
                 or connection.source_neuron.id == focused_id
                 or connection.target_neuron.id == focused_id
             )
-            connection.setVisible(visible)
-            connection.set_weight_label_visible(
-                visible and self.weight_labels_visible
-            )
-        if self.weight_labels_visible:
-            Connection.request_scene_weight_label_layout(self)
-        self.update()
+        )
+
+        # Während eine Verbindung ausgeblendet ist, werden ihre Gewichte
+        # weiter trainiert, aber nicht laufend für die Grafik aufbereitet.
+        # Beim erneuten Einblenden wird deshalb einmal der aktuelle Zustand
+        # übernommen.
+        if visible and not connection.isVisible():
+            connection.refresh_weight_display()
+
+        connection.setVisible(visible)
+        connection.set_weight_label_visible(
+            visible and self.weight_labels_visible
+        )
+
+        return visible
 
     def keyPressEvent(self, event):
         if (

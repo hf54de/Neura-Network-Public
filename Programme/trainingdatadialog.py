@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QMenu,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QStyledItemDelegate,
     QTableWidget,
@@ -1201,9 +1202,40 @@ class TrainingDataDialog(QDialog):
         )
 
         self.file_label = QLabel(self)
-        self.main_layout.addWidget(
-            self.file_label
+        self.file_label.setMinimumWidth(0)
+        self.file_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
         )
+
+        self.data_origin_label = QLabel(
+            text("data.origin.label"),
+            self,
+        )
+        self.data_origin_combo = QComboBox(self)
+        self.data_origin_combo.setMinimumWidth(220)
+        self.data_origin_combo.setToolTip(
+            text("data.origin.tooltip")
+        )
+        for origin in TrainingDataIO.DATA_ORIGINS:
+            self.data_origin_combo.addItem(
+                text(f"data.origin.{origin}"),
+                origin,
+            )
+        self.data_origin_combo.currentIndexChanged.connect(
+            self.data_origin_changed
+        )
+
+        self.file_header_layout = QHBoxLayout()
+        self.file_header_layout.setContentsMargins(0, 0, 0, 0)
+        self.file_header_layout.addWidget(self.file_label, 1)
+        self.file_header_layout.addWidget(self.data_origin_label)
+        self.file_header_layout.addWidget(self.data_origin_combo)
+        self.main_layout.addLayout(self.file_header_layout)
+
+        origin_visible = self.data_kind == "training"
+        self.data_origin_label.setVisible(origin_visible)
+        self.data_origin_combo.setVisible(origin_visible)
 
         self.compatibility_layout = QHBoxLayout()
 
@@ -1583,6 +1615,34 @@ class TrainingDataDialog(QDialog):
             document_modified or mapping_repaired or names_synchronized
         )
         self.reset_edit_history()
+
+    def update_data_origin_control(self):
+        """Übernimmt die gespeicherte Herkunft in das Auswahlfeld."""
+
+        origin = self.document.get("data_origin", "unspecified")
+        index = self.data_origin_combo.findData(origin)
+        if index < 0:
+            index = self.data_origin_combo.findData("unspecified")
+
+        self.data_origin_combo.blockSignals(True)
+        self.data_origin_combo.setCurrentIndex(max(0, index))
+        self.data_origin_combo.blockSignals(False)
+
+    def data_origin_changed(self, _index):
+        """Speichert die Auswahl als Eigenschaft der Trainingsdatei."""
+
+        if self.loading_table or self.data_kind != "training":
+            return
+
+        origin = self.data_origin_combo.currentData()
+        if origin not in TrainingDataIO.DATA_ORIGINS:
+            origin = "unspecified"
+        if self.document.get("data_origin", "unspecified") == origin:
+            return
+
+        self.document["data_origin"] = origin
+        self.set_modified(True)
+        self.record_edit_history()
 
     def reconcile_document_mappings(self):
         """Repariert eindeutige Zuordnungen gegen das tatsächlich geladene Netz."""
@@ -2760,6 +2820,9 @@ class TrainingDataDialog(QDialog):
                 )
             )
         )
+        self.file_label.setToolTip(
+            str(self.current_file_path or "")
+        )
 
     def update_compatibility_label(self):
         network_input_count = len(
@@ -3026,6 +3089,7 @@ class TrainingDataDialog(QDialog):
             self._restoring_edit_history = False
 
         self.automatic_scaling_status_label.setVisible(False)
+        self.update_data_origin_control()
         self.update_headers()
         self.update_compatibility_label()
         self.update_calibration_source_label()
@@ -3130,6 +3194,7 @@ class TrainingDataDialog(QDialog):
         finally:
             self.loading_table = False
 
+        self.update_data_origin_control()
         self.update_headers()
         self.update_compatibility_label()
         self.update_calibration_source_label()
@@ -3734,6 +3799,11 @@ class TrainingDataDialog(QDialog):
 
         document = copy.deepcopy(
             self.document
+        )
+        document["data_origin"] = (
+            self.data_origin_combo.currentData()
+            if self.data_kind == "training"
+            else document.get("data_origin", "unspecified")
         )
         document["records"] = records
 

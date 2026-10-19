@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSlider,
     QSizePolicy,
     QStackedWidget,
@@ -36,7 +37,6 @@ from graphicalexperimentdialog import (
 )
 from numberformat import format_number
 from language import LanguageManager
-from settings import Settings
 
 
 def format_range_value(value):
@@ -293,6 +293,9 @@ class AnalogOutputBar(QProgressBar):
 class ForwardCalibrationDialog(QDialog):
     """Manuelle Vorwärtsberechnung mit kalibrierten Rohwerten."""
 
+    INITIAL_WIDTH = 700
+    LIST_VISIBLE_DATA_ROWS = 12
+
     calculation_updated = Signal()
 
     SHARED_COLUMN_WIDTHS = (95, 130, 105, 75)
@@ -335,6 +338,7 @@ class ForwardCalibrationDialog(QDialog):
         self.output_widgets = []
         self.calculation_performed = False
         self.experimental_binary_mode = False
+        self.initial_width_pending = True
         self.has_binary_columns = any(
             mapping.get("data_type") == "binary"
             for mapping in self.output_columns
@@ -344,9 +348,8 @@ class ForwardCalibrationDialog(QDialog):
             self.language.text("forward.window.title")
         )
         self.setModal(True)
-        self.ui_settings = Settings.get_ui_settings()
         self.resize(
-            self.ui_settings["forward_dialog_width"],
+            self.INITIAL_WIDTH,
             420
         )
 
@@ -383,6 +386,14 @@ class ForwardCalibrationDialog(QDialog):
         self.fixed_font = QFontDatabase.systemFont(
             QFontDatabase.SystemFont.FixedFont
         )
+
+        # Ein- und Ausgaben erhalten weiter unten jeweils einen eigenen
+        # Scrollbereich. Ein zusätzlicher gemeinsamer Scrollbereich würde nur
+        # einen dritten, inhaltlich bedeutungslosen Scrollbalken erzeugen.
+        self.content_widget = QWidget(self)
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(10)
 
         self.input_group = QGroupBox(
             self.language.text("forward.inputs.group")
@@ -552,7 +563,11 @@ class ForwardCalibrationDialog(QDialog):
                 )
                 self.sync_slider_from_value(widget_data, raw_value)
 
-        self.main_layout.addWidget(self.input_group)
+        self.input_scroll = self.create_table_scroll_area(
+            self.input_group,
+            "forwardInputScroll",
+        )
+        self.content_layout.addWidget(self.input_scroll)
 
         self.array_group = QGroupBox(
             self.language.text("forward.array.group")
@@ -565,7 +580,7 @@ class ForwardCalibrationDialog(QDialog):
         self.array_layout.setSpacing(6)
         self.array_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.array_group.setVisible(False)
-        self.main_layout.addWidget(self.array_group)
+        self.content_layout.addWidget(self.array_group)
 
         self.output_group = QGroupBox(
             self.language.text("forward.outputs.group")
@@ -695,7 +710,13 @@ class ForwardCalibrationDialog(QDialog):
         self.apply_shared_column_layout(self.input_layout)
         self.apply_shared_column_layout(self.output_layout)
 
-        self.main_layout.addWidget(self.output_group)
+        self.output_scroll = self.create_table_scroll_area(
+            self.output_group,
+            "forwardOutputScroll",
+        )
+        self.content_layout.addWidget(self.output_scroll)
+        self.content_layout.addStretch(1)
+        self.main_layout.addWidget(self.content_widget, 1)
 
         self.status_label = QLabel(
             self.language.text("forward.status.not_calculated")
@@ -1064,14 +1085,8 @@ class ForwardCalibrationDialog(QDialog):
         self.update_compact_text_heights()
 
     def done(self, result):
-        """Merkt sich die Breite; die Höhe folgt stets dem Inhalt."""
+        """Beendet den Dialog und räumt eine aktive Rastereingabe auf."""
 
-        if not self.isMaximized() and not self.isFullScreen():
-            self.ui_settings["forward_dialog_width"] = self.width()
-            try:
-                Settings.save_ui_settings(self.ui_settings)
-            except OSError:
-                pass
         controller = getattr(self, "array_paint_controller", None)
         if controller is not None:
             controller.deactivate()
@@ -1121,6 +1136,7 @@ class ForwardCalibrationDialog(QDialog):
         if not self.array_buttons:
             self.array_view_active = False
             self.array_group.setVisible(False)
+            self.input_scroll.setVisible(True)
             self.input_group.setVisible(True)
         self.update_array_buttons()
 
@@ -1172,6 +1188,7 @@ class ForwardCalibrationDialog(QDialog):
         """Wechselt zwischen tabellarischer Eingabe und 2D-Raster."""
 
         self.array_view_active = not self.array_view_active
+        self.input_scroll.setVisible(not self.array_view_active)
         self.input_group.setVisible(not self.array_view_active)
         self.array_group.setVisible(self.array_view_active)
         self.array_view_button.setText(
@@ -1204,18 +1221,56 @@ class ForwardCalibrationDialog(QDialog):
         self.main_layout.activate()
         for _pass in range(4):
             self.compact_visible_grid_groups()
+            self.limit_table_scroll_heights()
+            self.content_layout.activate()
             self.main_layout.activate()
-        requested_height = self.sizeHint().height()
+
         screen = QApplication.screenAt(self.frameGeometry().center())
         if screen is None:
             screen = QApplication.primaryScreen()
+
+        requested_width = self.width()
+        if self.initial_width_pending:
+            requested_width = self.minimum_table_content_width()
+            self.initial_width_pending = False
+            if requested_width != self.width():
+                self.resize(requested_width, self.height())
+                self.update_compact_text_heights()
+                self.content_layout.activate()
+                self.main_layout.activate()
+
+        content_height = self.content_layout.sizeHint().height()
+        chrome_height = max(
+            0,
+            self.sizeHint().height() - self.content_widget.sizeHint().height(),
+        )
+        requested_height = max(420, chrome_height + content_height)
         if screen is not None:
             requested_height = min(
                 requested_height,
                 max(420, screen.availableGeometry().height() - 60),
             )
-        self.resize(self.width(), requested_height)
+        self.resize(requested_width, requested_height)
         self.setFixedHeight(requested_height)
+
+    def minimum_table_content_width(self):
+        """Ermittelt die kleinste Startbreite ohne horizontales Scrollen."""
+
+        table_width = max(
+            self.input_group.minimumSizeHint().width(),
+            self.output_group.minimumSizeHint().width(),
+        )
+        scroll_chrome = max(
+            scroll.frameWidth() * 2
+            + scroll.verticalScrollBar().sizeHint().width()
+            for scroll in (self.input_scroll, self.output_scroll)
+        )
+        margins = self.main_layout.contentsMargins()
+        return max(
+            self.INITIAL_WIDTH,
+            self.minimumSizeHint().width(),
+            table_width + scroll_chrome + margins.left() + margins.right(),
+        )
 
     def compact_visible_grid_groups(self):
         """Beendet Tabellen-Gruppen direkt nach ihrer letzten sichtbaren Zeile."""
@@ -1287,6 +1342,86 @@ class ForwardCalibrationDialog(QDialog):
                 max(widget.geometry().bottom() for widget in final_widgets)
                 + layout.contentsMargins().bottom()
                 + bottom_clearance
+            )
+
+    def create_table_scroll_area(self, group, object_name):
+        """Kapselt eine Wertetabelle in einen eigenen Scrollbereich."""
+
+        scroll = QScrollArea(self.content_widget)
+        scroll.setObjectName(object_name)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        scroll.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        scroll.setWidget(group)
+        return scroll
+
+    def limit_table_scroll_heights(self):
+        """Zeigt je Tabelle höchstens zwölf Datenzeilen ohne Größenverlust."""
+
+        for scroll, group, layout in (
+            (self.input_scroll, self.input_group, self.input_layout),
+            (self.output_scroll, self.output_group, self.output_layout),
+        ):
+            if scroll.isHidden() or group.isHidden():
+                continue
+
+            layout.activate()
+            visible_rows = []
+            for row in range(layout.rowCount()):
+                widgets = [
+                    item.widget()
+                    for column in range(layout.columnCount())
+                    for item in (layout.itemAtPosition(row, column),)
+                    if (
+                        item is not None
+                        and item.widget() is not None
+                        and not item.widget().isHidden()
+                    )
+                ]
+                if widgets:
+                    visible_rows.append((row, widgets))
+
+            if not visible_rows:
+                continue
+
+            # Die erste Zeile enthält die Spaltenüberschriften. Bis zu zwölf
+            # Datensätze werden vollständig und ausdrücklich ohne vertikalen
+            # Scrollbalken gezeigt. Ab dem 13. Datensatz ist der eigene
+            # Scrollbalken der jeweiligen Tabelle immer sichtbar. Damit hängt
+            # die Entscheidung nicht von Rundungsdifferenzen der Qt-Geometrie
+            # ab.
+            data_row_count = max(0, len(visible_rows) - 1)
+            if data_row_count <= self.LIST_VISIBLE_DATA_ROWS:
+                scroll.setVerticalScrollBarPolicy(
+                    Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+                )
+                shown_rows = visible_rows
+            else:
+                scroll.setVerticalScrollBarPolicy(
+                    Qt.ScrollBarPolicy.ScrollBarAlwaysOn
+                )
+                shown_rows = visible_rows[:self.LIST_VISIBLE_DATA_ROWS + 1]
+            shown_bottom = max(
+                widget.geometry().bottom()
+                for _row, widgets in shown_rows
+                for widget in widgets
+            )
+            viewport_height = (
+                shown_bottom
+                + layout.contentsMargins().bottom()
+                + 2
+            )
+            full_height = group.height()
+            scroll.setFixedHeight(
+                min(full_height, viewport_height) + scroll.frameWidth() * 2
             )
 
     @staticmethod

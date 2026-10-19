@@ -2,6 +2,231 @@
 
 Diese integrierte Hilfe beantwortet die wichtigsten Fragen direkt im Programm. Das ausführliche bebilderte Handbuch kann über **Hilfe → Tutorials** als Word- oder PDF-Datei geöffnet werden.
 
+## Einordnung und besonderer Nutzen von NeuronNetz
+
+NeuronNetz ist ein transparentes Entwicklungs- und Lernwerkzeug für kleine
+neuronale Netze in der Automatisierungstechnik. Das Tool verbindet die
+Bearbeitung der Trainingsdaten, den grafischen Aufbau des Netzes, das Training,
+die Prüfung der Ergebnisse, die Gestaltung einer Anwendungsansicht und den
+Export des trainierten Netzes als SPS-Code in einer gemeinsamen
+Arbeitsumgebung.
+
+Im Mittelpunkt steht die Nachvollziehbarkeit. Der Anwender sieht nicht nur,
+dass ein neuronales Netz ein Ergebnis liefert, sondern kann untersuchen, wie
+dieses Ergebnis entsteht. Netzwerkstruktur, Neuronen, Verbindungen, Gewichte,
+Bias-Werte und Aktivierungsfunktionen bleiben sichtbar. Auch der Lernprozess
+kann anhand der Fehlerentwicklung, einzelner Datensätze und gespeicherter
+Vergleichsläufe verfolgt werden.
+
+### Ein durchgängiger Arbeitsablauf
+
+NeuronNetz begleitet ein Projekt von den Ausgangsdaten bis zur späteren
+Verwendung des trainierten Netzes:
+
+1. Trainingsdaten erstellen, importieren und beschreiben.
+2. Eingänge und Ausgänge den Neuronen zuordnen.
+3. Analoge Werte skalieren und binäre Werte kennzeichnen.
+4. Eine geeignete Netzwerkstruktur aufbauen.
+5. Das Netz trainieren und den Lernverlauf beobachten.
+6. Frühere Trainingsläufe miteinander vergleichen.
+7. Das Netz mit Trainingsdaten und getrennten Testdaten prüfen.
+8. Kennlinien, Abweichungen, Toleranzen und Einflüsse untersuchen.
+9. Eine übersichtliche Anwendungsansicht gestalten.
+10. Das geprüfte Netz als nachvollziehbaren SPS-Code exportieren.
+
+Dadurch bleiben Daten, Netzwerk und spätere Anwendung miteinander verbunden.
+Änderungen an der Datenstruktur, Skalierung oder Netzwerkstruktur werden
+sichtbar und können gezielt geprüft werden.
+
+### Sichtbarer und nachvollziehbarer Lernprozess
+
+Viele Werkzeuge behandeln ein trainiertes Modell hauptsächlich als fertige
+Datei. NeuronNetz legt den Schwerpunkt auf die einzelnen Schritte, die zu
+diesem Modell führen.
+
+Der Anwender kann unter anderem untersuchen:
+
+- wie das Netzwerk aufgebaut ist,
+- welche Neuronen und Verbindungen beteiligt sind,
+- wie sich Gewichte und Bias-Werte während des Trainings verändern,
+- wie Eingabewerte intern skaliert werden,
+- wie ein einzelner Datensatz vorwärts und rückwärts durch das Netz verarbeitet
+  wird,
+- wie sich der mittlere Fehler entwickelt,
+- wie groß der maximale Fehler eines einzelnen Datensatzes ist,
+- ob ein kleiner mittlerer Fehler möglicherweise größere Einzelabweichungen
+  verdeckt,
+- wie sich verschiedene Initialisierungen und Trainingsparameter auswirken.
+
+Gespeicherte Vergleichsläufe machen sichtbar, ob ein neuer Trainingslauf
+tatsächlich eine Verbesserung bringt. Die Fehlerkurven können über ihre gesamte
+Länge verglichen werden. Dadurch lassen sich unterschiedliche Lernraten,
+Initialisierungen und Netzstrukturen beurteilen, ohne nur das Endergebnis zu
+betrachten.
+
+### Umfassendere Prüfung des trainierten Netzes
+
+Ein kleiner mittlerer Trainingsfehler allein reicht nicht aus, um die Qualität
+eines Netzes zu beurteilen. Deshalb stellt NeuronNetz mehrere ergänzende
+Auswertungen bereit.
+
+Dazu gehören:
+
+- Datensatzvergleich,
+- Fehlerauswertung,
+- maximaler Einzelfehler,
+- Soll-Ist-Diagramm,
+- Netzkennlinie,
+- Toleranzprüfung,
+- Einflussanalyse,
+- Prüfung mit getrennten Testdaten.
+
+Die Netzkennlinie zeigt, wie der Ausgang auf Veränderungen eines ausgewählten
+Eingangs reagiert. Die Einflussanalyse macht sichtbar, welche Eingänge das
+gewählte Ausgangsneuron besonders stark beeinflussen. Mit der Toleranzprüfung
+lässt sich untersuchen, wie häufig und wie stark die berechneten Werte von den
+Sollwerten abweichen.
+
+Diese Funktionen helfen, unplausible Zusammenhänge, unzureichend abgedeckte
+Wertebereiche und einzelne problematische Datensätze zu erkennen. Sie ersetzen
+keine fachliche Prüfung, ermöglichen aber eine deutlich gründlichere
+Beurteilung als die alleinige Betrachtung des Trainingsfehlers.
+
+### Bedeutung der Trainingsdaten
+
+Die Aussagekraft eines neuronalen Netzes hängt wesentlich von seinen
+Trainingsdaten ab. Deshalb unterscheidet NeuronNetz die Herkunft der Daten:
+
+- **Empirische Messdaten**
+- **Formelbasiert erzeugte Daten**
+- **Simulationsdaten**
+- **Gemischte Daten**
+- **Nicht angegeben**
+
+Formelbasiert erzeugte Daten eignen sich besonders als Lernbeispiele. Sie
+zeigen anschaulich, dass ein neuronales Netz einen bekannten mathematischen
+Zusammenhang erlernen und annähern kann. Solche Projekte sind hilfreich, um
+Netzwerkstruktur, Skalierung, Training und Fehlerentwicklung zu verstehen.
+
+Für eine reale Steuerungsaufgabe ist die direkte Programmierung einer bekannten
+Formel jedoch häufig einfacher, genauer und leichter nachzuweisen. Ein
+neuronales Netz bietet vor allem dann einen praktischen Vorteil, wenn der
+Zusammenhang zwischen Eingängen und Ausgängen nicht vollständig als Formel
+beschrieben werden kann.
+
+Empirische Messdaten stammen beispielsweise aus Versuchen, Prüfständen,
+Laboruntersuchungen oder aufgezeichneten Anlagenzuständen. Sie enthalten häufig
+Messrauschen, Streuungen, ungleichmäßig verteilte Betriebspunkte und seltene
+Sonderfälle. Genau diese Eigenschaften machen sie für praktische Anwendungen
+interessant.
+
+Geeignete Anwendungsfälle sind beispielsweise:
+
+- Schätzung einer nur im Labor bestimmbaren Produktqualität aus laufend
+  verfügbaren Prozesswerten,
+- Erkennung von Motor-, Pumpen- oder Anlagenzuständen,
+- Abschätzung von Werkzeugverschleiß,
+- Vorhersage des tatsächlichen Energiebedarfs,
+- Ermittlung eines experimentell bestimmten Wirkungsgrades,
+- Erkennung von Raumbelegung aus mehreren Sensordaten,
+- Schätzung von Emissionen oder anderen schwer direkt messbaren Größen.
+
+Simulationsdaten können sinnvoll sein, wenn ein Prozessmodell komplexe
+Betriebszustände abbildet oder reale Messungen nur schwer, teuer oder gefährlich
+durchführbar sind. Dabei sollte dokumentiert werden, auf welchem Modell die
+Simulation beruht und welche Vereinfachungen vorgenommen wurden.
+
+Gemischte Daten verbinden beispielsweise reale Messwerte mit ergänzenden
+Simulationsdaten. In solchen Fällen muss erkennbar bleiben, welche Bestandteile
+gemessen und welche künstlich erzeugt wurden.
+
+Die Kennzeichnung der Datenherkunft verändert weder die Datensätze noch das
+Training. Sie hilft dem Anwender, den Zweck und die Aussagekraft eines Projekts
+richtig einzuordnen.
+
+### Training auf dem PC und Ausführung in der SPS
+
+Für industrielle Anwendungen ist ein kontrollierter Ablauf sinnvoll:
+
+1. Die SPS oder ein anderes Erfassungssystem sammelt Prozess- und Messdaten.
+2. Fehlende Sollwerte werden durch Laborergebnisse, Qualitätsprüfungen oder
+   bestätigte Anlagenzustände ergänzt.
+3. Die Daten werden außerhalb der SPS aufbereitet.
+4. NeuronNetz trainiert und prüft das Netzwerk.
+5. Der Anwender bewertet Trainings- und Testdaten, Fehlerverlauf und
+   Einzelfehler.
+6. Das freigegebene Netz wird als versionierter SPS-Funktionsbaustein
+   exportiert.
+7. Die SPS führt im Betrieb nur die Vorwärtsberechnung des geprüften Netzes aus.
+8. Neue Betriebsdaten können später für ein kontrolliertes Nachtraining
+   verwendet werden.
+
+Dieser Ablauf trennt das Lernen des Netzes von seinem produktiven Einsatz. Ein
+neuer Trainingsstand beeinflusst die Anlage erst, nachdem er geprüft und
+bewusst freigegeben wurde. Der deterministische SPS-Zyklus wird nicht durch
+einen laufenden Trainingsvorgang belastet.
+
+Ein selbstständiges und unkontrolliertes Weiterlernen in der SPS ist nicht das
+Ziel von NeuronNetz. Änderungen am Modell sollen nachvollziehbar, vergleichbar
+und bei Bedarf rückgängig zu machen sein.
+
+### Einordnung gegenüber industriellen KI-Lösungen
+
+Industrielle KI-Plattformen konzentrieren sich häufig auf die Ausführung bereits
+vorbereiteter Modelle, die Verwaltung vieler Modellversionen, leistungsfähige
+Hardware und die Einbindung in größere Daten- und Automatisierungsstrukturen.
+Dafür werden je nach Hersteller besondere Laufzeitkomponenten, Edge-Geräte oder
+zusätzliche Lizenzen benötigt.
+
+NeuronNetz verfolgt einen überschaubaren und transparenten Ansatz:
+
+| NeuronNetz | Typische industrielle KI-Plattform |
+|---|---|
+| Netzwerk kann grafisch aufgebaut werden | Modell wird häufig mit externen Werkzeugen erstellt |
+| Lernvorgang ist sichtbar und untersuchbar | Training bleibt meist außerhalb der Laufzeitumgebung |
+| Gewichte, Bias-Werte und Rechenschritte sind nachvollziehbar | Modell wird überwiegend als fertige Datei eingesetzt |
+| Trainingsdaten können direkt bearbeitet und skaliert werden | Schwerpunkt liegt häufig auf Datenanbindung und Modellbereitstellung |
+| Vergleichsläufe und Einzelfehler können untersucht werden | Schwerpunkt liegt häufig auf Betrieb und Verwaltung freigegebener Modelle |
+| Exportiert nachvollziehbaren Structured Text | Modell wird häufig durch eine besondere Laufzeit ausgeführt |
+| Keine zusätzliche KI-Laufzeit für den erzeugten SPS-Code erforderlich | Je nach Lösung werden Laufzeitlizenz oder Edge-Hardware benötigt |
+| Für kleine und verständliche Netze ausgelegt | Auch für große und komplexe Modelle geeignet |
+| Lern-, Analyse- und Engineeringwerkzeug | Industrielle Infrastruktur- und Ausführungsplattform |
+
+NeuronNetz ersetzt keine umfassende industrielle KI-Infrastruktur. Seine Stärke
+liegt in der Verbindung von Verständlichkeit, Datenbearbeitung, sichtbarem
+Training, ausführlicher Analyse und nachvollziehbarem SPS-Code.
+
+Das Tool nimmt damit eine Position zwischen einfachen Lernprogrammen und
+umfangreichen industriellen KI-Plattformen ein: Das Netz wird auf dem PC
+verständlich entwickelt und geprüft; das freigegebene Modell kann anschließend
+ohne besondere KI-Laufzeit als normaler SPS-Code ausgeführt werden.
+
+### Grenzen und Verantwortung
+
+Ein erfolgreiches Training beweist nicht automatisch, dass ein Netz für eine
+reale Anlage geeignet ist. Entscheidend sind die Qualität und
+Repräsentativität der Daten, die Abdeckung aller zulässigen Betriebszustände,
+getrennte Testdaten und eine fachliche Bewertung der Ergebnisse.
+
+Vor einem praktischen Einsatz müssen insbesondere folgende Fragen geklärt
+werden:
+
+- Sind alle relevanten Betriebsbereiche in den Daten vertreten?
+- Wurden Trainings- und Testdaten sinnvoll getrennt?
+- Sind Messfehler und Ausreißer geprüft worden?
+- Verhalten sich die Ausgänge auch zwischen den vorhandenen Datensätzen
+  plausibel?
+- Was geschieht bei Eingaben außerhalb des bekannten Datenbereichs?
+- Ist eine direkte Formel oder klassische Regelung möglicherweise besser
+  geeignet?
+- Wurde das exportierte Netz unter realistischen Bedingungen geprüft?
+- Sind die Anforderungen an Sicherheit, Dokumentation und Freigabe erfüllt?
+
+NeuronNetz unterstützt diese Beurteilung durch transparente Darstellung und
+verschiedene Prüfwerkzeuge. Die Verantwortung für Datenqualität, fachliche
+Plausibilität und den sicheren Einsatz des exportierten Netzes bleibt beim
+Anwender.
+
 ---
 
 # 1. Überblick
@@ -143,6 +368,8 @@ Ein bestehendes Netzwerk kann über **Netzwerk → Anordnen** neu angeordnet wer
 # 16. Trainingsdaten
 
 **Trainingsdaten → Trainingsdaten bearbeiten** öffnet die Tabelle. Jede Zeile ist ein Datensatz; jede Spalte gehört zu einem Input oder Output/Sollwert.
+
+Oben rechts kennzeichnet **Herkunft der Trainingsdaten**, wie die Werte entstanden sind: empirische Messdaten, formelbasiert erzeugte Daten, Simulationsdaten, gemischte Daten oder nicht angegeben. Neue und ältere Dateien verwenden zunächst **Nicht angegeben**. Die Auswahl wird in der `.nndata`-Datei gespeichert und im Trainingsfenster sowie in Trainingsberichten angezeigt.
 
 Mögliche Eingaben:
 

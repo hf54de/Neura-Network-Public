@@ -2,6 +2,213 @@
 
 This integrated help explains the principal workflows, windows, and controls directly in the program. The illustrated Word or PDF manual can additionally be opened through **Help → Tutorials**.
 
+## Positioning and Particular Benefits of NeuronNetz
+
+NeuronNetz is a transparent development and learning tool for small neural
+networks in automation engineering. It combines training-data preparation,
+graphical network design, training, result validation, application-view design,
+and the export of the trained network as PLC code in one working environment.
+
+Traceability is central to the tool. Users can see more than the fact that a
+neural network produces a result: they can examine how that result is produced.
+The network structure, neurons, connections, weights, bias values, and
+activation functions remain visible. The learning process can also be followed
+through error development, individual records, and saved comparison runs.
+
+### A Continuous Workflow
+
+NeuronNetz supports a project from the original data through to the later use
+of the trained network:
+
+1. Create, import, and describe training data.
+2. Assign inputs and outputs to neurons.
+3. Scale analog values and identify binary values.
+4. Build a suitable network structure.
+5. Train the network and observe its learning progress.
+6. Compare earlier training runs.
+7. Validate the network with training data and separate test data.
+8. Examine characteristic curves, deviations, tolerances, and influences.
+9. Design a clear application view.
+10. Export the validated network as traceable PLC code.
+
+This keeps the data, network, and subsequent application connected. Changes to
+the data structure, scaling, or network structure remain visible and can be
+checked deliberately.
+
+### A Visible and Traceable Learning Process
+
+Many tools primarily treat a trained model as a finished file. NeuronNetz
+focuses on the individual steps that lead to that model.
+
+Users can examine, among other things:
+
+- how the network is structured,
+- which neurons and connections are involved,
+- how weights and bias values change during training,
+- how input values are scaled internally,
+- how a single record is processed forward and backward through the network,
+- how the mean error develops,
+- how large the maximum error of an individual record is,
+- whether a small mean error may conceal larger individual deviations,
+- how different initializations and training parameters affect the result.
+
+Saved comparison runs show whether a new training run actually improves the
+result. Error curves can be compared over their full length. This makes it
+possible to assess different learning rates, initializations, and network
+structures instead of considering only the final result.
+
+### More Complete Validation of the Trained Network
+
+A small mean training error alone is not enough to assess the quality of a
+network. NeuronNetz therefore provides several complementary evaluations.
+
+These include:
+
+- record comparison,
+- error evaluation,
+- maximum individual error,
+- target-versus-actual diagram,
+- network characteristic curve,
+- tolerance test,
+- influence analysis,
+- validation with separate test data.
+
+The network characteristic curve shows how the output responds when a selected
+input changes. The influence analysis shows which inputs affect the selected
+output neuron most strongly. The tolerance test examines how often and by how
+much calculated values deviate from their target values.
+
+These functions help identify implausible relationships, insufficiently
+covered value ranges, and individual problematic records. They do not replace
+an expert assessment, but they permit a much more thorough evaluation than the
+training error alone.
+
+### Importance of the Training Data
+
+The significance of a neural network depends greatly on its training data.
+NeuronNetz therefore distinguishes the origin of the data:
+
+- **Empirical measurement data**
+- **Formula-generated data**
+- **Simulation data**
+- **Mixed data**
+- **Not specified**
+
+Formula-generated data are especially suitable for learning examples. They
+clearly demonstrate that a neural network can learn and approximate a known
+mathematical relationship. Such projects help users understand network
+structure, scaling, training, and error development.
+
+For a real control task, directly programming a known formula is often simpler,
+more accurate, and easier to verify. A neural network offers a practical
+advantage mainly when the relationship between inputs and outputs cannot be
+described completely by a formula.
+
+Empirical measurement data may come from experiments, test benches, laboratory
+tests, or recorded operating states. They often contain measurement noise,
+scatter, unevenly distributed operating points, and rare special cases. These
+properties are precisely what makes such data relevant to practical
+applications.
+
+Suitable applications include:
+
+- estimating product quality that can otherwise be determined only in a
+  laboratory from continuously available process values,
+- detecting the condition of motors, pumps, or plants,
+- estimating tool wear,
+- predicting actual energy demand,
+- determining an experimentally measured efficiency,
+- detecting room occupancy from several sensor values,
+- estimating emissions or other quantities that are difficult to measure
+  directly.
+
+Simulation data can be useful when a process model represents complex operating
+states or when real measurements are difficult, expensive, or dangerous to
+obtain. The underlying model and its simplifications should be documented.
+
+Mixed data may combine real measurements with supplementary simulation data.
+In such cases, it must remain clear which parts were measured and which were
+generated artificially.
+
+Identifying the data origin changes neither the records nor the training. It
+helps users assess the purpose and significance of a project correctly.
+
+### Training on the PC and Execution in the PLC
+
+A controlled workflow is appropriate for industrial applications:
+
+1. The PLC or another acquisition system collects process and measurement data.
+2. Missing target values are added from laboratory results, quality checks, or
+   confirmed plant conditions.
+3. The data are prepared outside the PLC.
+4. NeuronNetz trains and validates the network.
+5. The user evaluates training and test data, error development, and individual
+   errors.
+6. The approved network is exported as a versioned PLC function block.
+7. During operation, the PLC performs only the forward calculation of the
+   validated network.
+8. New operating data can later be used for controlled retraining.
+
+This workflow separates learning from productive use. A new training state
+affects the plant only after it has been validated and deliberately approved.
+The deterministic PLC cycle is not burdened by an active training process.
+
+Independent and uncontrolled continued learning in the PLC is not an objective
+of NeuronNetz. Changes to the model should remain traceable, comparable, and
+reversible when required.
+
+### Positioning in Relation to Industrial AI Solutions
+
+Industrial AI platforms often focus on executing prepared models, managing many
+model versions, using powerful hardware, and integrating with larger data and
+automation infrastructures. Depending on the manufacturer, this may require
+special runtime components, edge devices, or additional licenses.
+
+NeuronNetz follows a manageable and transparent approach:
+
+| NeuronNetz | Typical industrial AI platform |
+|---|---|
+| The network can be built graphically | The model is often created with external tools |
+| The learning process is visible and can be examined | Training generally remains outside the runtime environment |
+| Weights, bias values, and calculation steps are traceable | The model is mainly used as a finished file |
+| Training data can be edited and scaled directly | The focus is often on data connectivity and model deployment |
+| Comparison runs and individual errors can be examined | The focus is often on operation and management of approved models |
+| Exports traceable Structured Text | The model is often executed by a dedicated runtime |
+| No additional AI runtime is required for the generated PLC code | A runtime license or edge hardware may be required, depending on the solution |
+| Designed for small and understandable networks | Also suitable for large and complex models |
+| Learning, analysis, and engineering tool | Industrial infrastructure and execution platform |
+
+NeuronNetz does not replace a comprehensive industrial AI infrastructure. Its
+strength lies in combining comprehensibility, data preparation, visible
+training, detailed analysis, and traceable PLC code.
+
+The tool therefore occupies a position between simple learning programs and
+comprehensive industrial AI platforms: the network is developed and validated
+transparently on the PC, and the approved model can then be executed as normal
+PLC code without a dedicated AI runtime.
+
+### Limitations and Responsibility
+
+Successful training does not automatically prove that a network is suitable
+for a real plant. Data quality and representativeness, coverage of every
+permitted operating state, separate test data, and expert evaluation of the
+results are decisive.
+
+Before practical use, the following questions in particular must be resolved:
+
+- Are all relevant operating ranges represented in the data?
+- Have the training and test data been separated appropriately?
+- Have measurement errors and outliers been examined?
+- Do the outputs remain plausible between the available records?
+- What happens with inputs outside the known data range?
+- Would a direct formula or conventional control method be more suitable?
+- Has the exported network been tested under realistic conditions?
+- Have the requirements for safety, documentation, and approval been met?
+
+NeuronNetz supports this assessment through transparent presentation and
+several validation tools. Responsibility for data quality, technical
+plausibility, and the safe use of the exported network remains with the user.
+
 ---
 
 # 1. Overview
@@ -143,6 +350,8 @@ Use **Network → Arrange** to rearrange an existing network without changing we
 # 16. Training Data
 
 Open the table with **Training Data → Edit Training Data**. Each row is a record; each column belongs to an input or an output/target.
+
+At the upper right, **Training data origin** identifies how the values were obtained: empirical measurement data, formula-generated data, simulation data, mixed data, or not specified. New and older files initially use **Not specified**. The selection is stored in the `.nndata` file and shown in the Training window and training reports.
 
 Data can be:
 

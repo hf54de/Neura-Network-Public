@@ -100,6 +100,7 @@ from traininghistorydialog import TrainingHistoryDialog
 from trainingdatadialog import TrainingDataDialog
 from trainingdataio import TrainingDataIO
 from trainingdatamanager import TrainingDataManager
+from trainingvalidity import training_context, invalidate_history
 from toolbaricons import ToolbarIcons
 
 
@@ -156,6 +157,7 @@ class MainWindow(QMainWindow):
         # Projektbezogene Kennzahlen und kompakte Fehlerkurven
         # bereits ausgeführter Trainingsläufe.
         self.training_history = []
+        self._invalidated_training_runs = {}
         self.active_training_run_id = None
         self.analysis_tolerances = {}
 
@@ -2603,6 +2605,9 @@ class MainWindow(QMainWindow):
         self.scene.set_weight_labels_visible(
             self.display_settings["show_weights"]
         )
+        self.scene.set_connections_visible(
+            self.display_settings["show_connections"]
+        )
         self.scene.set_weight_visualization_enabled(
             self.display_settings["visualize_weights"]
         )
@@ -4082,6 +4087,7 @@ class MainWindow(QMainWindow):
     def finish_io_structure_change(self, adjust_data):
         """Entfernt alte Trainingszustände erst nach bestätigter I/O-Änderung."""
         self.training_history = []
+        self._invalidated_training_runs = {}
         self.active_training_run_id = None
         self.analysis_tolerances = {}
         self.set_project_modified(True)
@@ -5506,6 +5512,10 @@ class MainWindow(QMainWindow):
 
         dialog = NetworkCreateDialog(
             language_manager=self.language,
+            show_connections=self.display_settings.get(
+                "show_connections",
+                True
+            ),
             parent=self
         )
 
@@ -5534,6 +5544,13 @@ class MainWindow(QMainWindow):
                     ]
                 )
             )
+        )
+
+        self.display_settings["show_connections"] = bool(
+            settings["show_connections"]
+        )
+        self.scene.set_connections_visible(
+            self.display_settings["show_connections"]
         )
 
         self._history_timer.stop()
@@ -7069,6 +7086,7 @@ class MainWindow(QMainWindow):
         verwalteten Trainingsdatendatei.
         """
 
+        self.refresh_training_history_validity()
         self.update_status_summary()
         self.update_result_analysis_action_state()
         self.update_project_workflow()
@@ -7474,6 +7492,14 @@ class MainWindow(QMainWindow):
                     else self.language.text("common.unknown")
                 ),
                 "project_description": self.project_description,
+                "training_data_origin": self.language.text(
+                    "data.origin.{}".format(
+                        self.training_data_manager.document.get(
+                            "data_origin",
+                            "unspecified",
+                        )
+                    )
+                ),
                 "structure": overview["structure"],
                 "neurons": overview["neurons"],
                 "connections": overview["connections"],
@@ -7889,10 +7915,9 @@ class MainWindow(QMainWindow):
             self.training_step_completed
         )
 
-        previous_training_settings = dict(
-            self.training_settings
-        )
-        dialog.previous_training_settings = previous_training_settings
+        # Den bereits normalisierten Dialogzustand als Ausgangspunkt verwenden.
+        # So gilt das bloße Öffnen und Schließen nicht als Projektänderung.
+        dialog.previous_training_settings = dialog.get_training_settings()
         dialog.finished.connect(
             lambda result, current_dialog=dialog:
             self.training_dialog_finished(current_dialog)
@@ -8056,6 +8081,7 @@ class MainWindow(QMainWindow):
     def open_training_history(self):
         """Öffnet die projektbezogene Übersicht früherer Trainingsläufe."""
 
+        self.refresh_training_history_validity()
         previous_snapshot = self.capture_editor_snapshot()
         active_entry_before = next(
             (
@@ -8069,6 +8095,7 @@ class MainWindow(QMainWindow):
             entry.get("run_id")
             for entry in self.training_history
             if isinstance(entry, dict)
+            and self.training_run_matches_active_data(entry)
             and self.training_network_state_is_compatible(
                 entry.get("network_state")
             )
@@ -8097,6 +8124,7 @@ class MainWindow(QMainWindow):
 
             if (
                 selected_entry is None
+                or not self.training_run_matches_active_data(selected_entry)
                 or not self.restore_training_network_state(
                     selected_entry.get("network_state")
                 )
@@ -8161,29 +8189,30 @@ class MainWindow(QMainWindow):
 
         return None
 
+    def current_training_context(self):
+        return training_context(self.scene.network, self.training_data_manager.training_signature)
+
+    def refresh_training_history_validity(self):
+        if getattr(self, "_history_restoring", False) or not self.training_history:
+            return
+        context = self.current_training_context()
+        changed = invalidate_history(self.training_history, context, self._invalidated_training_runs)
+        if changed:
+            self.project_modified = True
+        if any(entry.get("run_id") == self.active_training_run_id
+               and entry.get("invalidated_reason") for entry in self.training_history):
+            self.active_training_run_id = None
+        return changed
+
     def training_run_matches_active_data(self, entry):
-        """Prüft, ob ein Historienlauf zur aktuell geladenen Trainingsdatei gehört."""
         if not isinstance(entry, dict) or not self.training_data_manager.has_document:
             return False
-        current_path = str(self.training_data_manager.file_path or "").strip()
-        stored_path = str(entry.get("training_data_path", "") or "").strip()
-        if current_path and stored_path:
-            if os.path.normcase(os.path.abspath(current_path)) == os.path.normcase(
-                os.path.abspath(stored_path)
-            ):
-                return True
-            # Nach dem Verschieben eines vollständigen Projektordners ist der
-            # frühere absolute Pfad nicht mehr gültig. Der im Lauf gespeicherte
-            # Anzeigename ordnet ihn weiterhin eindeutig dem Projekt zu.
-            return str(entry.get("training_data", "")) == str(
-                self.training_data_manager.display_name
-            )
-        return str(entry.get("training_data", "")) == str(
-            self.training_data_manager.display_name
-        )
+        return (not entry.get("invalidated_reason")
+                and entry.get("training_context") == self.current_training_context())
 
     def active_training_history_entry(self):
         """Liefert den aktiven oder neuesten passenden Trainingslauf."""
+        self.refresh_training_history_validity()
         matching = [
             entry for entry in self.training_history
             if self.training_run_matches_active_data(entry)
@@ -8225,7 +8254,8 @@ class MainWindow(QMainWindow):
             "neurons": [
                 {
                     "id": int(neuron.id),
-                    "bias": float(neuron.bias)
+                    "bias": float(neuron.bias),
+                    "activation": neuron.activation_function,
                 }
                 for neuron in neurons
             ],
@@ -8280,6 +8310,9 @@ class MainWindow(QMainWindow):
             return False
 
         for state in neuron_states:
+            if ("activation" in state and state["activation"]
+                    != current_neurons[state["id"]].activation_function):
+                return False
             try:
                 bias = float(state["bias"])
             except (KeyError, TypeError, ValueError):
@@ -8545,7 +8578,8 @@ class MainWindow(QMainWindow):
                 "initial_network_state": deepcopy(
                     result.get("initial_network_state")
                 ),
-                "network_state": self.capture_training_network_state()
+                "network_state": self.capture_training_network_state(),
+                "training_context": self.current_training_context(),
             }
         if continuation:
             # Nummer, ursprünglicher Startzeitpunkt und Startfehler gehören
@@ -8972,6 +9006,7 @@ class MainWindow(QMainWindow):
 
         finally:
             self._history_restoring = False
+        self.refresh_training_history_validity()
 
     def commit_explicit_history_step(
         self,
@@ -9321,6 +9356,7 @@ class MainWindow(QMainWindow):
         """
 
         if modified:
+            self.refresh_training_history_validity()
             if not self._history_restoring:
                 self.schedule_history_snapshot()
 
@@ -9436,6 +9472,8 @@ class MainWindow(QMainWindow):
         vollständig leeres Projekt zurück.
         """
 
+        self.training_history = []
+        self._invalidated_training_runs = {}
         self.scene.clear_project()
         self.training_data_manager.clear()
         self.test_data_manager.clear()
@@ -9444,6 +9482,7 @@ class MainWindow(QMainWindow):
             ProjectIO.default_training_settings()
         )
         self.training_history = []
+        self._invalidated_training_runs = {}
         self.active_training_run_id = None
         self.analysis_tolerances = {}
         self.plc_export_options = ProjectIO.normalize_plc_export_options()
@@ -10680,14 +10719,6 @@ class MainWindow(QMainWindow):
             ]
         )
 
-        self.training_history = deepcopy(
-            project_data.get(
-                "training_history",
-                []
-            )
-        )
-        self.active_training_run_id = project_data.get("active_training_run_id")
-
         self.analysis_tolerances = {}
         for entry in project_data.get("analysis_tolerances", []):
             if not isinstance(entry, dict) or entry.get("neuron_id") is None:
@@ -10724,9 +10755,9 @@ class MainWindow(QMainWindow):
         )
         active_history_entry = next(
             (
-                entry for entry in self.training_history
+                entry for entry in project_data.get("training_history", [])
                 if isinstance(entry, dict)
-                and entry.get("run_id") == self.active_training_run_id
+                and entry.get("run_id") == project_data.get("active_training_run_id")
             ),
             None,
         )
@@ -10799,6 +10830,16 @@ class MainWindow(QMainWindow):
 
         mapping_repairs = self.reconcile_active_data_mappings()
 
+        self.training_history = deepcopy(
+            project_data.get(
+                "training_history",
+                []
+            )
+        )
+        self.active_training_run_id = project_data.get("active_training_run_id")
+
+        history_invalidated = self.refresh_training_history_validity()
+
         self.reset_undo_history(
             mark_as_saved=True
         )
@@ -10809,6 +10850,7 @@ class MainWindow(QMainWindow):
                 or test_data_result["association_changed"]
                 or bool(parameter_repairs)
                 or mapping_repairs
+                or history_invalidated
             )
         )
 

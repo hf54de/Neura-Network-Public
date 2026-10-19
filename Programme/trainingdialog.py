@@ -191,6 +191,7 @@ class TrainingDialog(QDialog):
         self.current_run_can_continue = False
         self.current_run_stopped = False
         self.current_run_initial_state = None
+        self.current_run_started_with_zero_biases = False
 
         self.input_columns = []
         self.output_columns = []
@@ -344,6 +345,20 @@ class TrainingDialog(QDialog):
             self.fixed_font
         )
 
+        self.data_origin = QLineEdit()
+        self.data_origin.setReadOnly(True)
+        self.data_origin.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.data_origin.setFont(self.fixed_font)
+        data_origin = self.training_document.get(
+            "data_origin",
+            "unspecified",
+        )
+        if data_origin not in TrainingDataIO.DATA_ORIGINS:
+            data_origin = "unspecified"
+        self.data_origin.setText(
+            text(f"data.origin.{data_origin}")
+        )
+
         self.data_file.setText(self.project_directory_name())
         if self.training_file_path:
             self.data_file.setToolTip(str(self.training_file_path))
@@ -362,6 +377,11 @@ class TrainingDialog(QDialog):
         self.data_layout.addRow(
             text("training.data.records"),
             self.data_records
+        )
+
+        self.data_layout.addRow(
+            text("training.data.origin"),
+            self.data_origin
         )
 
         self.workload_label = QLabel(self.create_workload_summary())
@@ -1039,6 +1059,10 @@ class TrainingDialog(QDialog):
         self.error_chart_group.setFont(
             error_chart_group_font
         )
+        self.error_chart_group.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
 
         self.error_chart_layout = QVBoxLayout(
             self.error_chart_group
@@ -1705,7 +1729,7 @@ class TrainingDialog(QDialog):
         )
         self.content_layout.setRowStretch(
             1,
-            0
+            1
         )
 
         self.main_layout.addLayout(
@@ -1745,24 +1769,9 @@ class TrainingDialog(QDialog):
         self.left_training_layout.invalidate()
         self.left_training_container.updateGeometry()
         self.left_training_layout.activate()
-        plateau_height = 0
-        if not self.plateau_warning_container.isHidden():
-            plateau_height = (
-                self.plateau_warning_container.sizeHint().height()
-                + max(0, self.result_layout.verticalSpacing())
-            )
-        target_height = (
-            self.left_training_container.sizeHint().height()
-            - plateau_height
-        )
-        target_height = max(
-            self.error_chart_group.minimumSizeHint().height(),
-            target_height,
-        )
-        if target_height <= 0:
-            return
-        self.error_chart_group.setMinimumHeight(target_height)
-        self.error_chart_group.setMaximumHeight(target_height)
+        self.error_chart_group.setMinimumHeight(0)
+        self.error_chart_group.setMaximumHeight(16777215)
+        self.error_chart_group.updateGeometry()
         self.content_layout.invalidate()
 
     def schedule_training_layout_resize(self, _visible=None):
@@ -1782,16 +1791,12 @@ class TrainingDialog(QDialog):
 
         self.content_layout.activate()
         self.main_layout.activate()
-        available_row_height = self.left_training_container.height()
-        if (
-            available_row_height > 0
-            and self.error_chart_group.height() > available_row_height
-        ):
-            self.error_chart_group.setMinimumHeight(available_row_height)
-            self.error_chart_group.setMaximumHeight(available_row_height)
-            self.content_layout.invalidate()
-            self.content_layout.activate()
-            self.main_layout.activate()
+        self.error_chart_group.setMinimumHeight(0)
+        self.error_chart_group.setMaximumHeight(16777215)
+        self.error_chart_group.updateGeometry()
+        self.content_layout.invalidate()
+        self.content_layout.activate()
+        self.main_layout.activate()
 
     def release_window_size_limits(self):
         """Hebt die Grenzen vor dem Wechsel der Ansicht vorübergehend auf."""
@@ -2596,6 +2601,7 @@ class TrainingDialog(QDialog):
         )
         self.current_run_can_continue = False
         self.current_run_stopped = False
+        self.current_run_started_with_zero_biases = False
         self.update_training_run_label()
 
     def select_training_target(self, mode):
@@ -3009,6 +3015,9 @@ class TrainingDialog(QDialog):
     def show_restored_training_run(self, history_entry):
         """Zeigt Ergebnis und Fehlerkurve eines wiederhergestellten Laufs."""
 
+        if history_entry.get("invalidated_reason"):
+            self.clear_training_run_display()
+            return
         try:
             completed_epochs = int(history_entry.get("completed_epochs", 0))
             start_error = float(history_entry.get("start_error", 0.0))
@@ -3123,6 +3132,11 @@ class TrainingDialog(QDialog):
             if self.training_state_is_compatible(initial_state)
             else None
         )
+        self.current_run_started_with_zero_biases = (
+            self.training_state_uses_zero_biases(
+                self.current_run_initial_state
+            )
+        )
         self.next_training_run_id = max(
             self.next_training_run_id,
             (self.current_run_id or 0) + 1,
@@ -3173,6 +3187,7 @@ class TrainingDialog(QDialog):
         self.current_run_can_continue = False
         self.current_run_stopped = False
         self.current_run_initial_state = None
+        self.current_run_started_with_zero_biases = False
         self.next_training_run_id = 1
 
         self.error_chart_start_value = None
@@ -3717,7 +3732,7 @@ class TrainingDialog(QDialog):
     def update_epoch_time_display(self, seconds=None):
         """Dauer der letzten vollständigen Epoche einschließlich Fehlerauswertung."""
         self.result_epoch_time.setText(
-            f"{max(0.0, seconds):.1f} s" if seconds is not None else "–"
+            f"{max(0.0, seconds):.2f} s" if seconds is not None else "–"
         )
 
     def update_elapsed_time_display(
@@ -4231,10 +4246,34 @@ class TrainingDialog(QDialog):
         """Blendet den Hinweis ein und verteilt den verfügbaren Platz neu."""
 
         visible = bool(visible)
+        if visible:
+            self.update_plateau_warning_text()
         if self.plateau_warning_container.isHidden() == (not visible):
             return
         self.plateau_warning_container.setVisible(visible)
         self.schedule_training_layout_resize()
+
+    def update_plateau_warning_text(self):
+        """Ergänzt bei passender Startkonfiguration einen konkreten Hinweis."""
+
+        message = self.language.text("training.plateau_warning.text")
+        if self.should_show_xavier_plateau_hint():
+            message += "\n\n" + self.language.text(
+                "training.plateau_warning.xavier_hint"
+            )
+        self.plateau_warning_label.setText(message)
+
+    def should_show_xavier_plateau_hint(self):
+        """Prüft die für den Xavier-Hinweis relevante Startkonfiguration."""
+
+        if not self.current_run_started_with_zero_biases:
+            return False
+        return any(
+            neuron.neuron_type == NeuronType.HIDDEN
+            and str(neuron.activation_function).casefold()
+            in {"sigmoid", "tanh"}
+            for neuron in self.network.get_neurons()
+        )
 
     def dismiss_plateau_warning(self):
         """Schließt den Plateauhinweis für den aktuellen Trainingslauf."""
@@ -4282,7 +4321,6 @@ class TrainingDialog(QDialog):
         )
         meaningful_error_remains = (
             current_mean > self.error_limit.value()
-            and current_maximum >= 0.25
         )
         plateau_detected = (
             meaningful_error_remains
@@ -4528,17 +4566,16 @@ class TrainingDialog(QDialog):
             shuffled_records,
             start=1
         ):
-            self.result_status.setText(
-                self.language.text(
-                    "training.status.progress",
-                    epoch=epoch_number,
-                    total_epochs=total_epochs,
-                    record=record_index,
-                    total_records=record_count
+            if self.monitor_training_data.isChecked() and not fast:
+                self.result_status.setText(
+                    self.language.text(
+                        "training.status.progress",
+                        epoch=epoch_number,
+                        total_epochs=total_epochs,
+                        record=record_index,
+                        total_records=record_count
+                    )
                 )
-            )
-            # Paint the counter independently of throttled GUI event processing.
-            self.result_status.repaint()
 
             self.process_training_events()
 
@@ -4731,6 +4768,8 @@ class TrainingDialog(QDialog):
         )
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
+        dialog.adjustSize()
+        dialog.setFixedSize(dialog.size())
         dialog.exec()
 
     def get_target_range_warnings(self):
@@ -4911,7 +4950,8 @@ class TrainingDialog(QDialog):
 
             # Aktualisiert die sichtbare Gewichtsanzeige
             # an der Verbindung unmittelbar.
-            connection.update()
+            if connection.isVisible():
+                connection.update()
 
         for neuron in self.network.get_neurons():
             if neuron.neuron_type == NeuronType.INPUT:
@@ -4980,7 +5020,8 @@ class TrainingDialog(QDialog):
 
         return {
             "neurons": [
-                {"id": int(neuron.id), "bias": float(neuron.bias)}
+                {"id": int(neuron.id), "bias": float(neuron.bias),
+                 "activation": neuron.activation_function}
                 for neuron in sorted(
                     self.network.get_neurons(), key=lambda item: item.id
                 )
@@ -5012,11 +5053,39 @@ class TrainingDialog(QDialog):
             saved_connections = {int(item["id"]) for item in connections}
         except (KeyError, TypeError, ValueError):
             return False
+        current = {int(n.id): n for n in self.network.get_neurons()}
+        if any("activation" in item and (int(item["id"]) not in current
+               or item["activation"] != current[int(item["id"])].activation_function)
+               for item in neurons):
+            return False
         return (
             saved_neurons
             == {int(neuron.id) for neuron in self.network.get_neurons()}
             and saved_connections
             == {int(connection.id) for connection in self.network.get_connections()}
+        )
+
+    def training_state_uses_zero_biases(self, state):
+        """Erkennt, ob alle trainierbaren Biaswerte eines Zustands null sind."""
+
+        if not self.training_state_is_compatible(state):
+            return False
+        input_ids = {
+            int(neuron.id)
+            for neuron in self.network.get_neurons()
+            if neuron.neuron_type == NeuronType.INPUT
+        }
+        try:
+            biases = [
+                float(item["bias"])
+                for item in state["neurons"]
+                if int(item["id"]) not in input_ids
+            ]
+        except (KeyError, TypeError, ValueError):
+            return False
+        return bool(biases) and all(
+            math.isclose(bias, 0.0, abs_tol=1e-12)
+            for bias in biases
         )
 
     def restore_training_state(self, state):
@@ -5041,7 +5110,8 @@ class TrainingDialog(QDialog):
         self.network.reset_momentum_state()
         self.network.reset_runtime_values()
         for connection in connections.values():
-            connection.update()
+            if connection.isVisible():
+                connection.update()
         for neuron in neurons.values():
             neuron.update()
         return True
@@ -5063,6 +5133,7 @@ class TrainingDialog(QDialog):
             "current_run_can_continue",
             "current_run_stopped",
             "current_run_initial_state",
+            "current_run_started_with_zero_biases",
             "next_training_run_id",
             "training_elapsed_base",
         )
@@ -5357,6 +5428,11 @@ class TrainingDialog(QDialog):
 
         if not continue_existing:
             self.current_run_initial_state = self.capture_training_state()
+            self.current_run_started_with_zero_biases = (
+                self.training_state_uses_zero_biases(
+                    self.current_run_initial_state
+                )
+            )
 
         self.is_training = True
         self.stop_requested = False
@@ -5436,13 +5512,6 @@ class TrainingDialog(QDialog):
                 self.record_maximum_error(current_epoch, maximum_absolute_error)
 
                 completed_epochs = current_epoch
-                # Both numeric metrics describe the same evaluated epoch,
-                # independently of the selected curve and network monitoring.
-                self.result_mse.setText(format_number(mean_squared_error))
-                self.result_max_error.setText(format_number(maximum_absolute_error))
-                self.result_epochs.setText(str(completed_epochs))
-                self.error_chart_current_value = mean_squared_error
-                self.update_error_chart_summary()
                 self.update_plateau_detection(
                     completed_epochs,
                     mean_squared_error,
@@ -5522,6 +5591,21 @@ class TrainingDialog(QDialog):
 
                 if visible_update_due:
                     last_visible_refresh = current_time
+                    # Die sichtbaren Ergebnisfelder werden im schnellen Modus
+                    # zeitlich gebündelt. Alle Fehler- und Kurvenwerte werden
+                    # weiterhin für jede einzelne Epoche erfasst.
+                    self.result_mse.setText(
+                        format_number(mean_squared_error)
+                    )
+                    self.result_max_error.setText(
+                        format_number(maximum_absolute_error)
+                    )
+                    self.result_epochs.setText(
+                        str(completed_epochs)
+                    )
+                    self.error_chart_current_value = mean_squared_error
+                    self.update_error_chart_summary()
+
                     if self.monitor_training_data.isChecked():
                         # Nur die grafische Netzwerkdarstellung
                         # wird bei ausgeschaltetem Monitoring
@@ -5610,7 +5694,8 @@ class TrainingDialog(QDialog):
             # erreichten Zustand, ohne die Trainingsparameter zu verändern.
             self.calculate_dataset_metrics(update_display=True)
             for connection in self.network.get_connections():
-                connection.update()
+                if connection.isVisible():
+                    connection.update()
             for neuron in self.network.get_neurons():
                 neuron.update()
 
@@ -5646,6 +5731,13 @@ class TrainingDialog(QDialog):
         self.error_chart_current_value = mean_squared_error
         self.update_error_chart_summary()
         self.refresh_training_characteristic()
+
+        # Die grafische Darstellung wird einmalig mit dem Endstand
+        # abgeglichen. Das stellt auch nach einem Umschalten des Monitorings
+        # während des Laufes eine vollständige Endanzeige sicher.
+        for connection in self.network.get_connections():
+            if connection.isVisible():
+                connection.refresh_weight_display()
 
         if training_stopped:
             status_text = self.language.text("training.status.user_aborted")

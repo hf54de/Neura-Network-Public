@@ -41,7 +41,7 @@ class StartSplash(QSplashScreen):
         self.program_version = program_version
         self.status_text = ""
         pixmap = self.create_pixmap(program_version)
-        super().__init__(pixmap, Qt.WindowType.WindowStaysOnTopHint)
+        super().__init__(pixmap)
 
     def create_pixmap(self, program_version):
         pixmap = QPixmap(self.WIDTH, self.HEIGHT)

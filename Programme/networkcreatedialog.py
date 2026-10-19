@@ -27,9 +27,12 @@ class NetworkCreateDialog(QDialog):
     Erfasst die Struktur eines automatisch zu erzeugenden Netzwerkes.
     """
 
+    CONNECTION_WARNING_THRESHOLD = 2000
+
     def __init__(
         self,
         language_manager=None,
+        show_connections=True,
         parent=None
     ):
         super().__init__(parent)
@@ -204,8 +207,20 @@ class NetworkCreateDialog(QDialog):
             self.t("network.create.training_data_tooltip")
         )
 
+        self.show_connections = QCheckBox(
+            self.t("network.create.show_connections")
+        )
+        self.show_connections.setChecked(bool(show_connections))
+        self.show_connections.setToolTip(
+            self.t("network.create.show_connections_tooltip")
+        )
+
         self.options_layout.addWidget(
             self.fully_connected
+        )
+
+        self.options_layout.addWidget(
+            self.show_connections
         )
 
         self.options_layout.addWidget(
@@ -219,6 +234,14 @@ class NetworkCreateDialog(QDialog):
         self.summary_label.setAlignment(
             Qt.AlignmentFlag.AlignLeft
             | Qt.AlignmentFlag.AlignTop
+        )
+
+        self.connection_warning_label = QLabel()
+        self.connection_warning_label.setWordWrap(True)
+        self.connection_warning_label.setStyleSheet(
+            "QLabel { background-color: #fff3cd; color: #7a4b00; "
+            "border: 1px solid #e2b84b; border-radius: 5px; "
+            "padding: 8px; }"
         )
 
         self.button_box = QDialogButtonBox(
@@ -257,6 +280,10 @@ class NetworkCreateDialog(QDialog):
         )
 
         self.main_layout.addWidget(
+            self.connection_warning_label
+        )
+
+        self.main_layout.addWidget(
             self.button_box
         )
 
@@ -278,6 +305,10 @@ class NetworkCreateDialog(QDialog):
         )
 
         self.fully_connected.toggled.connect(
+            self.update_summary
+        )
+
+        self.show_connections.toggled.connect(
             self.update_summary
         )
 
@@ -388,6 +419,18 @@ class NetworkCreateDialog(QDialog):
             )
         )
 
+        show_warning = (
+            self.show_connections.isChecked()
+            and connection_count >= self.CONNECTION_WARNING_THRESHOLD
+        )
+        self.connection_warning_label.setText(
+            self.t(
+                "network.create.connection_warning",
+                connections=connection_count
+            )
+        )
+        self.connection_warning_label.setVisible(show_warning)
+
     def get_settings(self):
         """
         Liefert die gewählten Einstellungen.
@@ -417,6 +460,9 @@ class NetworkCreateDialog(QDialog):
             ),
             "fully_connected": (
                 self.fully_connected.isChecked()
+            ),
+            "show_connections": (
+                self.show_connections.isChecked()
             ),
             "create_training_data": (
                 self.create_training_data.isChecked()

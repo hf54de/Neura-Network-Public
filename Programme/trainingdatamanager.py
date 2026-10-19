@@ -11,6 +11,7 @@ import os
 from PySide6.QtCore import QObject, Signal
 
 from trainingdataio import TrainingDataIO
+from trainingvalidity import data_signature
 from language import LanguageManager
 
 
@@ -43,6 +44,7 @@ class TrainingDataManager(QObject):
         self.t = self.language.text
 
         self._document = None
+        self.training_signature = None
         self._file_path = None
         self._modified = False
 
@@ -120,6 +122,7 @@ class TrainingDataManager(QObject):
 
     def clear(self):
         self._document = None
+        self.training_signature = None
         self._file_path = None
         self._modified = False
 
@@ -146,6 +149,7 @@ class TrainingDataManager(QObject):
 
         TrainingDataIO.validate(prepared_document, translator=self.t)
 
+        self.training_signature = data_signature(prepared_document)
         self._document = prepared_document
         self._file_path = (
             str(file_path)

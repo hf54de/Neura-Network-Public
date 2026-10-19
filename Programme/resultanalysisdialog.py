@@ -15,6 +15,7 @@ from pathlib import Path
 from PySide6.QtCore import (
     QByteArray,
     QBuffer,
+    QEvent,
     QEventLoop,
     QIODevice,
     QMarginsF,
@@ -41,6 +42,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QTabWidget,
     QTableWidget,
@@ -55,6 +57,49 @@ from numberformat import format_number
 from trainingdataio import TrainingDataIO
 from analysisplot import CharacteristicPlot, FeatureImportancePlot, SollIstPlot
 from graphicalexperimentdialog import show_yellow_information_dialog
+
+
+class FillingErrorTable(QTableWidget):
+    """Distribute unused viewport width without enlarging the surrounding dialog."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.column_weights = ()
+        self.column_minima = ()
+        self.fit_timer = QTimer(self)
+        self.fit_timer.setSingleShot(True)
+        self.fit_timer.timeout.connect(self.fit_columns)
+        self.viewport().installEventFilter(self)
+
+    def eventFilter(self, watched, event):
+        if watched is self.viewport() and event.type() == QEvent.Type.Resize:
+            self.fit_timer.start(0)
+        return super().eventFilter(watched, event)
+
+    def configure_widths(self, minima, weights):
+        self.column_minima, self.column_weights = minima, weights
+        self.fit_columns()
+        self.fit_timer.start(0)
+
+    def fit_columns(self):
+        if not self.column_weights:
+            return
+        columns = [c for c in range(self.columnCount()) if not self.isColumnHidden(c)]
+        header = self.horizontalHeader()
+        metrics = header.fontMetrics()
+        minima = {}
+        for column in columns:
+            item = self.horizontalHeaderItem(column)
+            text = item.text() if item is not None else ""
+            width = max((metrics.horizontalAdvance(line) for line in text.splitlines()), default=0) + 16
+            minima[column] = max(self.column_minima[column], width)
+        remaining = max(0, self.viewport().width() - sum(minima.values()))
+        total_weight = sum(self.column_weights[c] for c in columns)
+        used = 0
+        for index, column in enumerate(columns):
+            extra = remaining-used if index == len(columns)-1 else int(remaining*self.column_weights[column]/total_weight)
+            used += extra
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
+            self.setColumnWidth(column, minima[column]+extra)
 
 
 class ResultAnalysisDialog(QDialog):
@@ -167,37 +212,49 @@ class ResultAnalysisDialog(QDialog):
         summary_layout.addWidget(self.summary_label)
         overview_layout.addWidget(self.summary_group)
 
-        output_group = QGroupBox(self.t("analysis.outputs.group"))
-        output_layout = QVBoxLayout(output_group)
-        self.output_table = QTableWidget()
+        self.output_group = QGroupBox(self.t("analysis.outputs.group"))
+        output_layout = QVBoxLayout(self.output_group)
+        self.output_table = FillingErrorTable()
         self.configure_table(self.output_table)
-        self.output_table.setColumnCount(7)
+        self.output_table.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.output_table.setColumnCount(9)
         self.output_table.setHorizontalHeaderLabels([
             self.t("analysis.column.record"),
             self.t("analysis.column.output"),
             self.t("analysis.column.target"),
             self.t("analysis.column.actual"),
             self.t("analysis.column.deviation"),
-            self.t("analysis.column.mean_deviation"),
+            self.t("analysis.column.mean_deviation").replace(" ", "\n", 1),
             self.t("analysis.column.binary_result"),
+            self.t("analysis.column.percent_target"),
+            self.t("analysis.column.percent_range"),
         ])
         output_layout.addWidget(self.output_table)
-        overview_layout.addWidget(output_group, 1)
+        self.output_group.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Maximum,
+        )
+        overview_layout.addWidget(self.output_group)
 
         deviations_group = QGroupBox(self.t("analysis.deviations.group"))
         deviations_layout = QVBoxLayout(deviations_group)
         deviations_note = QLabel(self.t("analysis.deviations.note"))
         deviations_note.setWordWrap(True)
         deviations_layout.addWidget(deviations_note)
-        self.deviations_table = QTableWidget()
+        self.deviations_table = FillingErrorTable()
         self.configure_table(self.deviations_table)
-        self.deviations_table.setColumnCount(5)
+        self.deviations_table.setColumnCount(7)
         self.deviations_table.setHorizontalHeaderLabels([
             self.t("analysis.column.record"),
             self.t("analysis.column.output"),
             self.t("analysis.column.target"),
             self.t("analysis.column.actual"),
             self.t("analysis.column.deviation"),
+            self.t("analysis.column.percent_target"),
+            self.t("analysis.column.percent_range"),
         ])
         deviations_layout.addWidget(self.deviations_table)
         overview_layout.addWidget(deviations_group, 2)
@@ -471,6 +528,20 @@ class ResultAnalysisDialog(QDialog):
             QHeaderView.ResizeMode.ResizeToContents
         )
         table.horizontalHeader().setStretchLastSection(False)
+
+    def update_output_table_height(self):
+        """Passt die Output-Übersicht an ihre Zeilenzahl an."""
+        visible_rows = min(max(self.output_table.rowCount(), 1), 6)
+        row_height = self.output_table.verticalHeader().defaultSectionSize()
+        header_height = self.output_table.horizontalHeader().sizeHint().height()
+        scrollbar_height = self.output_table.horizontalScrollBar().sizeHint().height()
+        frame_height = self.output_table.frameWidth() * 2
+        self.output_table.setFixedHeight(
+            header_height
+            + visible_rows * row_height
+            + scrollbar_height
+            + frame_height
+        )
 
     def toggle_technical_values(self, visible):
         self.technical_group.setVisible(bool(visible))
@@ -790,6 +861,7 @@ class ResultAnalysisDialog(QDialog):
                         "raw_absolute": raw_absolute,
                         "internal_absolute": internal_absolute,
                         "range_percentage": range_percentage,
+                        "display_range_percentage": self.raw_range_percentage(raw_absolute, mapping),
                         "is_binary": is_binary,
                         "binary_error": binary_error,
                     })
@@ -1385,6 +1457,7 @@ class ResultAnalysisDialog(QDialog):
                     f"{self.display_number(mean_value)}{suffix}",
                     binary_text,
                 )
+            values += self.percentage_texts(maximum_item)
             for column, value in enumerate(values):
                 self.output_table.setItem(
                     row_index, column, self.table_item(value, column != 1)
@@ -1422,12 +1495,15 @@ class ResultAnalysisDialog(QDialog):
                     f"{self.display_number(item['actual'])}{value_suffix}",
                     f"{self.display_number(item['raw_absolute'])}{deviation_suffix}",
                 )
+            values += self.percentage_texts(item)
             for column, value in enumerate(values):
                 self.deviations_table.setItem(
                     row_index, column, self.table_item(value, column != 1)
                 )
 
+        self.set_percentage_tooltips()
         self.apply_compact_column_widths(binary_total > 0)
+        self.update_output_table_height()
 
         internal_values = [row["internal_absolute"] for row in displayed_rows]
         range_values = [
@@ -1952,24 +2028,49 @@ class ResultAnalysisDialog(QDialog):
             return format_number(number, 4)
         return f"{number:.4f}".rstrip("0").rstrip(".")
 
-    def apply_compact_column_widths(self, has_binary_outputs):
-        """Verhindert breite Restspalten und hält Zahlenfelder gleichmäßig."""
-
-        shared_widths = (90, 175, 105, 145, 175)
-        output_widths = shared_widths + (150, 165)
-        deviation_widths = shared_widths
-        for table, widths in (
-            (self.output_table, output_widths),
-            (self.deviations_table, deviation_widths),
+    @staticmethod
+    def raw_range_percentage(error, mapping):
+        calibration = mapping.get("calibration", {})
+        if mapping.get("data_type") == "binary" or calibration.get("mode") not in (
+            "minmax_0_1", "minmax_minus1_1"
         ):
-            header = table.horizontalHeader()
-            for column, width in enumerate(widths):
-                if table.isColumnHidden(column):
-                    continue
-                header.setSectionResizeMode(
-                    column, QHeaderView.ResizeMode.Fixed
-                )
-                table.setColumnWidth(column, width)
+            return None
+        try:
+            span = float(calibration["source_max"]) - float(calibration["source_min"])
+            value = error / span * 100.0 if span > 0 else None
+            return value if value is not None and math.isfinite(value) else None
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return None
+
+    def percentage_texts(self, row):
+        if row is None or row.get("is_binary"):
+            return ("—", "—")
+        target = abs(row["target"])
+        relative = row["raw_absolute"] / target * 100.0 if target else None
+        values = (relative, row.get("display_range_percentage"))
+        return tuple(self.display_number(value) + " %"
+                     if value is not None and math.isfinite(value) else "—" for value in values)
+
+    def set_percentage_tooltips(self):
+        for table, first in ((self.output_table, 7), (self.deviations_table, 5)):
+            for offset, key in enumerate(("target", "range")):
+                column = first + offset
+                tip = self.t("analysis.percent." + key + "_tip")
+                table.horizontalHeaderItem(column).setToolTip(tip)
+                for row in range(table.rowCount()):
+                    table.item(row, column).setToolTip(tip)
+            for row in range(table.rowCount()):
+                for column in range(first):
+                    item = table.item(row, column)
+                    if item is not None:
+                        item.setToolTip(item.text())
+
+    def apply_compact_column_widths(self, has_binary_outputs):
+        """Use the full existing table width; emphasize errors and percentages."""
+        self.output_table.configure_widths(
+            (68, 90, 74, 74, 90, 94, 140, 90, 94), (1, 1, 1, 1, 2, 2, 2, 2, 2))
+        self.deviations_table.configure_widths(
+            (68, 90, 74, 74, 90, 90, 94), (1, 1, 1, 1, 2, 2, 2))
 
     @staticmethod
     def report_chart_image(
@@ -2320,6 +2421,7 @@ class ResultAnalysisDialog(QDialog):
             ".note{background:#eef4f8;border:1px solid #b9cbd8;padding:7px;}</style>",
             f"<h1>{escape(self.t('analysis.report.heading'))}</h1><table>",
             f"<tr><td>{escape(self.t('analysis.report.project').rstrip(':'))}</td><td>{escape(str(context.get('project_name') or '–'))}</td></tr>",
+            f"<tr><td>{escape(self.t('training.data.origin').rstrip(':'))}</td><td>{escape(str(context.get('training_data_origin') or self.t('data.origin.unspecified')))}</td></tr>",
             f"<tr><td>{escape(self.t('analysis.report.created'))}</td><td>{escape(self.report_datetime(datetime.now(), include_seconds=False))}</td></tr>",
             f"<tr><td>{escape(self.t('analysis.report.active_run'))}</td><td>{escape(self.t('analysis.report.run', run=run.get('run_id', '–')))}</td></tr></table>",
         ]
@@ -2553,6 +2655,7 @@ class ResultAnalysisDialog(QDialog):
         report.heading(report_title, 1)
         report.table([
             [self.t("analysis.report.project").rstrip(":"), context.get("project_name") or "–"],
+            [self.t("training.data.origin").rstrip(":"), context.get("training_data_origin") or self.t("data.origin.unspecified")],
             [self.t("analysis.report.created"), self.report_datetime(datetime.now(), include_seconds=False)],
             [self.t("analysis.report.active_run"), self.t("analysis.report.run", run=run.get("run_id", "–"))],
         ], widths=[2, 5], keep_together=True)

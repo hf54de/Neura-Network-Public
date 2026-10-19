@@ -1098,11 +1098,25 @@ Dateiendung:
 Eine Trainingsdatendatei enthält:
 
 - Name
+- Herkunft der Trainingsdaten
 - Spalten
 - Rollen der Spalten
 - Zuordnung der Spalten zu Neuronen
 - optionale Kalibrierung der Spalten
 - Datensätze
+
+## Herkunft der Trainingsdaten
+
+Oben rechts im Trainingsdateneditor kann die Herkunft als **Empirische
+Messdaten**, **Formelbasiert erzeugte Daten**, **Simulationsdaten**, **Gemischte
+Daten** oder **Nicht angegeben** gekennzeichnet werden. Neue Dateien verwenden
+standardmäßig **Nicht angegeben**. Dateien ohne gespeicherten Herkunftseintrag
+bleiben vollständig kompatibel und werden ebenfalls so angezeigt.
+
+Die Kennzeichnung gehört zur `.nndata`-Datei. Sie wird im Trainingsfenster im
+Bereich **Trainingsdaten** angezeigt und in Trainingsberichte übernommen. Die
+Auswahl beschreibt die Datenquelle, verändert aber weder Datensätze noch
+Skalierung oder Training.
 
 ## Spaltentypen
 
@@ -1399,7 +1413,7 @@ Vor dem Öffnen des Trainingsdialogs prüft das Programm:
 Das Training kann nur gestartet werden, wenn das Netzwerk gültig ist.
 
 Im Bereich **Trainingsdaten** zeigt der Dialog vor dem Start außerdem kompakt
-die Netzstruktur, die Anzahl der Gewichte und Bias-Werte, alle trainierbaren
+die Herkunft der Trainingsdaten, die Netzstruktur, die Anzahl der Gewichte und Bias-Werte, alle trainierbaren
 Parameter sowie eine Schätzung der Verbindungsoperationen je Epoche. Die
 Vorwärtsrechnung zählt eine Operation je Gewicht und Datensatz. Für das gesamte
 Training werden Vorwärtsrechnung, Rückwärtsrechnung und Parameteränderung mit

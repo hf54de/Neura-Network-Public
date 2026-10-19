@@ -90,6 +90,7 @@ class SettingsDialog(QDialog):
     preview_changed = Signal(object, object)
 
     DISPLAY_FIELDS = (
+        ("show_connections", "settings.display.show_connections"),
         ("show_weights", "settings.display.show_weights"),
         ("show_neuron_values", "settings.display.show_neuron_values"),
         (

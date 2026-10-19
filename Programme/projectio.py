@@ -259,6 +259,7 @@ class ProjectIO:
             "monitor_training_data": True,
             "show_error_chart": True,
             "error_chart_scale": "linear",
+            "comparison_full_length": False,
             "training_target_mode": "epochs"
         }
 
@@ -286,6 +287,7 @@ class ProjectIO:
         """
 
         return {
+            "show_connections": True,
             "show_weights": True,
             "binary_uncertainty": {"lower": 0.3, "upper": 0.7},
             "visualize_weights": True,
@@ -951,7 +953,7 @@ class ProjectIO:
         cls._validate_training_history_data(
             project_data.get(
                 "training_history"
-            )
+            ), translator=translator
         )
 
         neurons = project_data.get(
@@ -1032,6 +1034,45 @@ class ProjectIO:
                 )
                 raise ValueError(message)
             used_connection_pairs.add(pair)
+
+        cls._validate_project_topology(neurons, connections, translator)
+
+    @staticmethod
+    def _validate_project_topology(neurons, connections, translator=None):
+        from collections import deque
+        from language import LanguageManager
+        text = translator if callable(translator) else LanguageManager("de").text
+        types = {n["id"]: n["type"] for n in neurons}
+        incoming = dict.fromkeys(types, 0)
+        targets = {identifier: [] for identifier in types}
+        for connection in connections:
+            source, target = connection["source"], connection["target"]
+            reason = None
+            if source == target:
+                reason = "self"
+            elif types[source] == NeuronType.OUTPUT.value:
+                reason = "output"
+            elif types[target] == NeuronType.INPUT.value:
+                reason = "input"
+            if reason is not None:
+                raise ValueError(text("dialog.project_open.invalid_topology", reason=text(
+                    "dialog.project_open.topology." + reason, connection=connection["id"]
+                )))
+            incoming[target] += 1
+            targets[source].append(target)
+        pending = deque(identifier for identifier, count in incoming.items() if count == 0)
+        visited = 0
+        while pending:
+            identifier = pending.popleft()
+            visited += 1
+            for target in targets[identifier]:
+                incoming[target] -= 1
+                if incoming[target] == 0:
+                    pending.append(target)
+        if visited != len(types):
+            raise ValueError(text("dialog.project_open.invalid_topology", reason=text(
+                "dialog.project_open.topology.cycle"
+            )))
 
     @staticmethod
     def _validate_neuron_data(
@@ -1390,6 +1431,7 @@ class ProjectIO:
             )
 
         required_fields = {
+            "show_connections",
             "show_weights",
             "visualize_weights",
             "show_neuron_values",
@@ -1652,7 +1694,14 @@ class ProjectIO:
             )
 
     @staticmethod
-    def _validate_training_history_data(training_history):
+    def _history_error_text(key, translator=None):
+        if callable(translator):
+            return translator(key)
+        from language import LanguageManager
+        return LanguageManager("de").text(key)
+
+    @staticmethod
+    def _validate_training_history_data(training_history, translator=None):
         """Prüft die kompakt gespeicherte Historie der Trainingsläufe."""
 
         if not isinstance(training_history, list):
@@ -1689,6 +1738,21 @@ class ProjectIO:
                 raise ValueError(
                     "Die Trainingshistorie enthält einen ungültigen Eintrag."
                 )
+
+            if "validity_id" in entry and (
+                not isinstance(entry["validity_id"], str)
+                or re.fullmatch(r"[0-9a-f]{64}", entry["validity_id"]) is None
+            ):
+                raise ValueError(ProjectIO._history_error_text("history.error.context", translator))
+            context = entry.get("training_context")
+            if context is not None and (
+                not isinstance(context, dict)
+                or not isinstance(context.get("activations"), list)
+                or not (context.get("data") is None or isinstance(context.get("data"), str))
+            ):
+                raise ValueError(ProjectIO._history_error_text("history.error.context", translator))
+            if entry.get("invalidated_reason") not in (None, "activation", "data"):
+                raise ValueError(ProjectIO._history_error_text("history.error.status", translator))
 
             missing_fields = required_fields - entry.keys()
 
@@ -1870,14 +1934,14 @@ class ProjectIO:
                     previous_epoch = epoch
 
             ProjectIO._validate_training_network_state(
-                entry["network_state"]
+                entry["network_state"], translator=translator
             )
             ProjectIO._validate_training_network_state(
-                entry.get("initial_network_state")
+                entry.get("initial_network_state"), translator=translator
             )
 
     @staticmethod
-    def _validate_training_network_state(network_state):
+    def _validate_training_network_state(network_state, translator=None):
         """Prüft einen optionalen Endzustand eines Trainingslaufes."""
 
         if network_state is None:
@@ -1942,12 +2006,18 @@ class ProjectIO:
         for neuron_state in neurons:
             if (
                 not isinstance(neuron_state, dict)
-                or set(neuron_state.keys()) != {"id", "bias"}
+                or not {"id", "bias"}.issubset(neuron_state)
+                or set(neuron_state) - {"id", "bias", "activation"}
             ):
                 raise ValueError(
                     "Der gespeicherte Netzwerkzustand enthält ein "
                     "ungültiges Neuron."
                 )
+
+            if "activation" in neuron_state and neuron_state["activation"] not in {
+                "Linear", "ReLU", "Sigmoid", "Tanh"
+            }:
+                raise ValueError(ProjectIO._history_error_text("history.error.activation", translator))
 
             neuron_id = neuron_state["id"]
 
