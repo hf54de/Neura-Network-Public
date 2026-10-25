@@ -9,7 +9,7 @@ from copy import deepcopy
 from pathlib import Path
 from threading import Event
 from unittest.mock import patch
-from PySide6.QtCore import QMimeData, QPointF, QRectF, Qt, QEvent
+from PySide6.QtCore import QMimeData, QPoint, QPointF, QRectF, Qt, QEvent
 from PySide6.QtWidgets import QApplication, QMenu, QDoubleSpinBox, QDialogButtonBox
 from PySide6.QtTest import QTest
 from PySide6.QtGui import QFontDatabase, QFont, QColor, QHelpEvent, QImage, QPainter
@@ -398,6 +398,390 @@ class CurveTests(unittest.TestCase):
             p.widget().grab().save(str(out / ("characteristic_" + code + ".png")))
             dialog.deleteLater()
         self.assertNotIn("x_auto", clean_settings({"x_auto": False, "x_min": 5, "x_max": 2}))
+
+class ApplicationComparisonTests(unittest.TestCase):
+    def test_characteristic_slider_uses_input_pipeline_and_mode(self):
+        for code in ("de", "en"):
+            net, mappings = build()
+            net.remove_neuron(mappings[1]["neuron"])
+            mappings[2]["column_index"] = 1
+            with patch.object(GraphicalExperimentDialog, "restore_window_geometry"):
+                d = GraphicalExperimentDialog(net, mappings[:1], mappings[2:],
+                    [[-2., -3.], [0., 5.], [2., 13.]], None, language_manager=lang(code))
+            try:
+                def ready():
+                    APP.processEvents()  # Start the queued final calculation after releasing the slider.
+                    drain(lambda: not d.forward_calculation_running and not d.calculation_timer.isActive()
+                          and not d.curves.busy and not d.curves.pending and not d.curves.timer.isActive())
+                ready()
+                proxy = d.curves.create()
+                second = d.curves.create()
+                ready()
+                plot, other = proxy.widget().plot, second.widget().plot
+                controls = d.input_cards[0][1]
+                self.assertFalse(d.edit_mode)
+                self.assertTrue(plot.input_slider.isEnabled())
+                self.assertEqual(plot.input_bounds, (-2., 2.))
+                original_curve = plot.points
+                before = ([n.bias for n in net.get_neurons()], [c.weight for c in net.get_connections()])
+                plot.input_slider.setValue(7500)
+                ready()
+                self.assertEqual(controls["editor"].value(), 1.)
+                self.assertEqual(controls["slider"].value(), 750)
+                self.assertEqual(other.input_slider.value(), 7500)
+                self.assertEqual(plot.point, (1., 3.))
+                self.assertEqual(plot.target, 9.)
+                self.assertIn("6,00" if code == "de" else "6.00", plot.deviation_text())
+                self.assertIs(plot.points, original_curve)
+                self.assertTrue(d.input_state_dirty)
+                controls["editor"].setValue(-1.)
+                ready()
+                self.assertEqual(plot.input_slider.value(), 2500)
+                self.assertEqual(other.input_slider.value(), 2500)
+                self.assertEqual(plot.point, (-1., -1.))
+                plot.input_slider.setValue(10000)
+                ready()
+                self.assertEqual((controls["editor"].value(), plot.point), (2., (2., 5.)))
+                plot.input_slider.setValue(0)
+                ready()
+                self.assertEqual((controls["editor"].value(), plot.point), (-2., (-2., -3.)))
+                plot.input_slider.sliderPressed.emit()
+                self.assertEqual(d.active_input_sliders, 1)
+                plot.input_slider.setValue(6000)
+                plot.input_slider.sliderReleased.emit()
+                ready()
+                self.assertEqual(d.active_input_sliders, 0)
+                self.assertAlmostEqual(controls["editor"].value(), .4)
+                self.assertEqual(plot.input_slider.value(), 6000)
+                d.mode_combo.setCurrentIndex(d.mode_combo.findData("edit"))
+                APP.processEvents()
+                self.assertFalse(plot.input_slider.isEnabled())
+                plot.input_slider.setValue(9000)
+                self.assertAlmostEqual(controls["editor"].value(), .4)
+                d.mode_combo.setCurrentIndex(d.mode_combo.findData("experiment"))
+                APP.processEvents()
+                self.assertFalse(d.edit_mode)
+                self.assertTrue(plot.input_slider.isEnabled())
+                self.assertEqual(plot.input_slider.value(), 6000)
+                ready()
+                self.assertAlmostEqual(plot.point[0], .4)
+                self.assertAlmostEqual(plot.point[1], 1.8)
+                self.assertEqual(([n.bias for n in net.get_neurons()], [c.weight for c in net.get_connections()]), before)
+                out = Path(os.environ.get("NEURONNETZ_CURVE_QA", tempfile.gettempdir()))
+                for width, height in ((840, 400), (440, 300), (260, 200)):
+                    proxy.set_card_size(width, height)
+                    APP.processEvents()
+                    plot.grab().save(str(out / f"curve_slider_{code}_{width}.png"))
+                    self.assertLessEqual(plot.input_slider.geometry().bottom(), plot._box.top())
+            finally:
+                d.stop_forward_executor()
+                drain(lambda: not d.curves.busy)
+                d.deleteLater()
+                APP.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+                APP.processEvents()
+
+    def test_information_dialog_stays_outside_graphics_scene(self):
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QDialog, QLabel, QPushButton
+        for code in ("de", "en"):
+            net, mappings = build()
+            net.remove_neuron(mappings[1]["neuron"])
+            mappings[2]["column_index"] = 1
+            with patch.object(GraphicalExperimentDialog, "restore_window_geometry"):
+                d = GraphicalExperimentDialog(net, mappings[:1], mappings[2:],
+                    [[-2., -3.], [0., 5.], [2., 13.]], None, language_manager=lang(code))
+            try:
+                drain(lambda: not d.forward_calculation_running and not d.calculation_timer.isActive())
+                proxy = d.curves.create()
+                plot = proxy.widget().plot
+                drain(lambda: not d.curves.busy and not d.curves.pending and not d.curves.timer.isActive())
+                d.resize(900, 700)
+                d.show()
+                view = d.scene.views()[0]
+                view.fitInView(proxy, Qt.AspectRatioMode.KeepAspectRatio)
+                APP.processEvents()
+                scene_items = set(d.scene.items())
+                geometry = proxy.geometry()
+                bounds = d.scene.itemsBoundingRect()
+                points = list(plot.points)
+                state = runtime(net)
+                observations = []
+                def inspect_and_close():
+                    modal = APP.activeModalWidget()
+                    try:
+                        self.assertIsInstance(modal, QDialog)
+                        self.assertIs(modal.parentWidget(), d)
+                        self.assertIsNone(modal.graphicsProxyWidget())
+                        labels = [label for label in modal.findChildren(QLabel) if label.text() == plot.explanation()]
+                        self.assertEqual(len(labels), 1)
+                        self.assertIn("#fff8d8", labels[0].styleSheet())
+                        self.assertTrue(labels[0].isVisible())
+                        close = next(button for button in modal.findChildren(QPushButton)
+                                     if button.text() == ("Schließen" if code == "de" else "Close"))
+                        self.assertEqual(set(d.scene.items()), scene_items)
+                        self.assertEqual(proxy.geometry(), geometry)
+                        self.assertEqual(d.scene.itemsBoundingRect(), bounds)
+                        out = Path(os.environ.get("NEURONNETZ_CURVE_QA", tempfile.gettempdir()))
+                        modal.grab().save(str(out / f"curve_information_{code}.png"))
+                        QTest.mouseClick(close, Qt.MouseButton.LeftButton)
+                    except BaseException as error:
+                        observations.append(error)
+                        if modal is not None:
+                            modal.reject()
+                QTimer.singleShot(50, inspect_and_close)
+                plot.info_button.click()
+                APP.processEvents()
+                if observations:
+                    raise observations[0]
+                self.assertIsNone(APP.activeModalWidget())
+                self.assertTrue(proxy.isVisible())
+                self.assertEqual(set(d.scene.items()), scene_items)
+                self.assertEqual(proxy.geometry(), geometry)
+                self.assertEqual(d.scene.itemsBoundingRect(), bounds)
+                self.assertEqual(plot.points, points)
+                self.assertEqual(runtime(net), state)
+                out = Path(os.environ.get("NEURONNETZ_CURVE_QA", tempfile.gettempdir()))
+                d.grab().save(str(out / f"curve_information_closed_{code}.png"))
+            finally:
+                d.stop_forward_executor()
+                drain(lambda: not d.curves.busy)
+                d.deleteLater()
+                APP.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+                APP.processEvents()
+
+    def test_curve_has_no_target_colored_fill(self):
+        plot = CurvePlot(lambda de, en: de, {})
+        try:
+            plot.resize(730, 420)
+            plot.points = [(-2., 4.), (0., -2.), (2., 4.)]
+            plot.set_targets([(-1., 3., 1), (1., 4., 2)])
+            plot.ensure_background()
+            image = plot._background.toImage()
+            position = plot.map_point((0., 2.))
+            self.assertNotEqual(image.pixelColor(round(position.x()), round(position.y())).name(), "#f4c430")
+            target = plot.map_point((1., 4.))
+            self.assertEqual(image.pixelColor(round(target.x()), round(target.y())).name(), "#f4c430")
+        finally:
+            plot.deleteLater()
+
+    def test_targets_interpolation_and_live_prediction(self):
+        for code in ("de", "en"):
+            net, mappings = build()
+            net.remove_neuron(mappings[1]["neuron"])
+            mappings[2]["column_index"] = 1
+            mappings[0]["column_name"] = "Position"
+            mappings[0]["unit"] = "mm"
+            records = [[-2., -3.], [0., 5.], [2., 13.]]
+            with patch.object(GraphicalExperimentDialog, "restore_window_geometry"):
+                d = GraphicalExperimentDialog(net, mappings[:1], mappings[2:], records,
+                    None, language_manager=lang(code))
+            try:
+                drain(lambda: not d.forward_calculation_running and not d.calculation_timer.isActive())
+                proxy = d.curves.create()
+                plot = proxy.widget().plot
+                drain(lambda: not d.curves.busy and not d.curves.pending and not d.curves.timer.isActive())
+                before = runtime(net)
+                self.assertEqual(plot.target_points, [(-2., -3., 1), (0., 5., 2), (2., 13., 3)])
+                d.curves.update_outputs({1: 0., 3: 1.})
+                self.assertEqual((plot.point, plot.target, plot.target_record), ((0., 1.), 5., 2))
+                plot.resize(900, 480)
+                plot.ensure_background()
+                background = plot._background
+                curve = plot.points
+                d.curves.update_outputs({1: 1., 3: 3.})
+                self.assertEqual((plot.point, plot.target, plot.target_record), ((1., 3.), 9., None))
+                self.assertEqual(plot.deviation_text(), "Position = 1,00 mm | Soll ≈ 9,00 V | Ist = 3,00 V | Abweichung ≈ 6,00 V" if code == "de"
+                                 else "Position = 1.00 mm | Target ≈ 9.00 V | Actual = 3.00 V | Deviation ≈ 6.00 V")
+                self.assertIn("geschätzt" if code == "de" else "Estimated target", plot.context)
+                plot.ensure_background()
+                self.assertIs(plot._background, background)
+                self.assertIs(plot.points, curve)
+                mappings[2]["unit"] = ""
+                d.curves.refresh()
+                self.assertEqual(plot.deviation_text(), "Position = 1,00 mm | Soll ≈ 9,00 | Ist = 3,00 | Abweichung ≈ 6,00" if code == "de"
+                                 else "Position = 1.00 mm | Target ≈ 9.00 | Actual = 3.00 | Deviation ≈ 6.00")
+                mappings[2]["unit"] = "mV"
+                d.curves.refresh()
+                self.assertEqual(plot.deviation_text().count(" mV"), 3)
+                mappings[2]["unit"] = "V"
+                d.curves.refresh()
+                plot.ensure_background()
+                self.assertTrue(plot._range[2] <= -3. <= 13. <= plot._range[3])
+                out = Path(os.environ.get("NEURONNETZ_CURVE_QA", tempfile.gettempdir()))
+                for width, height in ((900, 480), (440, 300), (260, 200)):
+                    plot.resize(width, height)
+                    self.assertTrue(plot.grab().save(str(out / f"application_comparison_{code}_{width}.png")))
+                plot.show_targets.setChecked(False)
+                plot.ensure_background()
+                self.assertEqual(plot.target, 9.)
+                d.curves.update_outputs({1: 3., 3: 7.})
+                self.assertIsNone(plot.target)
+                self.assertIn("Kein passender" if code == "de" else "No matching", plot.context)
+                plot.set_targets([(0., 1., 1), (2., 3., 2), (2., 4., 3)])
+                plot.set_point((1., 3.))
+                self.assertIsNone(plot.target)  # Conflicting boundary: no interpolation.
+                plot.set_targets([(0., 0., 1), (2., 4., 2)])
+                plot.set_point((0., 1.))
+                self.assertEqual(plot.target, 0.)
+                self.assertEqual(plot.deviation_text(), "Position = 0,00 mm | Soll = 0,00 V | Ist = 1,00 V | Abweichung 1,00 V" if code == "de" else "Position = 0.00 mm | Target = 0.00 V | Actual = 1.00 V | Deviation 1.00 V")
+                self.assertNotIn("inf", plot.context.lower())
+                self.assertEqual(plot.comparison_at(2. + 1e-11), (4., 2))
+                plot.set_targets([(0., -.03, 1), (2., -.03, 2)])
+                plot.set_point((1., 2.37))
+                self.assertEqual(plot.deviation_text(), "Position = 1,00 mm | Soll ≈ -0,03 V | Ist = 2,37 V | Abweichung ≈ 2,40 V" if code == "de" else "Position = 1.00 mm | Target ≈ -0.03 V | Actual = 2.37 V | Deviation ≈ 2.40 V")
+                self.assertNotIn("%", plot.deviation_text())
+                self.assertIn("8000 %", plot.context)
+                self.assertIn("% vom Sollwert" if code == "de" else "% of target", plot.toolTip())
+                self.assertIn("nahe null" if code == "de" else "near zero", plot.toolTip())
+                self.assertEqual(runtime(net), before)
+                self.assertEqual(d.curves.data(proxy)["settings"]["input_id"], 1)
+                for mapping in (d.input_columns[0], d.output_columns[0]):
+                    mapping["data_type"] = "binary"
+                    d.curves.refresh({1: 0.})
+                    self.assertFalse(proxy.isVisible())
+                    self.assertTrue(d.curves.data(proxy)["visible"])
+                    mapping["data_type"] = "analog"
+                    d.curves.refresh({1: 0.})
+                    drain(lambda: not d.curves.busy and not d.curves.pending and not d.curves.timer.isActive())
+                    self.assertTrue(proxy.isVisible())
+                saved = d.curves.data(proxy)
+                d.curves.restore([saved])
+                drain(lambda: not d.curves.busy and not d.curves.pending and not d.curves.timer.isActive())
+                restored = d.curves.proxies[0].widget().plot
+                self.assertEqual(restored.target_points, [(-2., -3., 1), (0., 5., 2), (2., 13., 3)])
+                self.assertEqual(runtime(net), before)
+            finally:
+                d.stop_forward_executor()
+                drain(lambda: not d.curves.busy)
+                d.deleteLater()
+                APP.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+                APP.processEvents()
+
+
+class ForwardWindowCharacteristicTests(unittest.TestCase):
+    def settle(self, dialog):
+        APP.processEvents()
+        dialog.fit_window_to_content()
+        APP.processEvents()
+
+    def dispose(self, dialog):
+        APP.processEvents()
+        dialog.deleteLater()
+        APP.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        APP.processEvents()
+
+    def test_toggle_slider_and_compact_height_in_both_languages(self):
+        from forwardcalibrationdialog import ForwardCalibrationDialog
+        for code in ("de", "en"):
+            net, m = build()
+            net.remove_neuron(m[1]["neuron"])
+            m[2]["column_index"] = 1
+            m[0]["column_name"], m[0]["unit"] = "Position", "mm"
+            d = ForwardCalibrationDialog(net, m[:1], m[2:], [[-2., -3.], [0., 5.], [2., 13.]], language_manager=lang(code))
+            try:
+                d.show(); self.settle(d)
+                base = d.height()
+                self.assertLess(base, 420)
+                self.assertFalse(d.characteristic_button.isHidden())
+                self.assertTrue(d.characteristic_group.isHidden())
+                bottom = d.output_scroll.mapTo(d, QPoint(0, d.output_scroll.height())).y()
+                self.assertLess(d.status_label.mapTo(d, QPoint()).y()-bottom, 35)
+                before = runtime(net)
+                d.characteristic_button.click(); self.settle(d)
+                plot = d.characteristic_plot
+                self.assertGreater(d.height(), base+150)
+                self.assertEqual(len(plot.points), 161)
+                self.assertEqual(runtime(net), before)
+                self.assertEqual((plot.point, plot.target), ((0., 1.), 5.))
+                curve = plot.points
+                plot.input_slider.setValue(7500)
+                self.assertEqual(d.input_widgets[0]["input_widget"].value(), 1.)
+                self.assertEqual((plot.point, plot.target), ((1., 3.), 9.))
+                self.assertIn("1,00 mm" if code == "de" else "1.00 mm", plot.deviation_text())
+                self.assertIs(plot.points, curve)
+                d.input_widgets[0]["input_widget"].setValue(-1.)
+                self.assertEqual(plot.point, (-1., -1.))
+                self.assertEqual(plot.input_slider.value(), 2500)
+                out = Path(os.environ.get("NEURONNETZ_CURVE_QA", tempfile.gettempdir()))
+                d.grab().save(str(out / f"forward_characteristic_{code}.png"))
+                d.characteristic_button.click(); self.settle(d)
+                self.assertTrue(d.characteristic_group.isHidden())
+                self.assertLessEqual(d.height(), base+2)
+                with patch("forwardcalibrationdialog.sample_slice") as sample:
+                    d.input_widgets[0]["input_widget"].setValue(1.)
+                    sample.assert_not_called()
+                d.characteristic_button.click(); self.settle(d)
+                self.assertEqual(plot.point, (1., 3.))
+                d.characteristic_button.click(); self.settle(d)
+                d.grab().save(str(out / f"forward_compact_{code}.png"))
+            finally:
+                self.dispose(d)
+
+    def test_unsupported_network_retains_binary_and_array_buttons(self):
+        from forwardcalibrationdialog import ForwardCalibrationDialog
+        for code in ("de", "en"):
+            net, m = build()
+            for mapping in m:
+                mapping["data_type"] = "binary"
+            d = ForwardCalibrationDialog(net, m[:2], m[2:], [[0., 0., 0.], [1., 1., 1.]],
+                input_array=dict(columns=2, column_indices=[0, 1]), language_manager=lang(code))
+            try:
+                d.show(); self.settle(d)
+                self.assertTrue(d.characteristic_button.isHidden())
+                self.assertTrue(d.characteristic_group.isHidden())
+                for button in (d.description_button, d.test_data_button, d.binary_view_button,
+                               d.array_view_button, d.graphical_experiment_button):
+                    self.assertTrue(button.isVisible())
+                d.binary_view_button.click()
+                self.assertTrue(d.experimental_binary_mode)
+                d.array_view_button.click(); self.settle(d)
+                self.assertTrue(d.array_view_active)
+                self.assertTrue(d.array_group.isVisible())
+                out = Path(os.environ.get("NEURONNETZ_CURVE_QA", tempfile.gettempdir()))
+                d.grab().save(str(out / f"forward_binary_array_{code}.png"))
+                d.array_view_button.click(); self.settle(d)
+                self.assertTrue(d.input_scroll.isVisible())
+            finally:
+                self.dispose(d)
+
+    def test_analog_output_selection_excludes_binary_outputs(self):
+        from forwardcalibrationdialog import ForwardCalibrationDialog
+        net, m = build()
+        net.remove_neuron(m[1]["neuron"])
+        m[2]["column_index"] = 1
+        extra = []
+        for identifier, kind in ((4, "binary"), (5, "analog")):
+            n = Neuron(identifier, 0, 0, f"N{identifier}")
+            n.neuron_type = NeuronType.OUTPUT
+            n.activation_function = "Linear"
+            n.bias = 2 if kind == "analog" else 0
+            net.add_neuron(n)
+            net.add_connection(Connection(identifier, m[0]["neuron"], n, -1. if kind == "analog" else .1))
+            extra.append(dict(m[2], neuron=n, column_index=identifier-2, data_type=kind, unit="mA"))
+        outputs = [extra[0], m[2], extra[1]]
+        d = ForwardCalibrationDialog(net, m[:1], outputs, [[-2., -3., 0., 8.], [2., 13., 1., 4.]], language_manager=lang("de"))
+        try:
+            d.show(); self.settle(d)
+            self.assertTrue(d.binary_view_button.isVisible())
+            self.assertEqual(d.characteristic_output.count(), 2)
+            self.assertEqual(d.characteristic_output.currentData(), 1)
+            d.characteristic_button.click(); self.settle(d)
+            d.characteristic_output.setCurrentIndex(d.characteristic_output.findData(2))
+            d.input_widgets[0]["input_widget"].setValue(1.)
+            self.assertEqual((d.characteristic_plot.point, d.characteristic_plot.target), ((1., 1.), 5.))
+            self.assertEqual(d.characteristic_plot.output_unit, "mA")
+        finally:
+            self.dispose(d)
+        for kind in ("binary", "analog"):
+            m[0]["data_type"] = kind
+            outputs[1]["data_type"] = "binary"
+            outputs[2]["data_type"] = "binary"
+            d = ForwardCalibrationDialog(net, m[:1], outputs, [[-2., -3., 0., 8.], [2., 13., 1., 4.]], language_manager=lang("de"))
+            try:
+                self.assertTrue(d.characteristic_button.isHidden())
+            finally:
+                self.dispose(d)
+
 
 class PercentageTests(unittest.TestCase):
     def test_percentages_and_translations(self):

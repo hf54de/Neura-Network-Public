@@ -341,5 +341,311 @@ class ReviewFixTests(unittest.TestCase):
                 self.assertEqual(fields(en),fields(de),key)
                 self.assertEqual(language("en").BUILTIN_ENGLISH[key],en)
 
+class ProjectDeletionTests(unittest.TestCase):
+    def setUp(self):
+        from settings import Settings
+        from PySide6.QtWidgets import QMessageBox
+        self.settings = Settings
+        self.message_type = QMessageBox
+        self.temp = tempfile.TemporaryDirectory(prefix=".project_delete_test_", dir=ROOT)
+        self.root = Path(self.temp.name).resolve()
+        self.assertEqual(self.root.parent, ROOT.resolve())
+        self.addCleanup(self.temp.cleanup)
+        p = patch.object(Settings, "get_settings_path", return_value=self.root / "settings.json")
+        p.start(); self.addCleanup(p.stop)
+        ui = dict(Settings.default_ui_settings(), project_directory=str(self.root), language="de")
+        with patch.object(Settings, "get_ui_settings", return_value=ui), patch.object(Settings, "restore_window", return_value=False):
+            self.w = MainWindow(defer_initial_show=True)
+        self.addCleanup(self.dispose_window)
+        self.folder = self.root / "Demo"
+        self.folder.mkdir()
+        self.file = self.folder / "Demo.nnproj"
+        self.file.write_text("{}", encoding="utf8")
+        (self.folder / "data" / "nested").mkdir(parents=True)
+        (self.folder / "data" / "nested" / "values.txt").write_text("preserve until confirmed", encoding="utf8")
+        self.neighbor = self.root / "Neighbor.txt"
+        self.neighbor.write_text("keep", encoding="utf8")
+        self.w.current_project_path = str(self.file)
+        self.w.project_description = "Unsaved description"
+        self.w.project_modified = True
+        self.w.scene.network.add_neuron(Neuron(1, 0, 0, "N1"))
+        self.w.update_window_title()
+
+    def dispose_window(self):
+        from PySide6.QtCore import QEvent
+        APP.processEvents()  # Drain constructor callbacks while their widgets still exist.
+        self.w._history_timer.stop()
+        self.w.deleteLater()
+        APP.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        APP.processEvents()
+
+    def confirm(self, accepted=True, after=None):
+        from contextlib import ExitStack
+        stack = ExitStack()
+        selected = {}
+        def execute(box):
+            self.assertIn(str(self.folder), box.text())
+            self.assertEqual(box.buttonRole(box.defaultButton()), self.message_type.ButtonRole.RejectRole)
+            role = self.message_type.ButtonRole.DestructiveRole if accepted else self.message_type.ButtonRole.RejectRole
+            selected[id(box)] = next(button for button in box.buttons() if box.buttonRole(button) == role)
+            if after:
+                after()
+            return 0
+        stack.enter_context(patch.object(self.message_type, "exec", execute))
+        stack.enter_context(patch.object(self.message_type, "clickedButton", lambda box: selected.get(id(box))))
+        return stack
+
+    def test_cancel_preserves_project_and_unsaved_changes(self):
+        with self.confirm(False), patch("mainwindow.shutil.rmtree") as remove:
+            self.assertFalse(self.w.delete_current_project())
+            remove.assert_not_called()
+        self.assertTrue(self.file.exists())
+        self.assertTrue(self.w.project_modified)
+        self.assertEqual(self.w.project_description, "Unsaved description")
+        self.assertEqual(self.w.current_project_path, str(self.file))
+
+    def test_confirm_deletes_only_project_and_leaves_no_active_project(self):
+        self.settings.add_recent_project_file(str(self.file), "de")
+        self.settings.add_recent_project_file(str(self.file), "en")
+        self.settings.save_last_project_file(str(self.file))
+        bar = self.w.menuBar()
+        file_action = bar.actions()[0]
+        file_menu = file_action.menu()
+        menu = file_menu.actions()
+        self.assertEqual(menu.index(self.w.action_delete_project), menu.index(self.w.action_rename_project)+1)
+        self.assertTrue(self.w.action_delete_project.isEnabled())
+        with self.confirm():
+            self.assertTrue(self.w.delete_current_project())
+        self.assertFalse(self.folder.exists())
+        self.assertEqual(self.neighbor.read_text(encoding="utf8"), "keep")
+        self.assertIsNone(self.w.current_project_path)
+        self.assertEqual(self.w.scene.network.get_neurons(), [])
+        self.assertEqual(self.w.project_description, "")
+        self.assertFalse(self.w.project_modified)
+        self.assertEqual(self.w.undo_history, [])
+        self.assertFalse(self.w.action_delete_project.isEnabled())
+        self.assertFalse(self.w.action_save.isEnabled())
+        self.assertIn("Kein Projekt geöffnet", self.w.windowTitle())
+        self.assertEqual(self.settings.get_last_project_file(), "")
+        for code in ("de", "en"):
+            self.assertNotIn(str(self.file), self.settings.get_recent_project_files(code))
+        self.w.language = language("en")
+        self.w.update_window_title()
+        self.assertIn("No Project Open", self.w.windowTitle())
+        self.w.initialize_new_project()
+        self.assertIn("New Project", self.w.windowTitle())
+
+    def test_rejects_collections_and_links(self):
+        self.assertEqual(self.w.project_deletion_directory(), self.folder)
+        other = self.folder / "Another.nnproj"
+        other.write_text("{}", encoding="utf8")
+        self.assertIsNone(self.w.project_deletion_directory())
+        other.unlink()
+        self.w.ui_settings["project_directory"] = str(self.folder)
+        self.assertIsNone(self.w.project_deletion_directory())
+        self.w.ui_settings["project_directory"] = str(self.root)
+        self.w.current_project_path = str(self.folder / "Different.nnproj")
+        Path(self.w.current_project_path).write_text("{}", encoding="utf8")
+        self.assertIsNone(self.w.project_deletion_directory())
+        self.w.current_project_path = str(self.file)
+        with patch.object(Path, "is_junction", return_value=True):
+            self.assertIsNone(self.w.project_deletion_directory())
+        with patch.object(Path, "is_symlink", return_value=True):
+            self.assertIsNone(self.w.project_deletion_directory())
+
+    def test_failure_preserves_editor_and_reports_error(self):
+        with self.confirm(), patch("mainwindow.shutil.rmtree", side_effect=PermissionError("locked")), patch.object(self.message_type, "critical") as report:
+            self.assertFalse(self.w.delete_current_project())
+            report.assert_called_once()
+        self.assertTrue(self.file.exists())
+        self.assertEqual(self.w.current_project_path, str(self.file))
+        self.assertEqual(len(self.w.scene.network.get_neurons()), 1)
+        self.assertTrue(self.w.project_modified)
+
+    def test_rechecks_folder_after_confirmation_and_blocks_training(self):
+        def alter():
+            (self.folder / "Other.nnproj").write_text("{}", encoding="utf8")
+        with self.confirm(after=alter), patch.object(self.message_type, "warning") as report, patch("mainwindow.shutil.rmtree") as remove:
+            self.assertFalse(self.w.delete_current_project())
+            remove.assert_not_called()
+            report.assert_called_once()
+        self.assertTrue(self.file.exists())
+        self.w.training_observation_mode = True
+        self.w.update_window_title()
+        self.assertFalse(self.w.action_delete_project.isEnabled())
+        self.assertFalse(self.w.delete_current_project())
+
+
+class AutomaticScalingPreviewTests(unittest.TestCase):
+    def setUp(self):
+        from PySide6.QtGui import QFont, QFontDatabase
+        previous = APP.font()
+        QFontDatabase.addApplicationFont("C:/Windows/Fonts/segoeui.ttf")
+        APP.setFont(QFont("Segoe UI", 9))
+        self.addCleanup(lambda: APP.setFont(previous))
+
+    def make_dialog(self, code):
+        from trainingdatadialog import TrainingDataDialog
+        net = network(code)
+        net.get_neuron(1).name = "Position"
+        net.get_neuron(3).name = "Sensorspannung"
+        net.get_neuron(3).activation_function = "Tanh"
+        doc = document()
+        doc["columns"][0]["name"] = "Position"
+        doc["columns"][1]["name"] = "Sensorspannung"
+        doc["records"] = [[0., .5], [120., 4.5]]
+        doc["columns"][0]["calibration"] = dict(mode="standard", source_min=0., source_max=120., mean=60., stddev=12.)
+        return TrainingDataDialog(net, doc, language_manager=language(code))
+
+    def execute_preview(self, editor, code, accept, selections=None):
+        from trainingdatadialog import AutomaticScalingPreviewDialog
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QDialogButtonBox
+        from PySide6.QtTest import QTest
+        before = deepcopy(editor.document)
+        history = deepcopy(editor._edit_history)
+        failures = []
+        def inspect():
+            preview = APP.activeModalWidget()
+            try:
+                self.assertIsInstance(preview, AutomaticScalingPreviewDialog)
+                self.assertEqual(editor.document, before)
+                self.assertEqual(editor._edit_history, history)
+                self.assertEqual(preview.table.columnCount(), 5)
+                self.assertEqual(preview.table.item(0, 0).text(), "Position")
+                self.assertEqual(preview.table.item(0, 1).text(), "Input")
+                self.assertEqual(preview.table.item(0, 2).text(), "0")
+                self.assertEqual(preview.table.item(0, 3).text(), "120")
+                self.assertEqual(preview.table.item(1, 0).text(), "Sensorspannung")
+                self.assertEqual(preview.table.item(1, 1).text(), "Output")
+                self.assertEqual(preview.table.item(1, 4).text(), "")
+                for row, combo in preview.method_combos.items():
+                    self.assertEqual(preview.table.item(row, 4).text(), "")
+                    self.assertGreaterEqual(preview.table.rowHeight(row), combo.sizeHint().height()+2)
+                self.assertEqual(preview.selected_methods(), {0: "minmax_0_1", 1: "minmax_minus1_1"})
+                for row, mode in (selections or {}).items():
+                    combo = preview.method_combos[row]
+                    self.assertEqual(combo.count(), 4)
+                    combo.setCurrentIndex(combo.findData(mode))
+                    self.assertEqual(combo.currentData(), mode)
+                self.assertEqual(editor.document, before)
+                preview.grab().save(str(Path(tempfile.gettempdir()) / f"scaling_preview_{code}.png"))
+                button = QDialogButtonBox.StandardButton.Ok if accept else QDialogButtonBox.StandardButton.Cancel
+                QTest.mouseClick(preview.buttons.button(button), Qt.MouseButton.LeftButton)
+            except BaseException as error:
+                failures.append(error)
+                if preview is not None:
+                    preview.reject()
+        QTimer.singleShot(30, inspect)
+        editor.automatically_scale_from_table()
+        if failures:
+            raise failures[0]
+
+    def dispose(self, editor):
+        from PySide6.QtCore import QEvent
+        editor.deleteLater()
+        APP.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        APP.processEvents()
+
+    def test_cancel_leaves_document_modified_flag_and_history_untouched(self):
+        for code in ("de", "en"):
+            editor = self.make_dialog(code)
+            try:
+                before = deepcopy(editor.document)
+                modified, index = editor.modified, editor._edit_history_index
+                history = deepcopy(editor._edit_history)
+                self.execute_preview(editor, code, False, {0: "none", 1: "standard"})
+                self.assertEqual(editor.document, before)
+                self.assertEqual(editor.modified, modified)
+                self.assertEqual(editor._edit_history_index, index)
+                self.assertEqual(editor._edit_history, history)
+                self.assertTrue(editor.automatic_scaling_status_label.isHidden())
+            finally:
+                self.dispose(editor)
+
+    def test_accept_applies_existing_input_and_tanh_rules(self):
+        for code in ("de", "en"):
+            editor = self.make_dialog(code)
+            try:
+                records = deepcopy(editor.document["records"])
+                self.execute_preview(editor, code, True)
+                first, second = editor.document["columns"]
+                self.assertEqual(first["calibration"]["mode"], "minmax_0_1")
+                self.assertEqual(first["calibration"]["source_max"], 120.)
+                self.assertEqual(second["calibration"]["mode"], "minmax_minus1_1")
+                self.assertEqual(second["calibration"]["source_min"], .5)
+                self.assertEqual(second["calibration"]["source_max"], 4.5)
+                self.assertEqual(editor.document["records"], records)
+                self.assertTrue(editor.modified)
+                self.assertFalse(editor.automatic_scaling_status_label.isHidden())
+            finally:
+                self.dispose(editor)
+
+    def test_selected_methods_are_applied_only_after_accept(self):
+        for code in ("de", "en"):
+            for selections in ({0: "standard", 1: "none"}, {0: "minmax_minus1_1", 1: "standard"}):
+                editor = self.make_dialog(code)
+                try:
+                    self.execute_preview(editor, code, True, selections)
+                    first, second = [column["calibration"] for column in editor.document["columns"]]
+                    self.assertEqual(first["mode"], selections[0])
+                    self.assertEqual(second["mode"], selections[1])
+                    self.assertEqual(first["source_min"], 0.)
+                    self.assertEqual(first["source_max"], 120.)
+                    self.assertEqual(first["mean"], 60.)
+                    self.assertEqual(first["stddev"], 60.)
+                    self.assertEqual(second["mean"], 2.5)
+                    self.assertEqual(second["stddev"], 2.)
+                    self.assertEqual(TrainingDataIO.scale_value(60., first), 0.)
+                    self.assertEqual(TrainingDataIO.scale_value(2.5, second), 2.5 if selections[1] == "none" else 0.)
+                finally:
+                    self.dispose(editor)
+
+    def test_compact_width_and_long_names_are_screen_limited(self):
+        from trainingdatadialog import AutomaticScalingPreviewDialog
+        from PySide6.QtWidgets import QAbstractItemView
+        for code in ("de", "en"):
+            method = language(code).text("data.calibration.minmax_0_1")
+            short = AutomaticScalingPreviewDialog([("Position", "Input", "0", "120", method)], language(code), modes=["minmax_0_1"])
+            name = "Very long neuron designation " * 50
+            long = AutomaticScalingPreviewDialog([(name, "Input", "0", "120", method)], language(code), modes=["minmax_0_1"])
+            try:
+                self.assertEqual(short.table.editTriggers(), QAbstractItemView.EditTrigger.NoEditTriggers)
+                self.assertLess(short.width(), 600)
+                self.assertGreater(long.width(), short.width())
+                self.assertLessEqual(long.width(), long.screen().availableGeometry().width()-40)
+                self.assertEqual(long.table.item(0, 0).toolTip(), name)
+                self.assertEqual([short.table.columnWidth(i) for i in range(1, 5)],
+                                 [long.table.columnWidth(i) for i in range(1, 5)])
+                self.assertLess(short.height(), 200)
+            finally:
+                self.dispose(short); self.dispose(long)
+
+    def test_preview_describes_binary_constant_and_empty_columns(self):
+        editor = self.make_dialog("de")
+        try:
+            editor.document["columns"][0]["data_type"] = "binary"
+            before = deepcopy(editor.document)
+            with patch.object(editor, "get_column_numeric_values", side_effect=[[0., 1.], [7., 7.]]):
+                rows = editor.automatic_scaling_preview_rows()
+            self.assertEqual(rows[0][4], language("de").text("data.calibration.none"))
+            self.assertEqual(rows[1][4], language("de").text("data.auto_scale_preview.constant"))
+            with patch.object(editor, "get_column_numeric_values", return_value=[]):
+                rows = editor.automatic_scaling_preview_rows()
+            self.assertEqual(rows[1][2:4], ("—", "—"))
+            self.assertEqual(rows[1][4], language("de").text("data.auto_scale_preview.empty"))
+            self.assertEqual(editor.document, before)
+            from trainingdatadialog import AutomaticScalingPreviewDialog
+            preview = AutomaticScalingPreviewDialog(rows, language("de"), modes=[None, None])
+            try:
+                self.assertEqual(preview.selected_methods(), {})
+                self.assertIsNone(preview.table.cellWidget(0, 4))
+                self.assertIsNone(preview.table.cellWidget(1, 4))
+            finally:
+                self.dispose(preview)
+        finally:
+            self.dispose(editor)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGridLayout,
     QGroupBox,
+    QHeaderView,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -107,6 +108,94 @@ class NumericItemDelegate(QStyledItemDelegate):
         except ValueError:
             return
         model.setData(index, text, Qt.ItemDataRole.EditRole)
+
+
+class AutomaticScalingPreviewDialog(QDialog):
+    """Content-sized preview with editable methods and explicit confirmation."""
+
+    def __init__(self, rows, language_manager, parent=None, modes=None):
+        super().__init__(parent)
+        text = language_manager.text
+        self.setWindowTitle(text("data.auto_scale_preview.title"))
+        layout = QVBoxLayout(self)
+        self.table = QTableWidget(len(rows), 5, self)
+        self.table.setHorizontalHeaderLabels([
+            text("data.auto_scale_preview.neuron"), text("data.auto_scale_preview.type"),
+            text("data.auto_scale_preview.minimum"), text("data.auto_scale_preview.maximum"),
+            text("data.auto_scale_preview.method")])
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setWordWrap(False)
+        self.table.verticalHeader().hide()
+        header = self.table.horizontalHeader()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        for row, values in enumerate(rows):
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                item.setToolTip(str(value))
+                if column in (2, 3):
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                self.table.setItem(row, column, item)
+        self.method_combos = {}
+        for row, mode in enumerate(modes or []):
+            if mode is None:
+                continue  # Binary, empty and constant columns retain their existing handling.
+            combo = QComboBox(self.table)
+            for value in ("none", "minmax_0_1", "minmax_minus1_1", "standard"):
+                combo.addItem(text("data.calibration." + value), value)
+            combo.setCurrentIndex(combo.findData(mode))
+            combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+            self.table.setCellWidget(row, 4, combo)
+            self.method_combos[row] = combo
+        metrics = self.table.fontMetrics()
+        for column in range(5):
+            labels = [self.table.horizontalHeaderItem(column).text()]
+            labels.extend(self.table.item(row, column).text() for row in range(len(rows)))
+            self.table.setColumnWidth(column, max(metrics.horizontalAdvance(label) for label in labels) + 20)
+        if self.method_combos:
+            self.table.setColumnWidth(4, max(self.table.columnWidth(4),
+                max(combo.sizeHint().width() for combo in self.method_combos.values()) + 2))
+        # Cell widgets can have transparent backgrounds. Do not paint the
+        # former method label underneath the combo box as a second text layer.
+        for row in self.method_combos:
+            self.table.item(row, 4).setText("")
+            self.table.item(row, 4).setToolTip("")
+        self.table.resizeRowsToContents()
+        for row, combo in self.method_combos.items():
+            self.table.setRowHeight(row, max(self.table.rowHeight(row), combo.sizeHint().height()+2))
+        layout.addWidget(self.table)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setText(text("data.auto_scale_preview.apply"))
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setAutoDefault(False)
+        self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(text("common.cancel"))
+        self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setDefault(True)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        layout.addWidget(self.buttons)
+        screen = parent.screen() if parent is not None else self.screen()
+        available = screen.availableGeometry()
+        margins = layout.contentsMargins()
+        chrome = margins.left() + margins.right() + 2*self.table.frameWidth()
+        # The fixed columns retain their natural widths. Only the neuron name
+        # is shortened if the full table would exceed the available screen.
+        rows_shown = min(len(rows), 12)
+        scrollbar = self.table.verticalScrollBar().sizeHint().width() if len(rows) > rows_shown else 0
+        others = sum(self.table.columnWidth(i) for i in range(1, 5))
+        max_name = max(40, available.width()-40-chrome-scrollbar-others)
+        self.table.setColumnWidth(0, min(self.table.columnWidth(0), max_name))
+        width = chrome + scrollbar + sum(self.table.columnWidth(i) for i in range(5))
+        button_width = self.buttons.sizeHint().width() + margins.left() + margins.right()
+        self.setFixedWidth(min(available.width()-40, max(width, button_width)))
+        table_height = (header.sizeHint().height() + sum(self.table.rowHeight(i) for i in range(rows_shown))
+                        + 2*self.table.frameWidth())
+        if width > self.width():
+            table_height += self.table.horizontalScrollBar().sizeHint().height()
+        self.table.setFixedHeight(min(table_height, max(80, available.height()-140)))
+        self.adjustSize()
+
+    def selected_methods(self):
+        return {row: combo.currentData() for row, combo in self.method_combos.items()}
 
 
 class ColumnPropertiesDialog(QDialog):
@@ -2032,10 +2121,46 @@ class TrainingDataDialog(QDialog):
 
         return "minmax_0_1"
 
+    def automatic_scaling_preview_rows(self):
+        """Describe the existing scaling rules without modifying any column."""
+        rows = []
+        text = self.language.text
+        for index, column in enumerate(self.document.get("columns", [])):
+            neuron = self.get_valid_mapped_neuron(column)
+            name = str(neuron.name if neuron is not None else column.get("name") or index+1)
+            values = self.get_column_numeric_values(index)
+            def formatted(value):
+                result = format_number(value)
+                return result.replace(".", ",") if self.language.current_language.lower().startswith("de") else result
+            low = formatted(min(values)) if values else "—"
+            high = formatted(max(values)) if values else "—"
+            if column.get("data_type", "analog") == "binary":
+                method = text("data.calibration.none")
+            elif not values:
+                method = text("data.auto_scale_preview.empty")
+            elif min(values) == max(values):
+                method = text("data.auto_scale_preview.constant")
+            else:
+                method = text("data.calibration." + self.automatic_calibration_mode(column))
+            rows.append((name, text("data.role." + column.get("role", "input")), low, high, method))
+        return rows
+
     def automatically_scale_from_table(self):
         """Skaliert alle geeigneten Trainingsspalten anhand ihrer Rohwerte."""
 
         if not self.has_complete_numeric_record():
+            return
+
+        modes = []
+        for index, column in enumerate(self.document.get("columns", [])):
+            values = self.get_column_numeric_values(index)
+            editable = column.get("data_type", "analog") != "binary" and values and min(values) < max(values)
+            modes.append(self.automatic_calibration_mode(column) if editable else None)
+        preview = AutomaticScalingPreviewDialog(self.automatic_scaling_preview_rows(), self.language, self, modes=modes)
+        accepted = preview.exec() == QDialog.DialogCode.Accepted
+        selected_methods = preview.selected_methods()
+        preview.deleteLater()
+        if not accepted:
             return
 
         scaled_count = 0
@@ -2083,7 +2208,7 @@ class TrainingDataDialog(QDialog):
                 for value in values
             ) / len(values)
             new_calibration = {
-                "mode": self.automatic_calibration_mode(column),
+                "mode": selected_methods.get(data_index, self.automatic_calibration_mode(column)),
                 "source_min": source_min,
                 "source_max": source_max,
                 "mean": mean,
@@ -2109,7 +2234,7 @@ class TrainingDataDialog(QDialog):
 
             column.pop("calibration_source", None)
             column.pop("training_calibration", None)
-            scaled_count += 1
+            scaled_count += int(new_calibration["mode"] != "none")
 
         self.update_headers()
 

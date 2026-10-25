@@ -407,7 +407,9 @@ Training targets are **1 Epoch**, a fixed **Count**, or **Until Error Limit**.
 
 The error curve's Y axis can be linear or logarithmic. Full, compact, and minimized views change only the display, not the training state.
 
-**Chart metric** at the top of Results switches between mean epoch error (MSE), maximum individual error in internal network values, and the **network characteristic**. MSE and maximum individual error are recorded during training and saved with the run. The stopping threshold applies only to MSE. For the network characteristic, select an input, output, and reference record; only the selected input is varied. It shows the current network state, is calculated only while selected, and changes neither training nor weights or biases. Comparison runs without the selected curve remain selected but are not drawn and are marked “No curve available.” When continuing an older run, its maximum-error curve begins with the newly trained epochs.
+**Chart metric** at the top of Results switches between mean epoch error (MSE), maximum individual error in internal network values, and the **network characteristic**. MSE and maximum individual error are recorded during training and saved with the run. The stopping threshold applies only to MSE. It shows the current network state, is calculated only while selected, and changes neither training nor weights or biases. Comparison runs without the selected curve remain selected but are not drawn and are marked “No curve available.” When continuing an older run, its maximum-error curve begins with the newly trained epochs.
+
+The network characteristic requires exactly one input in total. This input and the selected output must be analog. Multiple outputs are allowed; select an analog output for the characteristic. **Network characteristic** always remains available in the chart selection. For unsupported networks, a centered message appears in the lower chart area: “The network characteristic is only available for networks with exactly one input. This input and the selected output must be analog.” The chart and input/output selectors are hidden. The selected chart type is retained.
 
 **Compare runs…** in **Error Curve** opens a compact selection of earlier runs with run number, date, epoch count, and maximum individual error at the saved end of the run. Checkboxes show or hide up to three comparison curves while training continues. When three runs are selected, uncheck one before choosing another. The color legend is placed in the top row between the comparison button and the Y-axis controls to preserve chart height. The current run remains bold blue; reference curves use thinner lines in other colors and extend to the current epoch by default. Click a run in the legend to hide it. Meaningful comparisons require unchanged training data and scaling; runs are matched using the training file recorded in history. Training History remains available for managing and restoring runs.
 
@@ -433,6 +435,12 @@ Test data must use the same column structure and assignment as training data. Te
 For large data sets, record comparison and influence analysis show a progress bar during calculation and remove it when complete. Background network drawing remains frozen during these calculations to reduce run time. Information about the selected data source is visible before the calculation starts.
 
 The target/actual chart can display one output or **All Outputs**. The combined view also supports a tolerance band. When output units differ, it uses a unit-independent percentage tolerance and keeps the unsuitable selection disabled.
+
+The **Network characteristic** tab remains selectable for unsupported networks. It then displays a centered notice in place of the chart and its controls. Exactly one analog input in total and a selected analog output are required; multiple outputs are allowed. For networks with multiple inputs, use **Record comparison**, **Error analysis**, or the **Target/actual chart** to compare targets and predictions.
+
+For supported networks, the slider changes the input value. The blue network characteristic shows the prediction curve, the orange point shows the current prediction, and the yellow point shows the target. A dashed vertical segment shows the deviation between prediction and target at the same input value. Clicking a yellow training point selects its stored target.
+
+Targets are linearly interpolated between neighboring matching analog target points. These targets and deviations from them are explicitly labeled as estimates. No extrapolation is performed outside the available target points. Binary values and conflicting targets at interpolation boundaries are not interpolated. If no target is available, no error segment is shown.
 
 # 22. Exploring the Network
 
@@ -473,6 +481,12 @@ Cards can be resized. Their background color can be set individually or transfer
 ### Binary input array
 
 If the training data define a two-dimensional binary input array, it can be inserted as one independent layout element. Its cells remain linked to their input neurons. In Explore mode the cells switch the corresponding binary inputs; tooltips identify the associated neurons. Colors for the On and Off states can be chosen separately.
+
+### Network characteristic
+
+A network characteristic can be inserted as a separate element when the network has exactly one analog input in total and the selected output is analog. Multiple outputs are allowed. Attempting to insert one into an unsupported network displays: “The network characteristic is only available for networks with exactly one input. This input and the selected output must be analog.” No new characteristic element is created.
+
+Previously saved characteristic elements are hidden for unsupported networks. Their data are preserved when saving, allowing the elements to reappear when the requirements are met again.
 
 ### Graphics, comments, and shapes
 

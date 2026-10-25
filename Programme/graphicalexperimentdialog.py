@@ -8599,6 +8599,8 @@ class GraphicalExperimentDialog(QDialog):
         self.input_state_dirty = True
         self.save_button.setEnabled(True)
         self.save_shortcut.setEnabled(True)
+        if hasattr(self, "curves"):
+            self.curves.sync_input_sliders()
         self.calculate()
 
     def input_slider_pressed(self):
@@ -8835,6 +8837,7 @@ class GraphicalExperimentDialog(QDialog):
             proxy.set_editable(self.edit_mode)
         for proxy in self.curves.proxies:
             proxy.set_editable(self.edit_mode)
+        self.curves.sync_input_sliders()
         for item in self.shape_items:
             item.set_editable(self.edit_mode)
         if self.input_array_card is not None:
@@ -9606,7 +9609,8 @@ class GraphicalExperimentDialog(QDialog):
             }
         return {
             "version": 11,
-            "characteristics": [self.curves.data(p) for p in self.curves.proxies if p.isVisible()],
+            "characteristics": [self.curves.data(p) for p in self.curves.proxies
+                                if self.curves.stored_visible(p)],
             "cards": cards,
             "input_values": {
                 str(mapping["neuron"].id): float(

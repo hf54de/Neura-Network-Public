@@ -547,10 +547,16 @@ class CharacteristicPlot(QWidget):
         super().__init__(parent)
         self.language = language_manager or LanguageManager()
         self.t = self.language.text
+        self.fixed_base_range = None
         self.curve_points = []
         self.background_points = []
         self.data_points = []
         self.data_point_strengths = []
+        self.fixed_base_range = None
+        self.comparison_active = False
+        self.comparison_prediction = None
+        self.operating_point = None
+        self.record_details = {}
         self.reference_point = None
         self.data_point_records = []
         self.background_point_records = []
@@ -648,15 +654,31 @@ class CharacteristicPlot(QWidget):
         self.reference_legend = str(reference_legend or "")
         self.reset_view()
 
+    def set_operating_point(self, point):
+        self.operating_point = point
+        self.update()
+
+    def set_comparison_point(self, point, record=None, prediction=None):
+        self.comparison_prediction = prediction if point is not None else None
+        self.comparison_active = point is not None
+        self.reference_point = point
+        self.reference_record = record
+        self.reference_legend = self.t("analysis.characteristic.comparison_target") if point is not None else ""
+        self.update()
+
     def legend_items(self):
         items = [
             ("curve", self.t("analysis.characteristic.legend_curve"))
         ]
+        if self.operating_point is not None:
+            items.append(("operating", self.t("analysis.characteristic.comparison_actual"
+                if self.comparison_active or self.fixed_base_range is not None else "analysis.characteristic.operating_point")))
         if self.background_points and self.background_legend:
             items.append(("background", self.background_legend))
         if self.data_points and self.point_legend:
             items.append(("similar", self.point_legend))
-        if self.reference_point is not None and self.reference_legend:
+        if (self.reference_point is not None and self.reference_legend
+                and not (self.fixed_base_range is not None and self.data_points)):
             items.append(("reference", self.reference_legend))
         return items
 
@@ -703,6 +725,8 @@ class CharacteristicPlot(QWidget):
         return minimum - padding, maximum + padding
 
     def base_view_range(self):
+        if self.fixed_base_range is not None:
+            return self.fixed_base_range
         points = (
             list(self.curve_points)
             + list(self.background_points)
@@ -710,6 +734,8 @@ class CharacteristicPlot(QWidget):
         )
         if self.reference_point is not None:
             points.append(self.reference_point)
+        if self.operating_point is not None:
+            points.append(self.operating_point)
         if not points:
             return 0.0, 1.0, 0.0, 1.0
         x_minimum, x_maximum = self.padded_range(
@@ -882,13 +908,14 @@ class CharacteristicPlot(QWidget):
         painter.setClipRect(rect.adjusted(-2, -2, 2, 2))
         self.screen_points = []
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(117, 129, 139, 62))
+        painter.setBrush(QColor(117, 129, 139, 170 if self.fixed_base_range is not None else 62))
         for index, (x_value, y_value) in enumerate(self.background_points):
             point = self.map_point(
                 x_value, y_value, rect,
                 x_minimum, x_maximum, y_minimum, y_maximum,
             )
-            painter.drawEllipse(point, 1.45, 1.45)
+            radius = 3.0 if self.fixed_base_range is not None else 1.45
+            painter.drawEllipse(point, radius, radius)
             if rect.adjusted(-8, -8, 8, 8).contains(point):
                 self.screen_points.append({
                     "point": point,
@@ -954,6 +981,25 @@ class CharacteristicPlot(QWidget):
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(QColor("#1676b8"), 2.2))
         painter.drawPath(path)
+        if self.operating_point is not None:
+            point = self.map_point(*self.operating_point, rect,
+                x_minimum, x_maximum, y_minimum, y_maximum)
+            if self.comparison_active and self.reference_point is not None:
+                target = self.map_point(*self.reference_point, rect,
+                    x_minimum, x_maximum, y_minimum, y_maximum)
+                painter.setPen(QPen(QColor("#c55229"), 1.5, Qt.PenStyle.DashLine))
+                comparison = self.map_point(
+                    *(self.comparison_prediction or self.operating_point), rect,
+                    x_minimum, x_maximum, y_minimum, y_maximum)
+                painter.drawLine(target, comparison)
+                painter.setBrush(QColor("#c55229"))
+                painter.drawEllipse(comparison, 3., 3.)
+                painter.setPen(QPen(QColor("#735500"), 1.2))
+                painter.setBrush(QColor("#f4c430"))
+                painter.drawEllipse(target, 6.5, 6.5)
+            painter.setPen(QPen(QColor("#ffffff"), 1.2))
+            painter.setBrush(QColor("#e05829"))
+            painter.drawEllipse(point, 5.5, 5.5)
         painter.restore()
 
         hovered_entry = self.hovered_screen_entry()
@@ -1002,6 +1048,10 @@ class CharacteristicPlot(QWidget):
                     QPointF(item_x, legend_y),
                     QPointF(item_x + 24, legend_y),
                 )
+            elif kind == "operating":
+                painter.setPen(QPen(QColor("#ffffff"), 1))
+                painter.setBrush(QColor("#e05829"))
+                painter.drawEllipse(QPointF(item_x + 12, legend_y), 5, 5)
             elif kind == "background":
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(QColor(117, 129, 139, 90))
@@ -1128,7 +1178,8 @@ class CharacteristicPlot(QWidget):
                 x=self.axis_tick_label(entry["x"]),
                 y_label=self.y_label,
                 y=self.axis_tick_label(entry["y"]),
-            ),
+            ) + ("\n\n" + self.record_details[int(entry["record"])]
+                 if int(entry["record"]) in self.record_details else ""),
             self,
         )
 

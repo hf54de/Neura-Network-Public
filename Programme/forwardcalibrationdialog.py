@@ -7,11 +7,13 @@
 # -------------------------------------------------------------------------------------------------
 import copy
 import math
+from threading import Event
 
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -31,9 +33,11 @@ from PySide6.QtWidgets import (
 )
 
 from trainingdataio import TrainingDataIO
+from applicationcurve import CurvePlot, sample_slice
 from graphicalexperimentdialog import (
     GraphicalExperimentDialog,
     show_yellow_information_dialog,
+    calculate_forward_snapshot,
 )
 from numberformat import format_number
 from language import LanguageManager
@@ -715,8 +719,27 @@ class ForwardCalibrationDialog(QDialog):
             "forwardOutputScroll",
         )
         self.content_layout.addWidget(self.output_scroll)
-        self.content_layout.addStretch(1)
-        self.main_layout.addWidget(self.content_widget, 1)
+        self.characteristic_group = QGroupBox(self.language.text("training.metric.characteristic"))
+        self.characteristic_group.setFixedHeight(280)
+        characteristic_layout = QVBoxLayout(self.characteristic_group)
+        output_row = QHBoxLayout()
+        output_row.addWidget(QLabel(self.language.text("training.characteristic.output")))
+        self.characteristic_output = QComboBox()
+        for index, mapping in enumerate(self.output_columns):
+            if mapping.get("data_type") != "binary":
+                name = str(mapping.get("name") or mapping.get("column_name") or mapping["neuron"].name)
+                self.characteristic_output.addItem(name, index)
+        output_row.addWidget(self.characteristic_output, 1)
+        characteristic_layout.addLayout(output_row)
+        translate = lambda de, en: de if self.language.current_language.lower().startswith("de") else en
+        self.characteristic_plot = CurvePlot(translate, {}, self.characteristic_group)
+        characteristic_layout.addWidget(self.characteristic_plot, 1)
+        self.characteristic_plot.input_value_requested.connect(self.characteristic_input_changed)
+        self.characteristic_output.currentIndexChanged.connect(self.refresh_characteristic)
+        self._characteristic_curve_key = None
+        self.characteristic_group.hide()
+        self.content_layout.addWidget(self.characteristic_group)
+        self.main_layout.addWidget(self.content_widget)
 
         self.status_label = QLabel(
             self.language.text("forward.status.not_calculated")
@@ -784,6 +807,12 @@ class ForwardCalibrationDialog(QDialog):
         self.bottom_layout.addWidget(self.binary_view_button)
         self.bottom_layout.addWidget(self.array_view_button)
         self.bottom_layout.addWidget(self.graphical_experiment_button)
+        self.characteristic_button = QPushButton(self.language.text("training.metric.characteristic"))
+        self.characteristic_button.setCheckable(True)
+        self.characteristic_button.setAutoDefault(False)
+        self.characteristic_button.setVisible(self.characteristic_available())
+        self.characteristic_button.toggled.connect(self.toggle_characteristic)
+        self.bottom_layout.addWidget(self.characteristic_button)
         self.bottom_layout.addStretch(1)
 
         self.button_box = QDialogButtonBox(
@@ -807,6 +836,71 @@ class ForwardCalibrationDialog(QDialog):
         self.update_input_previews()
         self.calculate()
         self.schedule_fit_window()
+
+    def characteristic_available(self):
+        if (len(self.input_columns) != 1 or len(self.network.get_input_neurons()) != 1
+                or self.input_columns[0].get("data_type") == "binary"
+                or not any(m.get("data_type") != "binary" for m in self.output_columns)
+                or not self.records):
+            return False
+        low, high = self.training_range(self.input_columns[0]["column_index"])
+        return math.isfinite(low) and math.isfinite(high) and 0 < high-low < math.inf
+
+    def toggle_characteristic(self, visible):
+        visible = bool(visible and self.characteristic_available())
+        self.characteristic_group.setVisible(visible)
+        if visible:
+            self.refresh_characteristic()
+        self.schedule_fit_window()
+
+    def characteristic_input_changed(self, value):
+        if not self.characteristic_group.isHidden() and self.characteristic_available():
+            self.input_widgets[0]["input_widget"].setValue(value)
+
+    def refresh_characteristic(self, *_):
+        if self.characteristic_group.isHidden() or not self.characteristic_available():
+            return
+        plot = self.characteristic_plot
+        try:
+            x = self.input_columns[0]
+            y = self.output_columns[self.characteristic_output.currentData()]
+            data = self.input_widgets[0]
+            raw = self.current_input_values()
+            bounds = (data["minimum"], data["maximum"])
+            spec = GraphicalExperimentDialog.create_forward_specification(self)
+            key = (spec, y["neuron"].id, repr(x["calibration"]), repr(y["calibration"]), bounds)
+            if key != self._characteristic_curve_key:
+                result = sample_slice(calculate_forward_snapshot, spec,
+                    [dict(id=x["neuron"].id, calibration=x["calibration"])],
+                    dict(id=y["neuron"].id, calibration=y["calibration"]),
+                    raw, x["neuron"].id, bounds, False, Event())
+                plot.points = result[0]
+                self._characteristic_curve_key = key
+            plot.input_name = str(x.get("name") or x.get("column_name") or x["neuron"].name)
+            plot.input_unit = str(x.get("unit") or "").strip()
+            plot.output_unit = str(y.get("unit") or "").strip()
+            plot.x_label = plot.input_name + (f" [{plot.input_unit}]" if plot.input_unit else "")
+            name = str(y.get("name") or y.get("column_name") or y["neuron"].name)
+            plot.y_label = name + (f" [{plot.output_unit}]" if plot.output_unit else "")
+            targets = []
+            for number, record in enumerate(self.records, 1):
+                try:
+                    tx, ty = float(record[x["column_index"]]), float(record[y["column_index"]])
+                    if math.isfinite(tx) and math.isfinite(ty):
+                        targets.append((tx, ty, number))
+                except (IndexError, KeyError, TypeError, ValueError, OverflowError):
+                    continue
+            plot.set_targets(targets)
+            actual = TrainingDataIO.unscale_value(y["neuron"].output_value, y["calibration"], self.language.text)
+            plot.configure_input_slider(bounds, raw[x["neuron"].id], enabled=True)
+            plot.set_point((raw[x["neuron"].id], actual))
+            plot.note = ""
+            plot.update()
+        except (ArithmeticError, KeyError, IndexError, TypeError, ValueError):
+            plot.points = []
+            plot.set_point(None)
+            plot.note = self.language.text("analysis.characteristic.no_data")
+            plot.update()
 
     def show_window_information(self):
         """Erläutert Bedienung und Anzeigen des Erprobungsfensters."""
@@ -1244,11 +1338,11 @@ class ForwardCalibrationDialog(QDialog):
             0,
             self.sizeHint().height() - self.content_widget.sizeHint().height(),
         )
-        requested_height = max(420, chrome_height + content_height)
+        requested_height = max(self.minimumSizeHint().height(), chrome_height + content_height)
         if screen is not None:
             requested_height = min(
                 requested_height,
-                max(420, screen.availableGeometry().height() - 60),
+                max(1, screen.availableGeometry().height() - 60),
             )
         self.resize(requested_width, requested_height)
         self.setFixedHeight(requested_height)
@@ -1399,7 +1493,9 @@ class ForwardCalibrationDialog(QDialog):
             # die Entscheidung nicht von Rundungsdifferenzen der Qt-Geometrie
             # ab.
             data_row_count = max(0, len(visible_rows) - 1)
-            if data_row_count <= self.LIST_VISIBLE_DATA_ROWS:
+            visible_limit = (self.LIST_VISIBLE_DATA_ROWS // 2
+                             if not self.characteristic_group.isHidden() else self.LIST_VISIBLE_DATA_ROWS)
+            if data_row_count <= visible_limit:
                 scroll.setVerticalScrollBarPolicy(
                     Qt.ScrollBarPolicy.ScrollBarAlwaysOff
                 )
@@ -1408,7 +1504,7 @@ class ForwardCalibrationDialog(QDialog):
                 scroll.setVerticalScrollBarPolicy(
                     Qt.ScrollBarPolicy.ScrollBarAlwaysOn
                 )
-                shown_rows = visible_rows[:self.LIST_VISIBLE_DATA_ROWS + 1]
+                shown_rows = visible_rows[:visible_limit + 1]
             shown_bottom = max(
                 widget.geometry().bottom()
                 for _row, widgets in shown_rows
@@ -1764,6 +1860,7 @@ class ForwardCalibrationDialog(QDialog):
             )
             return
 
+        self.refresh_characteristic()
         self.calculation_performed = True
         self.status_label.setText(
             self.language.text("forward.status.completed_unchanged")

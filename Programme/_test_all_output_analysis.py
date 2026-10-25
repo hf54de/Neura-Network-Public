@@ -127,30 +127,19 @@ def main():
     dialog.tabs.setCurrentIndex(3)
     app.processEvents()
     assert dialog.tabs.currentWidget() is dialog.characteristic_tab
-    assert dialog.output_combo.currentData() is None
-    assert dialog.output_combo.model().item(0).isEnabled()
-    assert not dialog.output_combo.view().isRowHidden(0)
-    assert dialog.characteristic_context.text() == dialog.t(
-        'analysis.output_required'
-    )
-    assert dialog.characteristic_plot.curve_points == []
-    dialog.grab().save(str(out/'all-outputs-characteristic-message.png'))
-    dialog.output_combo.setCurrentIndex(1)
-    app.processEvents()
     assert dialog.output_combo.currentData() == 2
-    assert dialog.output_combo.model().item(0).isEnabled()
-    assert not dialog.output_combo.view().isRowHidden(0)
-    assert len(dialog.characteristic_plot.curve_points) == 201
-    assert dialog.characteristic_plot.data_points == [(.6, .8)]
-    assert dialog.characteristic_plot.data_point_records == [2]
-    assert dialog.characteristic_plot.reference_point == (.2, 1.5)
+    assert not dialog.output_combo.model().item(0).isEnabled()
+    assert dialog.output_combo.view().isRowHidden(0)
+    assert dialog.characteristic_plot.reference_point == (.2,1.5)
     assert dialog.characteristic_plot.reference_record == 1
-    assert dialog.characteristic_plot.data_point_strengths == [1.0]
-    assert not dialog.characteristic_show_points.isVisible()
-    assert dialog.characteristic_show_all_records.isVisible()
-    assert not dialog.characteristic_show_all_records.isChecked()
-    assert dialog.characteristic_reference_label.isVisible()
-    assert dialog.characteristic_reference_record.isVisible()
+    assert all(abs(a-b) < 1e-12 for a,b in zip(dialog.characteristic_plot.operating_point, (.2,1.4)))
+    assert len(dialog.characteristic_plot.curve_points) == 201
+    assert dialog.characteristic_plot.data_points == [(.2,1.5)]
+    assert dialog.characteristic_show_points.isVisible()
+    assert dialog.characteristic_show_points.isChecked()
+    assert not hasattr(dialog, 'characteristic_reference_record')
+    dialog.characteristic_other_button.click()
+    dialog.characteristic_editors[1].setValue(.4)
     similarity_source = dict(
         inputs=mappings[:2],
         records=[[0, 0, 0], [10, .1, 0], [20, .5, 0], [30, 1, 0]],
@@ -206,11 +195,11 @@ def main():
     app.processEvents()
     assert dialog.characteristic_plot.view_range is None
     assert not dialog.characteristic_show_all_button.isEnabled()
-    dialog.characteristic_show_all_records.setChecked(True)
+    dialog.characteristic_show_points.setChecked(True)
     app.processEvents()
-    assert dialog.characteristic_plot.point_legend == 'Similar training records'
-    assert dialog.characteristic_plot.background_legend == 'All training records'
-    assert dialog.characteristic_plot.background_points == [(.6, .8)]
+    assert dialog.characteristic_plot.point_legend == 'Matching targets'
+    assert dialog.characteristic_plot.background_legend == 'Different other inputs'
+    assert dialog.characteristic_plot.background_points == [(.6,.8)]
     assert dialog.characteristic_plot.background_point_records == [2]
     assert len(dialog.characteristic_plot.data_points) == 1
     record_two_points = [
@@ -221,7 +210,7 @@ def main():
     chosen = dialog.characteristic_plot.nearest_record(
         record_two_points[0]['point']
     )
-    assert chosen['priority'] == 1
+    assert chosen['priority'] == 0
     class HoverEvent:
         def __init__(self, position):
             self._position = position
@@ -233,7 +222,7 @@ def main():
         HoverEvent(record_two_points[0]['point'])
     )
     app.processEvents()
-    assert dialog.characteristic_plot.hovered_screen_entry()['priority'] == 1
+    assert dialog.characteristic_plot.hovered_screen_entry()['priority'] == 0
     assert dialog.characteristic_plot.x_unit == '%'
     assert dialog.characteristic_plot.y_unit == '%'
     dialog.grab().save(str(out/'characteristic-hover-values.png'))
@@ -241,16 +230,16 @@ def main():
     dialog.characteristic_plot.update()
     app.processEvents()
     dialog.grab().save(str(out/'all-records-characteristic.png'))
-    dialog.characteristic_show_all_records.setChecked(False)
+    dialog.characteristic_show_points.setChecked(False)
     app.processEvents()
     source['inputs'] = mappings[:1]
     dialog.populate_characteristic_inputs()
     dialog.refresh_characteristic()
     app.processEvents()
-    assert not dialog.characteristic_reference_label.isVisible()
-    assert not dialog.characteristic_reference_record.isVisible()
+    assert not dialog.characteristic_other_button.isVisible()
     assert dialog.characteristic_show_points.isVisible()
-    assert not dialog.characteristic_show_all_records.isVisible()
+    dialog.characteristic_show_points.setChecked(True)
+    app.processEvents()
     assert len(dialog.characteristic_plot.data_points) == 2
     assert 'reference record' not in dialog.characteristic_explanation.text().lower()
     dialog.grab().save(str(out/'single-input-characteristic.png'))
@@ -261,7 +250,7 @@ def main():
     app.processEvents()
     record_two = next(
         entry for entry in dialog.characteristic_plot.screen_points
-        if entry['record'] == 2 and entry['priority'] == 1
+        if entry['record'] == 2 and entry['priority'] == 0
     )
     QTest.mouseClick(
         dialog.characteristic_plot,
@@ -269,8 +258,11 @@ def main():
         pos=record_two['point'].toPoint(),
     )
     app.processEvents()
-    assert dialog.tabs.currentIndex() == 0
-    assert dialog.records_table.currentRow() == 1
+    assert dialog.tabs.currentWidget() is dialog.characteristic_tab
+    assert not hasattr(dialog, "characteristic_compare")
+    assert dialog.characteristic_values[1] == .4
+    assert dialog.characteristic_plot.reference_record == 1
+    assert dialog.characteristic_plot.reference_point == (.2, 1.5)
     dialog.tabs.setCurrentIndex(4)
     app.processEvents()
     dialog.tolerance_spin.setValue(.125)

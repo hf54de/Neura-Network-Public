@@ -1225,6 +1225,14 @@ class TrainingDialog(QDialog):
             Qt.WidgetAttribute.WA_TransparentForMouseEvents,
             True,
         )
+        self.training_characteristic_notice = QLabel(
+            self.language.text("training.characteristic.unavailable"))
+        self.training_characteristic_notice.setWordWrap(True)
+        self.training_characteristic_notice.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.training_characteristic_notice.setMinimumHeight(190)
+        self.training_characteristic_notice.setMargin(16)
+        self.training_characteristic_notice.hide()
+        self.error_chart_layout.addWidget(self.training_characteristic_notice, 1)
         self.training_characteristic_plot.hide()
         self.error_chart_layout.addWidget(
             self.training_characteristic_plot
@@ -1232,6 +1240,7 @@ class TrainingDialog(QDialog):
         self.error_chart_layout.setStretch(0, 0)
         self.error_chart_layout.setStretch(1, 1)
         self.error_chart_layout.setStretch(2, 1)
+        self.error_chart_layout.setStretch(3, 1)
         self.comparison_legend = QLabel(self.error_chart_group)
         self.comparison_legend.setWordWrap(False)
         self.comparison_legend.setFont(comparison_font)
@@ -3280,9 +3289,15 @@ class TrainingDialog(QDialog):
             self.comparison_popup.error_metric = self.error_chart.error_metric
             self.comparison_popup.set_runs(self.comparison_runs, self.comparison_run_ids)
 
+    def training_characteristic_available(self):
+        return (len(self.input_columns) == 1
+                and self.input_columns[0].get("data_type") != "binary"
+                and any(m.get("data_type") != "binary" for m in self.output_columns))
+
     def update_error_metric(self, index=None):
         metric = self.error_metric_combo.currentData() or "mse"
         characteristic_visible = metric == "characteristic"
+        self.training_characteristic_notice.hide()
         self.error_chart.setVisible(not characteristic_visible)
         self.training_characteristic_plot.setVisible(characteristic_visible)
         self.training_characteristic_controls.setVisible(characteristic_visible)
@@ -3326,6 +3341,8 @@ class TrainingDialog(QDialog):
                 mapping["neuron"].id,
             )
         for mapping in self.output_columns:
+            if mapping.get("data_type") == "binary":
+                continue
             self.training_characteristic_output.addItem(
                 ResultAnalysisDialog.characteristic_axis_label(mapping),
                 mapping["neuron"].id,
@@ -3344,7 +3361,7 @@ class TrainingDialog(QDialog):
         )
 
     def training_characteristic_selection_changed(self, _value=None):
-        multiple_inputs = len(self.input_columns) > 1
+        multiple_inputs = False
         self.training_characteristic_reference_label.setVisible(
             multiple_inputs
         )
@@ -3371,6 +3388,16 @@ class TrainingDialog(QDialog):
             self.output_columns,
             self.training_characteristic_output,
         )
+        supported = (len(self.input_columns) == 1 and input_mapping is not None
+                     and input_mapping.get("data_type") != "binary"
+                     and output_mapping is not None
+                     and output_mapping.get("data_type") != "binary")
+        self.training_characteristic_notice.setVisible(not supported)
+        self.training_characteristic_plot.setVisible(supported)
+        self.training_characteristic_controls.setVisible(supported)
+        if not supported:
+            self.training_characteristic_plot.set_data([], [])
+            return False
         if input_mapping is None or output_mapping is None or not self.records:
             self.training_characteristic_plot.set_data([], [])
             return False

@@ -423,7 +423,9 @@ Trainingsziele sind **1 Epoche**, eine feste **Anzahl** oder **Bis Fehlergrenze*
 
 Die Y-Achse der Fehlerkurve kann linear oder logarithmisch dargestellt werden. Voll-, Kompakt- und Minimalansicht verändern nur die Anzeige, nicht den Trainingszustand.
 
-**Kurvenanzeige** oben im Ergebnisrahmen wechselt zwischen mittlerem Epochenfehler (MSE), maximalem Einzelfehler in internen Netzwerten und **Netzkennlinie**. MSE und maximaler Einzelfehler werden beim Training aufgezeichnet und mit dem Lauf gespeichert. Die Fehlergrenze gilt ausschließlich für den MSE. Für die Netzkennlinie werden Eingang, Ausgang und Bezugsdatensatz gewählt; nur der ausgewählte Eingang wird verändert. Sie zeigt den aktuellen Netzstand, wird nur bei ausgewählter Ansicht berechnet und verändert weder Training noch Gewichte oder Bias-Werte. Vergleichsläufe ohne den gewählten Verlauf bleiben ausgewählt, werden aber nicht gezeichnet und mit „Kein Verlauf vorhanden“ gekennzeichnet. Bei fortgesetzten alten Läufen beginnt die Maximalfehlerkurve erst mit den neu trainierten Epochen.
+**Kurvenanzeige** oben im Ergebnisrahmen wechselt zwischen mittlerem Epochenfehler (MSE), maximalem Einzelfehler in internen Netzwerten und **Netzkennlinie**. MSE und maximaler Einzelfehler werden beim Training aufgezeichnet und mit dem Lauf gespeichert. Die Fehlergrenze gilt ausschließlich für den MSE. Sie zeigt den aktuellen Netzstand, wird nur bei ausgewählter Ansicht berechnet und verändert weder Training noch Gewichte oder Bias-Werte. Vergleichsläufe ohne den gewählten Verlauf bleiben ausgewählt, werden aber nicht gezeichnet und mit „Kein Verlauf vorhanden“ gekennzeichnet. Bei fortgesetzten alten Läufen beginnt die Maximalfehlerkurve erst mit den neu trainierten Epochen.
+
+Die Netzkennlinie setzt genau einen Eingang insgesamt voraus. Dieser Eingang und der ausgewählte Ausgang müssen analog sein. Mehrere Ausgänge sind erlaubt; für die Kennlinie wird ein analoger Ausgang ausgewählt. **Netzkennlinie** bleibt immer in der Kurvenauswahl verfügbar. Bei ungeeigneten Netzen erscheint im unteren Grafikbereich zentriert der Hinweis: „Die Netzkennlinie ist nur für Netze mit genau einem Eingang verfügbar. Dieser Eingang und der ausgewählte Ausgang müssen analog sein.“ Grafik sowie Eingangs- und Ausgangsauswahl werden ausgeblendet. Die gewählte Kurvenart bleibt erhalten.
 
 **Vergleichsläufe…** im Bereich **Fehlerverlauf** öffnet eine kompakte Auswahl früherer Läufe mit Laufnummer, Datum, Epochenzahl und maximalem Einzelfehler am gespeicherten Laufende. Häkchen blenden bis zu drei Vergleichskurven ein oder aus, während das Training weiterläuft. Bei drei ausgewählten Läufen muss zunächst einer abgewählt werden. Die farbige Legende steht platzsparend in der oberen Zeile zwischen Vergleichsauswahl und Y-Achse. Der aktuelle Lauf bleibt kräftig blau; Vergleichskurven erscheinen dünner in anderen Farben und reichen standardmäßig bis zur aktuellen Epoche. Ein Klick auf den Lauf in der Legende blendet ihn aus. Für einen aussagekräftigen Vergleich müssen Trainingsdaten und Skalierung unverändert sein; die Zuordnung erfolgt anhand der in der Historie gespeicherten Trainingsdatei. Die Trainingshistorie dient weiterhin zum Verwalten und Wiederherstellen der Läufe.
 
@@ -445,6 +447,12 @@ Testdaten müssen dieselbe Spaltenstruktur und Zuordnung wie die Trainingsdaten 
 Bei umfangreichen Datensätzen zeigen Datensatzvergleich und Einflussanalyse während der Berechnung einen Fortschrittsbalken, der nach Abschluss wieder verschwindet. Die Netzwerkzeichnung im Hintergrund bleibt dabei eingefroren, damit die Auswertung schneller läuft. Die Datenquelleninformation wird bereits vor der Berechnung angezeigt.
 
 Im Soll-Ist-Diagramm kann ein Ausgang oder **Alle Outputs** gewählt werden. Auch die gemeinsame Ansicht besitzt eine Toleranzanzeige. Bei unterschiedlichen Einheiten verwendet sie eine einheitenunabhängige prozentuale Toleranz; die nicht passende Auswahl bleibt gesperrt.
+
+Die Registerkarte **Netzkennlinie** bleibt auch bei ungeeigneten Netzen auswählbar. Sie zeigt dann einen zentrierten Hinweis anstelle der Grafik und ihrer Bedienelemente. Voraussetzung sind genau ein analoger Eingang insgesamt und ein ausgewählter analoger Ausgang; mehrere Ausgänge sind erlaubt. Bei mehreren Eingängen verwenden Sie **Datensatzvergleich**, **Fehlerauswertung** oder **Soll-Ist-Diagramm** für den Soll-Ist-Vergleich.
+
+Bei geeigneten Netzen verändert der Schieberegler den Eingangswert. Die blaue Netzkennlinie zeigt den Verlauf der Netzvorhersage, der orange Punkt die aktuelle Vorhersage und der gelbe Punkt den Sollwert. Eine gestrichelte senkrechte Strecke zeigt die Abweichung zwischen Vorhersage und Sollwert am gleichen Eingangswert. Ein Klick auf einen gelben Trainingspunkt wählt dessen gespeicherten Sollwert.
+
+Zwischen benachbarten passenden analogen Sollpunkten wird linear interpoliert. Solche Sollwerte und die Abweichung zu ihnen werden ausdrücklich als Schätzung gekennzeichnet. Außerhalb der vorhandenen Sollpunkte wird nicht extrapoliert. Binäre Werte und widersprüchliche Sollwerte an den Interpolationsgrenzen werden nicht interpoliert. Ist kein Sollwert verfügbar, erscheint keine Fehlerstrecke.
 
 # 22. Netzwerk erproben
 
@@ -475,6 +483,12 @@ Im Menü **Gestaltung** blendet **Raster anzeigen** ein Hilfsraster ein. Über *
 Mit einem Rechtsklick auf eine freie Stelle können einzelne Eingänge und Ausgänge, das binäre Eingabe-Array, eine Grafik, Kommentare sowie Linien, Rechtecke und Kreise eingefügt werden. **Alle Ein- und Ausgänge hinzufügen** ergänzt in einem Schritt sämtliche noch nicht sichtbaren Neuronenkacheln, ohne vorhandene Kacheln zu verdoppeln. Nicht benötigte Ein- und Ausgänge lassen sich aus der Gestaltung entfernen, ohne die zugehörigen Neuronen aus dem Projekt zu löschen.
 
 Analoge Eingänge besitzen ein kompaktes, zentriertes Zahlenfeld und einen Regler, binäre Eingänge einen Ein-/Aus-Schalter. Analoge Ausgänge können als Balken oder Zeigerinstrument dargestellt werden; beide Skalen zeigen **0 %** bis **100 %**. Lange Namen und Einheiten passen sich an die Kartengröße an und bleiben vollständig als Hinweis verfügbar. Analoge Werte werden mit höchstens zwei Nachkommastellen angezeigt, Werte unter 0,01 bei Bedarf genauer. Bei jedem binären Ausgang kann im eigenen Kontextmenü individuell gewählt werden, ob nur die Entscheidung oder zusätzlich Zwischenwert und daraus abgeleiteter Zustand angezeigt werden.
+
+## Netzkennlinie
+
+Eine Netzkennlinie kann als eigenes Element eingefügt werden, wenn das Netz insgesamt genau einen analogen Eingang besitzt und der ausgewählte Ausgang analog ist. Mehrere Ausgänge sind erlaubt. Bei ungeeigneten Netzen erscheint beim Einfügeversuch die Meldung: „Die Netzkennlinie ist nur für Netze mit genau einem Eingang verfügbar. Dieser Eingang und der ausgewählte Ausgang müssen analog sein.“ Es wird kein neues Kennlinienelement angelegt.
+
+Bereits gespeicherte Kennlinienelemente werden bei ungeeigneten Netzen ausgeblendet. Ihre Daten bleiben beim Speichern erhalten, sodass die Elemente bei wieder passenden Voraussetzungen erneut erscheinen können.
 
 ## Grafik, Kommentare und Formen
 

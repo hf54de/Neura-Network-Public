@@ -391,6 +391,9 @@ class MainWindow(QMainWindow):
             self.rename_current_project
         )
 
+        self.action_delete_project = datei_menu.addAction(text("action.delete_project"))
+        self.action_delete_project.triggered.connect(self.delete_current_project)
+
         datei_menu.addSeparator()
 
         self.action_project_description = datei_menu.addAction(
@@ -7944,6 +7947,7 @@ class MainWindow(QMainWindow):
             self.action_save,
             self.action_save_as,
             self.action_rename_project,
+            self.action_delete_project,
             self.action_project_description,
             self.action_exit,
             self.action_undo,
@@ -9356,6 +9360,7 @@ class MainWindow(QMainWindow):
         """
 
         if modified:
+            self._no_active_project = False
             self.refresh_training_history_validity()
             if not self._history_restoring:
                 self.schedule_history_snapshot()
@@ -9395,14 +9400,20 @@ class MainWindow(QMainWindow):
                 and not self.training_observation_mode
             )
 
+        if hasattr(self, "action_delete_project"):
+            self.action_delete_project.setEnabled(
+                not self.training_observation_mode and self.project_deletion_directory() is not None)
+            self.action_delete_project.setToolTip(self.language.text("dialog.delete_project.requirements"))
+
         if self.current_project_path:
+            self._no_active_project = False
             project_name = str(
                 Path(self.current_project_path).expanduser().resolve()
             )
 
         else:
             project_name = self.language.text(
-                "window.new_project"
+                "window.no_project" if getattr(self, "_no_active_project", False) else "window.new_project"
             )
 
         title = (
@@ -9472,6 +9483,7 @@ class MainWindow(QMainWindow):
         vollständig leeres Projekt zurück.
         """
 
+        self._no_active_project = False
         self.training_history = []
         self._invalidated_training_runs = {}
         self.scene.clear_project()
@@ -10893,6 +10905,85 @@ class MainWindow(QMainWindow):
             self.update_project_image_action()
             self.update_example_projects_menu()
         return saved
+
+    def project_deletion_directory(self):
+        """Return only a dedicated, existing, unlinked project directory."""
+        if not self.current_project_path:
+            return None
+        try:
+            project = Path(self.current_project_path).expanduser().absolute()
+            directory = project.parent
+            if (project.suffix.casefold() != ".nnproj" or not project.is_file()
+                    or directory.name.casefold() != project.stem.casefold()):
+                return None
+            # Resolve only after rejecting aliases: a link must never change
+            # which physical directory the confirmation authorizes.
+            if any(part.is_symlink() or part.is_junction() for part in (project, *project.parents)):
+                return None
+            directory = directory.resolve(strict=True)
+            protected = {Path.home().resolve(), *Path(__file__).resolve().parents,
+                         *Path(sys.executable).resolve().parents}
+            configured = str(self.ui_settings.get("project_directory") or "").strip()
+            if configured:
+                protected.add(Path(configured).expanduser().resolve())
+            if directory in protected or directory.name.casefold() in {"projects_de", "projects_en"}:
+                return None
+            # A folder containing several project files is a collection.
+            if any(item.suffix.casefold() == ".nnproj" and item != project
+                   for item in directory.iterdir()):
+                return None
+            return directory
+        except (OSError, ValueError):
+            return None
+
+    def delete_current_project(self):
+        """Delete the explicitly confirmed project folder and unload it."""
+        if self.training_observation_mode:
+            return False
+        directory = self.project_deletion_directory()
+        title = self.language.text("dialog.delete_project.title")
+        if directory is None:
+            QMessageBox.warning(self, title, self.language.text("dialog.delete_project.requirements"))
+            return False
+        project_path = self.current_project_path
+        message = QMessageBox(self)
+        message.setWindowTitle(title)
+        message.setIcon(QMessageBox.Icon.Warning)
+        message.setText(self.language.text("dialog.delete_project.confirm", directory=str(directory)))
+        delete_button = message.addButton(
+            self.language.text("dialog.delete_project.delete"), QMessageBox.ButtonRole.DestructiveRole)
+        cancel_button = message.addButton(
+            self.language.text("dialog.delete_project.cancel"), QMessageBox.ButtonRole.RejectRole)
+        message.setDefaultButton(cancel_button)
+        message.setEscapeButton(cancel_button)
+        message.exec()
+        if message.clickedButton() != delete_button:
+            return False
+        # Check the resolved target again immediately before recursive deletion.
+        if (self.training_observation_mode or self.current_project_path != project_path
+                or self.project_deletion_directory() != directory):
+            QMessageBox.warning(self, title, self.language.text("dialog.delete_project.requirements"))
+            return False
+        try:
+            shutil.rmtree(directory)
+        except OSError as error:
+            QMessageBox.critical(self, title, self.language.text("dialog.delete_project.failed", error=str(error)))
+            return False
+
+        self.reset_project()
+        self._no_active_project = True
+        self.update_window_title()
+        try:
+            Settings.remove_recent_project_file(project_path)  # Both interface languages.
+            last_file = Settings.get_last_project_file()
+            if last_file and Path(last_file).expanduser().resolve().is_relative_to(directory):
+                Settings.clear_last_project_file()
+        except OSError as error:
+            QMessageBox.warning(self, title, self.language.text("dialog.delete_project.history_failed", error=str(error)))
+        self.update_recent_projects_menu()
+        self.update_example_projects_menu()
+        self.statusBar().showMessage(self.language.text("status.project.deleted"), 5000)
+        return True
 
     def rename_current_project(self):
         """Benennt Projektordner und Projektdatei gemeinsam und sicher um."""
