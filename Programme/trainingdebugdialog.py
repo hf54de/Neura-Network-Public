@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from numberformat import format_number
+from adamoptimizer import adam_calculation_lines
 from trainingdataio import TrainingDataIO
 from language import LanguageManager
 
@@ -62,13 +63,18 @@ class TrainingDebugDialog(QDialog):
         input_columns,
         output_columns,
         parent=None,
-        language_manager=None
+        language_manager=None,
+        solver=None,
+        learning_rate=None,
     ):
         super().__init__(parent)
 
         self.language = language_manager or LanguageManager()
         self.t = self.language.text
         self.network = network
+        self.solver = solver if solver is not None else network.get_solver()
+        self.initial_learning_rate = network.get_learning_rate()
+        self.initial_momentum = network.get_momentum()
         self.records = records
         self.input_columns = input_columns
         self.output_columns = output_columns
@@ -83,6 +89,7 @@ class TrainingDebugDialog(QDialog):
             for neuron in self.network.get_neurons()
         }
         self.initial_momentum_state = self.network.get_momentum_state()
+        self.initial_optimizer_state = self.network.get_optimizer_state()
 
         self.setWindowTitle(
             self.t("debug.window.title")
@@ -143,7 +150,7 @@ class TrainingDebugDialog(QDialog):
             0.001
         )
         self.learning_rate.setValue(
-            self.network.get_learning_rate()
+            self.initial_learning_rate if learning_rate is None else learning_rate
         )
 
         self.momentum = QDoubleSpinBox()
@@ -157,6 +164,8 @@ class TrainingDebugDialog(QDialog):
             self.record_combo
         )
 
+        self.selection_layout.addRow(self.t("adam.solver.label"),
+            QLabel(self.t("adam.solver." + self.solver)))
         self.selection_layout.addRow(
             self.t("debug.learning_rate"),
             self.learning_rate
@@ -165,6 +174,9 @@ class TrainingDebugDialog(QDialog):
             self.t("debug.momentum"),
             self.momentum
         )
+        if self.solver == "adam":
+            self.momentum.hide()
+            self.selection_layout.labelForField(self.momentum).hide()
 
         self.button_layout = QHBoxLayout()
 
@@ -535,8 +547,11 @@ class TrainingDebugDialog(QDialog):
 
         record = self.get_selected_record()
 
+        # Selecting or inspecting a solver must not reset the active run.
+        self.network.set_solver(self.solver)
         self.network.reset_runtime_values()
-        self.network.restore_momentum_state(self.initial_momentum_state)
+        if self.network.get_solver() == "sgd":
+            self.network.restore_momentum_state(self.initial_momentum_state)
 
         target_values = self.apply_record(
             record
@@ -842,19 +857,24 @@ class TrainingDebugDialog(QDialog):
             detail = (self.network.trainer.last_step_details or {}).get(
                 "connections", {}
             ).get(connection.id, {})
-            lines.append(" " * 8 + self.t(
-                "debug.report.momentum_update",
-                gradient=format_signed_debug_number(
-                    detail.get("weight_gradient_update", update_value)
-                ),
-                previous=format_signed_debug_number(
-                    detail.get("weight_previous_velocity", 0.0)
-                ),
-                contribution=format_signed_debug_number(
-                    detail.get("weight_momentum_term", 0.0)
-                ),
-                velocity=format_signed_debug_number(update_value),
-            ))
+            if detail.get("adam") is not None:
+                lines.extend(" " * 8 + line for line in adam_calculation_lines(
+                    detail["adam"], self.network.get_learning_rate(), weights_before[connection.id],
+                    self.t, format_debug_number))
+            else:
+                lines.append(" " * 8 + self.t(
+                    "debug.report.momentum_update",
+                    gradient=format_signed_debug_number(
+                        detail.get("weight_gradient_update", update_value)
+                    ),
+                    previous=format_signed_debug_number(
+                        detail.get("weight_previous_velocity", 0.0)
+                    ),
+                    contribution=format_signed_debug_number(
+                        detail.get("weight_momentum_term", 0.0)
+                    ),
+                    velocity=format_signed_debug_number(update_value),
+                ))
 
         lines.append(
             ""
@@ -889,19 +909,24 @@ class TrainingDebugDialog(QDialog):
             detail = (self.network.trainer.last_step_details or {}).get(
                 "neurons", {}
             ).get(neuron.id, {})
-            lines.append(" " * 8 + self.t(
-                "debug.report.momentum_update",
-                gradient=format_signed_debug_number(
-                    detail.get("bias_gradient_update", update_value)
-                ),
-                previous=format_signed_debug_number(
-                    detail.get("bias_previous_velocity", 0.0)
-                ),
-                contribution=format_signed_debug_number(
-                    detail.get("bias_momentum_term", 0.0)
-                ),
-                velocity=format_signed_debug_number(update_value),
-            ))
+            if detail.get("adam") is not None:
+                lines.extend(" " * 8 + line for line in adam_calculation_lines(
+                    detail["adam"], self.network.get_learning_rate(), biases_before[neuron.id],
+                    self.t, format_debug_number))
+            else:
+                lines.append(" " * 8 + self.t(
+                    "debug.report.momentum_update",
+                    gradient=format_signed_debug_number(
+                        detail.get("bias_gradient_update", update_value)
+                    ),
+                    previous=format_signed_debug_number(
+                        detail.get("bias_previous_velocity", 0.0)
+                    ),
+                    contribution=format_signed_debug_number(
+                        detail.get("bias_momentum_term", 0.0)
+                    ),
+                    velocity=format_signed_debug_number(update_value),
+                ))
 
         lines.append(
             ""
@@ -985,6 +1010,10 @@ class TrainingDebugDialog(QDialog):
 
                 neuron.update()
 
+        self.network.set_learning_rate(self.initial_learning_rate)
+        self.network.set_momentum(self.initial_momentum)
+        self.network.restore_optimizer_state(self.initial_optimizer_state)
+        self.network.restore_momentum_state(self.initial_momentum_state)
         self.network.reset_runtime_values()
 
         self.calculate_forward_only()

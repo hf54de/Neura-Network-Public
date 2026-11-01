@@ -1,3 +1,4 @@
+from chartcolors import ChartColors
 # -------------------------------------------------------------------------------------------------
 # Datei: analysisplot.py
 # Zweck: Erstellt Diagramme für Test-, Analyse- und Vergleichsergebnisse.
@@ -14,8 +15,10 @@ from PySide6.QtWidgets import QSizePolicy, QToolTip, QWidget
 from language import LanguageManager
 
 
-class SollIstPlot(QWidget):
+class SollIstPlot(ChartColors, QWidget):
     """Kompaktes interaktives Soll-Ist-Diagramm ohne externe Abhängigkeiten."""
+
+    chart_colors_enabled = True
 
     recordActivated = Signal(str, int)
 
@@ -154,10 +157,10 @@ class SollIstPlot(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#ffffff"))
+        painter.fillRect(self.rect(), self.chart_color("#ffffff"))
         rect = self.plot_rect()
         x_minimum, x_maximum, y_minimum, y_maximum = self.current_view_range()
-        painter.setPen(QPen(QColor("#9aa7b2"), 1))
+        painter.setPen(QPen(self.chart_color("#9aa7b2"), 1))
         painter.drawRect(rect)
 
         if self.binary and self.view_range is None:
@@ -171,9 +174,9 @@ class SollIstPlot(QWidget):
                 x_value, y_minimum, rect,
                 x_minimum, x_maximum, y_minimum, y_maximum
             ).x()
-            painter.setPen(QPen(QColor("#e3e8ec"), 1))
+            painter.setPen(QPen(self.chart_color("#e3e8ec"), 1))
             painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
-            painter.setPen(QColor("#4f5962"))
+            painter.setPen(self.chart_color("#4f5962"))
             painter.drawText(QRectF(x - 35, rect.bottom() + 5, 70, 20), Qt.AlignmentFlag.AlignHCenter, self.axis_tick_label(x_value))
 
         for y_value in y_ticks:
@@ -181,9 +184,9 @@ class SollIstPlot(QWidget):
                 x_minimum, y_value, rect,
                 x_minimum, x_maximum, y_minimum, y_maximum
             ).y()
-            painter.setPen(QPen(QColor("#e3e8ec"), 1))
+            painter.setPen(QPen(self.chart_color("#e3e8ec"), 1))
             painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
-            painter.setPen(QColor("#4f5962"))
+            painter.setPen(self.chart_color("#4f5962"))
             painter.drawText(QRectF(2, y - 10, 54, 20), Qt.AlignmentFlag.AlignRight, self.axis_tick_label(y_value))
 
         if self.show_tolerance and self.tolerance > 0.0:
@@ -197,17 +200,17 @@ class SollIstPlot(QWidget):
                                        x_minimum, x_maximum, y_minimum, y_maximum) for x in xs]
             upper, lower = boundary(1), boundary(-1)
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(67, 160, 105, 38))
+            painter.setBrush(self.chart_color(67, 160, 105, 38))
             painter.drawPolygon(QPolygonF(upper + list(reversed(lower))))
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.setPen(QPen(QColor(67, 145, 96, 150), 1))
+            painter.setPen(QPen(self.chart_color(67, 145, 96, 150), 1))
             painter.drawPolyline(QPolygonF(upper))
             painter.drawPolyline(QPolygonF(lower))
             painter.restore()
 
         painter.save()
         painter.setClipRect(rect)
-        painter.setPen(QPen(QColor("#68737d"), 2, Qt.PenStyle.DashLine))
+        painter.setPen(QPen(self.chart_color("#68737d"), 2, Qt.PenStyle.DashLine))
         painter.drawLine(
             self.map_point(x_minimum, x_minimum, rect, x_minimum, x_maximum,
                            y_minimum, y_maximum),
@@ -220,7 +223,7 @@ class SollIstPlot(QWidget):
                                         x_maximum, y_minimum, y_maximum).x()
             decision_y = self.map_point(x_minimum, 0.5, rect, x_minimum,
                                         x_maximum, y_minimum, y_maximum).y()
-            painter.setPen(QPen(QColor("#8a949d"), 1.5, Qt.PenStyle.DashLine))
+            painter.setPen(QPen(self.chart_color("#8a949d"), 1.5, Qt.PenStyle.DashLine))
             painter.drawLine(
                 QPointF(decision_x, rect.top()),
                 QPointF(decision_x, rect.bottom()),
@@ -231,7 +234,7 @@ class SollIstPlot(QWidget):
             )
         painter.restore()
 
-        painter.setPen(QColor("#243746"))
+        painter.setPen(self.chart_color("#243746"))
         painter.drawText(QRectF(rect.left(), rect.bottom() + 29, rect.width(), 22), Qt.AlignmentFlag.AlignCenter, self.t("analysis.plot.target_axis"))
         painter.save()
         painter.translate(18, rect.center().y())
@@ -240,7 +243,7 @@ class SollIstPlot(QWidget):
         painter.restore()
 
         if self.binary:
-            painter.setPen(QColor("#5b6570"))
+            painter.setPen(self.chart_color("#5b6570"))
             threshold = 0.5
             quadrants = (
                 (self.t("analysis.binary.true_off"),
@@ -288,9 +291,9 @@ class SollIstPlot(QWidget):
                     continue
                 y = rect.top() + 13 + offset * 22
                 painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QColor(color))
+                painter.setBrush(self.chart_color(color))
                 painter.drawEllipse(QPointF(legend_x, y), 5, 5)
-                painter.setPen(QColor("#243746"))
+                painter.setPen(self.chart_color("#243746"))
                 painter.drawText(QPointF(legend_x + 11, y + 5), self.t(label_key))
 
         self.screen_points = []
@@ -312,20 +315,20 @@ class SollIstPlot(QWidget):
                 > self.tolerance_at(row["target"])
             )
             if row.get("plot_color"):
-                color = QColor(row["plot_color"])
+                color = self.chart_color(row["plot_color"])
             elif outside_tolerance or row.get("binary_error"):
-                color = QColor("#d02020")
+                color = self.chart_color("#d02020")
             elif row.get("source_kind") == "test":
-                color = QColor("#e07a16")
+                color = self.chart_color("#e07a16")
             else:
-                color = QColor("#1676b8")
-            painter.setPen(QPen(QColor("#ffffff"), 1))
+                color = self.chart_color("#1676b8")
+            painter.setPen(QPen(self.chart_color("#ffffff"), 1))
             painter.setBrush(color)
             radius = 7 if highlighted else 4.5
             painter.drawEllipse(point, radius, radius)
             if highlighted:
                 painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.setPen(QPen(QColor("#f0a000"), 2))
+                painter.setPen(QPen(self.chart_color("#f0a000"), 2))
                 painter.drawEllipse(point, 10, 10)
             if rect.adjusted(-11, -11, 11, 11).contains(point):
                 self.screen_points.append((point, row))
@@ -338,7 +341,7 @@ class SollIstPlot(QWidget):
         if hovered_point is not None and hovered_row is not None:
             painter.save()
             painter.setClipRect(rect)
-            painter.setPen(QPen(QColor("#4f788f"), 1, Qt.PenStyle.DashLine))
+            painter.setPen(QPen(self.chart_color("#4f788f"), 1, Qt.PenStyle.DashLine))
             painter.drawLine(
                 QPointF(rect.left(), hovered_point.y()),
                 hovered_point,
@@ -353,8 +356,8 @@ class SollIstPlot(QWidget):
             suffix = f" {unit}" if unit else ""
             x_text = f"{hovered_row['target']:.6g}{suffix}"
             y_text = f"{hovered_row['actual']:.6g}{suffix}"
-            painter.setPen(QPen(QColor("#4f788f"), 1))
-            painter.setBrush(QColor("#eef5f8"))
+            painter.setPen(QPen(self.chart_color("#4f788f"), 1))
+            painter.setBrush(self.chart_color("#eef5f8"))
             x_label = QRectF(
                 hovered_point.x() - 43,
                 rect.bottom() + 4,
@@ -537,7 +540,7 @@ class SollIstPlot(QWidget):
         super().leaveEvent(event)
 
 
-class CharacteristicPlot(QWidget):
+class CharacteristicPlot(ChartColors, QWidget):
     """Zeigt eine aus echten Vorwärtsläufen berechnete Netzkennlinie."""
 
     recordActivated = Signal(str, int)
@@ -548,6 +551,8 @@ class CharacteristicPlot(QWidget):
         self.language = language_manager or LanguageManager()
         self.t = self.language.text
         self.fixed_base_range = None
+        self.stable_range_key = None
+        self.stable_base_range = None
         self.curve_points = []
         self.background_points = []
         self.data_points = []
@@ -600,6 +605,7 @@ class CharacteristicPlot(QWidget):
         source_kind="",
         x_unit="",
         y_unit="",
+        stable_range_key=None,
     ):
         self.curve_points = [
             (float(x_value), float(y_value))
@@ -652,6 +658,24 @@ class CharacteristicPlot(QWidget):
         self.point_legend = str(point_legend or "")
         self.background_legend = str(background_legend or "")
         self.reference_legend = str(reference_legend or "")
+        previous_range = self.stable_base_range if stable_range_key == self.stable_range_key else None
+        self.stable_range_key = stable_range_key
+        self.stable_base_range = None
+        points = self.curve_points + self.data_points + self.background_points
+        if self.reference_point is not None:
+            points.append(self.reference_point)
+        if stable_range_key is not None and points:
+            new_range = self.base_view_range()
+            if previous_range is not None:
+                limits = list(previous_range)
+                for axis in (0, 1):
+                    values = [point[axis] for point in points]
+                    if min(values) < limits[axis * 2]:
+                        limits[axis * 2] = new_range[axis * 2]
+                    if max(values) > limits[axis * 2 + 1]:
+                        limits[axis * 2 + 1] = new_range[axis * 2 + 1]
+                new_range = tuple(limits)
+            self.stable_base_range = new_range
         self.reset_view()
 
     def set_operating_point(self, point):
@@ -727,6 +751,8 @@ class CharacteristicPlot(QWidget):
     def base_view_range(self):
         if self.fixed_base_range is not None:
             return self.fixed_base_range
+        if self.stable_base_range is not None:
+            return self.stable_base_range
         points = (
             list(self.curve_points)
             + list(self.background_points)
@@ -792,16 +818,16 @@ class CharacteristicPlot(QWidget):
             self.palette().window().color(),
         )
         outer_rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        painter.setPen(QPen(QColor("#c2ccd6"), 1))
-        painter.setBrush(QColor("#ffffff"))
+        painter.setPen(QPen(self.chart_color("#c2ccd6"), 1))
+        painter.setBrush(self.chart_color("#ffffff"))
         painter.drawRoundedRect(outer_rect, 7, 7)
         rect = self.plot_rect()
-        painter.setPen(QPen(QColor("#c9d2dc"), 1))
+        painter.setPen(QPen(self.chart_color("#c9d2dc"), 1))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRect(rect)
 
         if not self.curve_points:
-            painter.setPen(QColor("#5b6570"))
+            painter.setPen(self.chart_color("#5b6570"))
             painter.drawText(
                 rect,
                 Qt.AlignmentFlag.AlignCenter,
@@ -813,7 +839,7 @@ class CharacteristicPlot(QWidget):
             self.current_view_range()
         )
 
-        painter.setPen(QPen(QColor("#e1e7ec"), 1))
+        painter.setPen(QPen(self.chart_color("#e1e7ec"), 1))
         for value in SollIstPlot.axis_ticks(x_minimum, x_maximum):
             point = self.map_point(
                 value, y_minimum, rect,
@@ -823,13 +849,13 @@ class CharacteristicPlot(QWidget):
                 QPointF(point.x(), rect.top()),
                 QPointF(point.x(), rect.bottom()),
             )
-            painter.setPen(QColor("#44515c"))
+            painter.setPen(self.chart_color("#44515c"))
             painter.drawText(
                 QRectF(point.x() - 45, rect.bottom() + 5, 90, 20),
                 Qt.AlignmentFlag.AlignCenter,
                 self.axis_tick_label(value),
             )
-            painter.setPen(QPen(QColor("#e1e7ec"), 1))
+            painter.setPen(QPen(self.chart_color("#e1e7ec"), 1))
         for value in SollIstPlot.axis_ticks(y_minimum, y_maximum):
             point = self.map_point(
                 x_minimum, value, rect,
@@ -839,13 +865,13 @@ class CharacteristicPlot(QWidget):
                 QPointF(rect.left(), point.y()),
                 QPointF(rect.right(), point.y()),
             )
-            painter.setPen(QColor("#44515c"))
+            painter.setPen(self.chart_color("#44515c"))
             painter.drawText(
                 QRectF(2, point.y() - 10, 68, 20),
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                 self.axis_tick_label(value),
             )
-            painter.setPen(QPen(QColor("#e1e7ec"), 1))
+            painter.setPen(QPen(self.chart_color("#e1e7ec"), 1))
 
         legend_items = self.legend_items()
         metrics = painter.fontMetrics()
@@ -888,7 +914,7 @@ class CharacteristicPlot(QWidget):
             )
             x_label = self.x_label
 
-        painter.setPen(QColor("#243746"))
+        painter.setPen(self.chart_color("#243746"))
         painter.drawText(
             x_label_rect,
             Qt.AlignmentFlag.AlignCenter,
@@ -908,7 +934,7 @@ class CharacteristicPlot(QWidget):
         painter.setClipRect(rect.adjusted(-2, -2, 2, 2))
         self.screen_points = []
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(117, 129, 139, 170 if self.fixed_base_range is not None else 62))
+        painter.setBrush(self.chart_color(117, 129, 139, 170 if self.fixed_base_range is not None else 62))
         for index, (x_value, y_value) in enumerate(self.background_points):
             point = self.map_point(
                 x_value, y_value, rect,
@@ -933,8 +959,8 @@ class CharacteristicPlot(QWidget):
             x_value, y_value = self.data_points[index]
             strength = self.data_point_strengths[index]
             alpha = round(65 + 150 * strength)
-            outline = QColor(141, 105, 0, min(255, alpha + 25))
-            fill = QColor(244, 196, 48, alpha)
+            outline = self.chart_color(141, 105, 0, min(255, alpha + 25))
+            fill = self.chart_color(244, 196, 48, alpha)
             painter.setPen(QPen(outline, 0.8))
             painter.setBrush(fill)
             point = self.map_point(
@@ -956,8 +982,8 @@ class CharacteristicPlot(QWidget):
                 self.reference_point[0], self.reference_point[1], rect,
                 x_minimum, x_maximum, y_minimum, y_maximum,
             )
-            painter.setPen(QPen(QColor("#735500"), 1.2))
-            painter.setBrush(QColor("#f4c430"))
+            painter.setPen(QPen(self.chart_color("#735500"), 1.2))
+            painter.setBrush(self.chart_color("#f4c430"))
             painter.drawEllipse(point, 5.5, 5.5)
             if rect.adjusted(-10, -10, 10, 10).contains(point):
                 self.screen_points.append({
@@ -979,7 +1005,7 @@ class CharacteristicPlot(QWidget):
             else:
                 path.lineTo(point)
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.setPen(QPen(QColor("#1676b8"), 2.2))
+        painter.setPen(QPen(self.chart_color("#1676b8"), 2.2))
         painter.drawPath(path)
         if self.operating_point is not None:
             point = self.map_point(*self.operating_point, rect,
@@ -987,18 +1013,18 @@ class CharacteristicPlot(QWidget):
             if self.comparison_active and self.reference_point is not None:
                 target = self.map_point(*self.reference_point, rect,
                     x_minimum, x_maximum, y_minimum, y_maximum)
-                painter.setPen(QPen(QColor("#c55229"), 1.5, Qt.PenStyle.DashLine))
+                painter.setPen(QPen(self.chart_color("#c55229"), 1.5, Qt.PenStyle.DashLine))
                 comparison = self.map_point(
                     *(self.comparison_prediction or self.operating_point), rect,
                     x_minimum, x_maximum, y_minimum, y_maximum)
                 painter.drawLine(target, comparison)
-                painter.setBrush(QColor("#c55229"))
+                painter.setBrush(self.chart_color("#c55229"))
                 painter.drawEllipse(comparison, 3., 3.)
-                painter.setPen(QPen(QColor("#735500"), 1.2))
-                painter.setBrush(QColor("#f4c430"))
+                painter.setPen(QPen(self.chart_color("#735500"), 1.2))
+                painter.setBrush(self.chart_color("#f4c430"))
                 painter.drawEllipse(target, 6.5, 6.5)
-            painter.setPen(QPen(QColor("#ffffff"), 1.2))
-            painter.setBrush(QColor("#e05829"))
+            painter.setPen(QPen(self.chart_color("#ffffff"), 1.2))
+            painter.setBrush(self.chart_color("#e05829"))
             painter.drawEllipse(point, 5.5, 5.5)
         painter.restore()
 
@@ -1008,7 +1034,7 @@ class CharacteristicPlot(QWidget):
             painter.save()
             painter.setClipRect(rect)
             painter.setPen(
-                QPen(QColor("#4f788f"), 1, Qt.PenStyle.DashLine)
+                QPen(self.chart_color("#4f788f"), 1, Qt.PenStyle.DashLine)
             )
             painter.drawLine(QPointF(rect.left(), point.y()), point)
             painter.drawLine(point, QPointF(point.x(), rect.bottom()))
@@ -1022,8 +1048,8 @@ class CharacteristicPlot(QWidget):
             y_text = (
                 f"{self.axis_tick_label(hovered_entry['y'])}{y_suffix}"
             )
-            painter.setPen(QPen(QColor("#4f788f"), 1))
-            painter.setBrush(QColor("#eef5f8"))
+            painter.setPen(QPen(self.chart_color("#4f788f"), 1))
+            painter.setBrush(self.chart_color("#eef5f8"))
             x_value_label = QRectF(
                 point.x() - 48, rect.bottom() + 4, 96, 22
             )
@@ -1042,35 +1068,35 @@ class CharacteristicPlot(QWidget):
         item_x = legend_x
         for index, (kind, label) in enumerate(legend_items):
             if kind == "curve":
-                painter.setPen(QPen(QColor("#1676b8"), 2.2))
+                painter.setPen(QPen(self.chart_color("#1676b8"), 2.2))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawLine(
                     QPointF(item_x, legend_y),
                     QPointF(item_x + 24, legend_y),
                 )
             elif kind == "operating":
-                painter.setPen(QPen(QColor("#ffffff"), 1))
-                painter.setBrush(QColor("#e05829"))
+                painter.setPen(QPen(self.chart_color("#ffffff"), 1))
+                painter.setBrush(self.chart_color("#e05829"))
                 painter.drawEllipse(QPointF(item_x + 12, legend_y), 5, 5)
             elif kind == "background":
                 painter.setPen(Qt.PenStyle.NoPen)
-                painter.setBrush(QColor(117, 129, 139, 90))
+                painter.setBrush(self.chart_color(117, 129, 139, 90))
                 painter.drawEllipse(
                     QPointF(item_x + 12, legend_y), 2.2, 2.2
                 )
             elif kind == "similar":
-                painter.setPen(QPen(QColor(141, 105, 0, 150), 1))
-                painter.setBrush(QColor(244, 196, 48, 135))
+                painter.setPen(QPen(self.chart_color(141, 105, 0, 150), 1))
+                painter.setBrush(self.chart_color(244, 196, 48, 135))
                 painter.drawEllipse(
                     QPointF(item_x + 12, legend_y), 3.5, 3.5
                 )
             else:
-                painter.setPen(QPen(QColor("#735500"), 1.2))
-                painter.setBrush(QColor("#f4c430"))
+                painter.setPen(QPen(self.chart_color("#735500"), 1.2))
+                painter.setBrush(self.chart_color("#f4c430"))
                 painter.drawEllipse(
                     QPointF(item_x + 12, legend_y), 5.0, 5.0
                 )
-            painter.setPen(QColor("#243746"))
+            painter.setPen(self.chart_color("#243746"))
             painter.drawText(
                 QPointF(item_x + 32, legend_y + 5), label
             )

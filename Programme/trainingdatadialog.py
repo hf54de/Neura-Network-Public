@@ -113,9 +113,13 @@ class NumericItemDelegate(QStyledItemDelegate):
 class AutomaticScalingPreviewDialog(QDialog):
     """Content-sized preview with editable methods and explicit confirmation."""
 
-    def __init__(self, rows, language_manager, parent=None, modes=None):
+    def __init__(self, rows, language_manager, parent=None, modes=None, bounds=None):
         super().__init__(parent)
         text = language_manager.text
+        self.language = language_manager
+        self.original_bounds = bounds or {}
+        self.original_bound_texts = {row: tuple(str(rows[row][col]) for col in (2, 3))
+                                     for row in self.original_bounds}
         self.setWindowTitle(text("data.auto_scale_preview.title"))
         layout = QVBoxLayout(self)
         self.table = QTableWidget(len(rows), 5, self)
@@ -123,7 +127,9 @@ class AutomaticScalingPreviewDialog(QDialog):
             text("data.auto_scale_preview.neuron"), text("data.auto_scale_preview.type"),
             text("data.auto_scale_preview.minimum"), text("data.auto_scale_preview.maximum"),
             text("data.auto_scale_preview.method")])
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked
+                                   | QAbstractItemView.EditTrigger.EditKeyPressed
+                                   | QAbstractItemView.EditTrigger.AnyKeyPressed)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setWordWrap(False)
         self.table.verticalHeader().hide()
@@ -134,6 +140,8 @@ class AutomaticScalingPreviewDialog(QDialog):
             for column, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
                 item.setToolTip(str(value))
+                if column not in (2, 3) or not modes or modes[row] is None:
+                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 if column in (2, 3):
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.table.setItem(row, column, item)
@@ -196,6 +204,30 @@ class AutomaticScalingPreviewDialog(QDialog):
 
     def selected_methods(self):
         return {row: combo.currentData() for row, combo in self.method_combos.items()}
+
+    def selected_bounds(self):
+        bounds = {}
+        for row in self.method_combos:
+            texts = tuple(self.table.item(row, column).text().strip() for column in (2, 3))
+            low, high = (self.original_bounds[row][index]
+                         if row in self.original_bounds and value == self.original_bound_texts[row][index]
+                         else float(value.replace(",", "."))
+                         for index, value in enumerate(texts))
+            if not math.isfinite(low) or not math.isfinite(high) or not low < high:
+                raise ValueError(row)
+            bounds[row] = (low, high)
+        return bounds
+
+    def accept(self):
+        # Commit a cell that is still being edited before reading the table.
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setFocus()
+        try:
+            self.selected_bounds()
+        except (ValueError, OverflowError):
+            QMessageBox.warning(self, self.windowTitle(),
+                                self.language.text("data.auto_scale_preview.invalid_bounds"))
+            return
+        super().accept()
 
 
 class ColumnPropertiesDialog(QDialog):
@@ -2152,13 +2184,17 @@ class TrainingDataDialog(QDialog):
             return
 
         modes = []
+        bounds = {}
         for index, column in enumerate(self.document.get("columns", [])):
             values = self.get_column_numeric_values(index)
             editable = column.get("data_type", "analog") != "binary" and values and min(values) < max(values)
             modes.append(self.automatic_calibration_mode(column) if editable else None)
-        preview = AutomaticScalingPreviewDialog(self.automatic_scaling_preview_rows(), self.language, self, modes=modes)
+            if editable:
+                bounds[index] = (min(values), max(values))
+        preview = AutomaticScalingPreviewDialog(self.automatic_scaling_preview_rows(), self.language, self, modes=modes, bounds=bounds)
         accepted = preview.exec() == QDialog.DialogCode.Accepted
         selected_methods = preview.selected_methods()
+        selected_bounds = preview.selected_bounds() if accepted else {}
         preview.deleteLater()
         if not accepted:
             return
@@ -2195,8 +2231,7 @@ class TrainingDataDialog(QDialog):
                 empty_columns.append(column_name)
                 continue
 
-            source_min = min(values)
-            source_max = max(values)
+            source_min, source_max = selected_bounds.get(data_index, (min(values), max(values)))
 
             if not source_min < source_max:
                 constant_columns.append(column_name)

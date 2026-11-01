@@ -13,6 +13,7 @@ from activationfunctions import ActivationFunctions
 from connection import Connection
 from neuron import Neuron
 from neurontype import NeuronType
+from adamoptimizer import adam_calculation_lines
 from numberformat import format_number
 from topology import NetworkTopology
 from trainer import BackpropagationTrainer
@@ -463,6 +464,21 @@ class NeuralNetwork(QObject):
         """Stellt kompatible Bewegungszustände wieder her."""
         self.trainer.restore_momentum_state(state)
 
+    def set_solver(self, solver):
+        self.trainer.set_solver(solver)
+
+    def get_solver(self):
+        return self.trainer.solver
+
+    def reset_optimizer_state(self):
+        self.trainer.reset_optimizer_state()
+
+    def get_optimizer_state(self):
+        return self.trainer.get_optimizer_state()
+
+    def restore_optimizer_state(self, state):
+        self.trainer.restore_optimizer_state(state)
+
     def calculate_training_deltas(
         self,
         target_values
@@ -746,6 +762,12 @@ class NeuralNetwork(QObject):
                 ]
             )
 
+        if last_step.get("solver") == "adam":
+            calculation_lines.extend(["", text("math.details.bias_rule", "BIAS-LERNREGEL"), ""])
+            calculation_lines.extend(adam_calculation_lines(neuron_step["adam"], last_step["learning_rate"],
+                neuron_step["bias_before"], translator or self.translator, format_number))
+            return "\n".join(calculation_lines)
+
         learning_rate = last_step["learning_rate"]
         bias_change = neuron_step["bias_update"]
         bias_gradient = neuron_step.get("bias_gradient_update", bias_change)
@@ -818,10 +840,11 @@ class NeuralNetwork(QObject):
             text("math.details.last_step", "LETZTER LERNSCHRITT"),
             "====================",
             "",
-            text(
+            (text("adam.math.weight_rule", "ADAM-GEWICHTSAKTUALISIERUNG")
+             if last_step.get("solver", self.get_solver()) == "adam" else text(
                 "math.formula.weight_update",
                 "ΔW = Lernrate × δZiel × YQuelle"
-            )
+            ))
         ]
 
         connection_step = last_step.get(
@@ -850,6 +873,11 @@ class NeuralNetwork(QObject):
                 ]
             )
 
+            return "\n".join(lines)
+
+        if last_step.get("solver") == "adam":
+            lines.extend(adam_calculation_lines(connection_step["adam"], last_step["learning_rate"],
+                connection_step["weight_before"], translator or self.translator, format_number))
             return "\n".join(lines)
 
         learning_rate = last_step["learning_rate"]
@@ -1129,7 +1157,8 @@ class NeuralNetwork(QObject):
 
         self.connections.clear()
         self.neurons.clear()
-        self.trainer.reset_momentum_state()
+        self.trainer.reset_optimizer_state()
+        self.trainer.set_solver("sgd")
 
         self.network_cleared.emit()
 

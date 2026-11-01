@@ -302,7 +302,8 @@ class ReviewFixTests(unittest.TestCase):
                     file_path=None,association_changed=False)
                 w.view=SimpleNamespace(set_zoom=Mock(),centerOn=Mock())
                 for name in ("apply_display_settings","update_project_image_action","remember_project_directory",
-                             "reset_undo_history","set_project_modified","schedule_loaded_project_fit"):
+                             "reset_undo_history","set_project_modified","schedule_loaded_project_fit",
+                             "initialize_training_protocol"):
                     setattr(w,name,Mock())
                 w.reconcile_active_data_mappings=lambda:False
                 status=Mock();w.statusBar=lambda:status
@@ -497,7 +498,7 @@ class AutomaticScalingPreviewTests(unittest.TestCase):
         doc["columns"][0]["calibration"] = dict(mode="standard", source_min=0., source_max=120., mean=60., stddev=12.)
         return TrainingDataDialog(net, doc, language_manager=language(code))
 
-    def execute_preview(self, editor, code, accept, selections=None):
+    def execute_preview(self, editor, code, accept, selections=None, bounds=None):
         from trainingdatadialog import AutomaticScalingPreviewDialog
         from PySide6.QtCore import QTimer
         from PySide6.QtWidgets import QDialogButtonBox
@@ -528,6 +529,9 @@ class AutomaticScalingPreviewTests(unittest.TestCase):
                     self.assertEqual(combo.count(), 4)
                     combo.setCurrentIndex(combo.findData(mode))
                     self.assertEqual(combo.currentData(), mode)
+                for row, limits in (bounds or {}).items():
+                    for column, value in zip((2, 3), limits):
+                        preview.table.item(row, column).setText(str(value))
                 self.assertEqual(editor.document, before)
                 preview.grab().save(str(Path(tempfile.gettempdir()) / f"scaling_preview_{code}.png"))
                 button = QDialogButtonBox.StandardButton.Ok if accept else QDialogButtonBox.StandardButton.Cancel
@@ -554,7 +558,7 @@ class AutomaticScalingPreviewTests(unittest.TestCase):
                 before = deepcopy(editor.document)
                 modified, index = editor.modified, editor._edit_history_index
                 history = deepcopy(editor._edit_history)
-                self.execute_preview(editor, code, False, {0: "none", 1: "standard"})
+                self.execute_preview(editor, code, False, {0: "none", 1: "standard"}, {0: ("bad", "0")})
                 self.assertEqual(editor.document, before)
                 self.assertEqual(editor.modified, modified)
                 self.assertEqual(editor._edit_history_index, index)
@@ -580,6 +584,55 @@ class AutomaticScalingPreviewTests(unittest.TestCase):
                 self.assertFalse(editor.automatic_scaling_status_label.isHidden())
             finally:
                 self.dispose(editor)
+
+    def test_edited_bounds_are_applied_without_changing_records_or_statistics(self):
+        for code in ("de", "en"):
+            editor = self.make_dialog(code)
+            try:
+                records = deepcopy(editor.document["records"])
+                self.execute_preview(editor, code, True, bounds={0: ("-10,5", "130"), 1: ("0", "5")})
+                first, second = [column["calibration"] for column in editor.document["columns"]]
+                self.assertEqual((first["source_min"], first["source_max"]), (-10.5, 130.))
+                self.assertEqual((second["source_min"], second["source_max"]), (0., 5.))
+                self.assertEqual((first["mean"], first["stddev"]), (60., 60.))
+                self.assertEqual(editor.document["records"], records)
+                self.assertAlmostEqual(TrainingDataIO.scale_value(-10.5, first), 0.)
+                self.assertAlmostEqual(TrainingDataIO.scale_value(130., first), 1.)
+            finally:
+                self.dispose(editor)
+
+    def test_unchanged_bounds_keep_full_precision(self):
+        from trainingdatadialog import AutomaticScalingPreviewDialog
+        limits = (1.234567891, 1.234567899)
+        preview = AutomaticScalingPreviewDialog([("Position", "Input", "1,23457", "1,23457", "Method")],
+                                               language("de"), modes=["minmax_0_1"], bounds={0: limits})
+        try:
+            self.assertEqual(preview.selected_bounds(), {0: limits})
+            preview.table.item(0, 2).setText("1,2")
+            self.assertEqual(preview.selected_bounds(), {0: (1.2, limits[1])})
+        finally:
+            self.dispose(preview)
+
+    def test_invalid_bounds_prevent_acceptance(self):
+        from trainingdatadialog import AutomaticScalingPreviewDialog
+        from PySide6.QtWidgets import QDialog
+        for code in ("de", "en"):
+            preview = AutomaticScalingPreviewDialog([("Position", "Input", "0", "120", "Method")],
+                                                   language(code), modes=["minmax_0_1"])
+            try:
+                for low, high in (("1", "1"), ("2", "1"), ("bad", "5"), ("nan", "5"), ("0", "inf")):
+                    preview.table.item(0, 2).setText(low)
+                    preview.table.item(0, 3).setText(high)
+                    with patch("trainingdatadialog.QMessageBox.warning") as warning:
+                        preview.accept()
+                    warning.assert_called_once()
+                    self.assertNotEqual(preview.result(), QDialog.DialogCode.Accepted)
+                preview.table.item(0, 2).setText("-1,5")
+                preview.table.item(0, 3).setText("5")
+                preview.accept()
+                self.assertEqual(preview.result(), QDialog.DialogCode.Accepted)
+            finally:
+                self.dispose(preview)
 
     def test_selected_methods_are_applied_only_after_accept(self):
         for code in ("de", "en"):
@@ -610,7 +663,8 @@ class AutomaticScalingPreviewTests(unittest.TestCase):
             name = "Very long neuron designation " * 50
             long = AutomaticScalingPreviewDialog([(name, "Input", "0", "120", method)], language(code), modes=["minmax_0_1"])
             try:
-                self.assertEqual(short.table.editTriggers(), QAbstractItemView.EditTrigger.NoEditTriggers)
+                self.assertTrue(short.table.item(0, 2).flags() & Qt.ItemFlag.ItemIsEditable)
+                self.assertFalse(short.table.item(0, 0).flags() & Qt.ItemFlag.ItemIsEditable)
                 self.assertLess(short.width(), 600)
                 self.assertGreater(long.width(), short.width())
                 self.assertLessEqual(long.width(), long.screen().availableGeometry().width()-40)
@@ -649,3 +703,111 @@ class AutomaticScalingPreviewTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TrainingRunQuickDeleteTests(unittest.TestCase):
+    def test_confirmation_fallback_empty_and_invalid(self):
+        from PySide6.QtWidgets import QWidget, QMessageBox
+        for code in ("de", "en"):
+            for kind in ("cancel", "fallback", "empty", "invalid", "running"):
+                source = window()
+                w = QWidget()
+                for key, value in vars(source).items():
+                    setattr(w, key, value)
+                w.language = language(code)
+                runs = [entry(source, 1), entry(source, 2)]
+                if kind == "empty": runs = runs[1:]
+                if kind == "invalid": runs[0]["invalidated_reason"] = "data"
+                # The history uses consecutive identifiers.
+                for i, run in enumerate(runs, 1): run["run_id"] = i
+                w.training_history = runs
+                w.active_training_run_id = len(runs)
+                for name in ("current_training_context", "refresh_training_history_validity",
+                             "training_run_matches_active_data", "active_training_history_entry"):
+                    setattr(w, name, getattr(MainWindow, name).__get__(w))
+                td = QWidget(w)
+                td.is_training = kind == "running"
+                td.clear_training_run_display = Mock()
+                w.training_dialog = td
+                for name in ("capture_editor_snapshot", "restore_training_settings_from_history",
+                             "commit_explicit_history_step", "set_project_modified", "update_project_workflow"):
+                    setattr(w, name, Mock())
+                w.restore_training_network_state = Mock(return_value=True)
+                w.statusBar = Mock(return_value=Mock())
+                w.protocol_deleted_runs = Mock()
+                w.protocol_run_loaded = Mock()
+                w.refresh_training_history_validity()
+                before = deepcopy(runs)
+                answer = QMessageBox.StandardButton.No if kind == "cancel" else QMessageBox.StandardButton.Yes
+                try:
+                    with patch.object(QMessageBox, "exec", return_value=answer):
+                        result = MainWindow.open_training_history(w, delete_run_id=len(runs))
+                    if kind in ("cancel", "running"):
+                        self.assertEqual(w.training_history, before)
+                        w.restore_training_network_state.assert_not_called()
+                    elif kind == "fallback":
+                        self.assertEqual(w.active_training_run_id, 1)
+                        self.assertEqual(result["run_id"], 1)
+                        w.restore_training_network_state.assert_called_once_with(before[0]["network_state"])
+                    else:
+                        self.assertIsNone(w.active_training_run_id)
+                        td.clear_training_run_display.assert_called_once()
+                finally: w.deleteLater()
+
+    def test_training_button_guards_and_layout(self):
+        from PySide6.QtGui import QFontDatabase, QFont
+        QFontDatabase.addApplicationFont("C:/Windows/Fonts/segoeui.ttf")
+        APP.setFont(QFont("Segoe UI", 9))
+        for code in ("de", "en"):
+            dialog = TrainingDialog(network(code), document(), language_manager=language(code))
+            try:
+                self.assertFalse(dialog.delete_run_button.isEnabled())
+                dialog.current_run_id = 1
+                dialog.set_training_controls_enabled(True)
+                self.assertTrue(dialog.delete_run_button.isEnabled())
+                dialog.set_training_controls_enabled(False)
+                self.assertFalse(dialog.delete_run_button.isEnabled())
+                dialog.is_training = True
+                with patch.object(dialog, "load_previous_training_run") as load:
+                    dialog.delete_current_training_run()
+                    load.assert_not_called()
+                dialog.is_training = False
+                dialog.set_training_controls_enabled(True)
+                dialog.setMaximumSize(2000, 1200)
+                dialog.resize(1200, 760)
+                dialog.show(); APP.processEvents()
+                dialog.setMaximumSize(2000, 1200)
+                dialog.resize(1200, 760); APP.processEvents()
+                dialog.grab().save(str(Path(tempfile.gettempdir()) / ("training_delete_" + code + ".png")))
+                for i in range(dialog.training_control_group.layout().count()):
+                    widget = dialog.training_control_group.layout().itemAt(i).widget()
+                    if widget is not None and widget is not dialog.training_control_info:
+                        self.assertGreaterEqual(widget.width(), widget.minimumSizeHint().width())
+            finally: dialog.deleteLater()
+
+
+class StableCharacteristicRangeTests(unittest.TestCase):
+    def test_stable_range_expands_only_outside_and_resets_for_new_context(self):
+        from analysisplot import CharacteristicPlot
+        plot = CharacteristicPlot(language_manager=language("de"))
+        try:
+            targets = [(0, 0), (1, 100)]
+            plot.set_data(targets, targets, stable_range_key=(1, 1, 3))
+            original = plot.base_view_range()
+            plot.set_data([(0, -1), (1, 101)], targets, stable_range_key=(1, 1, 3))
+            self.assertEqual(plot.base_view_range(), original)
+            plot.set_data([(0, -30), (1, 150)], targets, stable_range_key=(1, 1, 3))
+            expanded = plot.base_view_range()
+            self.assertLess(expanded[2], -30)
+            self.assertGreater(expanded[3], 150)
+            plot.set_data(targets, targets, stable_range_key=(1, 1, 3))
+            self.assertEqual(plot.base_view_range(), expanded)
+            for key in ((2, 1, 3), (2, 1, 4)):
+                plot.set_data(targets, targets, stable_range_key=key)
+                self.assertEqual(plot.base_view_range(), original)
+                plot.set_data([(0, -30), (1, 150)], targets, stable_range_key=key)
+            plot.set_data(targets, targets)
+            self.assertEqual(plot.base_view_range(), original)
+            plot.set_data([], [])
+            self.assertIsNone(plot.stable_base_range)
+        finally: plot.deleteLater()

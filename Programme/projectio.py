@@ -6,6 +6,8 @@
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
 import json
+from adamoptimizer import AdamOptimizer, validate_optimizer_state
+from weighttrajectory import valid_pair, validate_trajectory
 import math
 import os
 import re
@@ -25,7 +27,7 @@ class ProjectIO:
     von NeuronNetz-Projektdateien.
     """
 
-    PROJECT_VERSION = 15
+    PROJECT_VERSION = 17
 
     @classmethod
     def save_project(
@@ -47,6 +49,8 @@ class ProjectIO:
         is_example_project=False,
         example_difficulty=None,
         plc_export_options=None,
+        last_training_run_id=0,
+        optimizer_state=None,
     ):
         """
         Speichert alle Neuronen, Verbindungen und
@@ -97,6 +101,14 @@ class ProjectIO:
                 test_data_file_path
             )
         )
+
+        cls._validate_optimizer_state(optimizer_state)
+        if optimizer_state is not None and optimizer_state.get("solver") == "adam":
+            try:
+                AdamOptimizer().restore(optimizer_state, {c.id for c in connections},
+                    {n.id for n in neurons if n.neuron_type != NeuronType.INPUT})
+            except ValueError as error:
+                raise ValueError(cls._history_error_text("adam.error.state", None)) from error
 
         normalized_training_settings = (
             cls.normalize_training_settings(
@@ -180,8 +192,11 @@ class ProjectIO:
             ),
             "training_settings": normalized_training_settings,
             "training_history": normalized_training_history,
+            "last_training_run_id": max(int(last_training_run_id),
+                max((entry["run_id"] for entry in normalized_training_history), default=0)),
             "active_training_run_id": active_training_run_id,
             "momentum_state": deepcopy(momentum_state),
+            "optimizer_state": deepcopy(optimizer_state),
             "project_description": project_description,
             "analysis_tolerances": normalized_analysis_tolerances,
             "display_settings": normalized_display_settings,
@@ -252,6 +267,7 @@ class ProjectIO:
             "bias_initialization": "zero",
             "learning_rate": 0.01,
             "momentum": 0.0,
+            "solver": "sgd",
             "error_limit": 0.01,
             "maximum_epochs": 1000,
             "training_section_epochs": 1000,
@@ -260,6 +276,8 @@ class ProjectIO:
             "show_error_chart": True,
             "error_chart_scale": "linear",
             "comparison_full_length": False,
+            "record_weight_trajectory": False,
+            "weight_trajectory_pair": None,
             "training_target_mode": "epochs"
         }
 
@@ -649,6 +667,7 @@ class ProjectIO:
         )
         project_data.setdefault("active_training_run_id", None)
         project_data.setdefault("momentum_state", None)
+        project_data.setdefault("optimizer_state", None)
         active_training_run_id = project_data.get("active_training_run_id")
         if (
             isinstance(active_training_run_id, bool)
@@ -677,6 +696,7 @@ class ProjectIO:
                         None
                     )
                     history_entry.setdefault("momentum", 0.0)
+                    history_entry.setdefault("solver", "sgd")
                     history_entry.setdefault("shuffle_seed", None)
                     network_state = history_entry.get("network_state")
                     if isinstance(network_state, dict):
@@ -829,7 +849,7 @@ class ProjectIO:
                     0.0
                 )
 
-        if version in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14):
+        if version in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16):
             project_data["version"] = (
                 cls.PROJECT_VERSION
             )
@@ -856,6 +876,7 @@ class ProjectIO:
         version = project_data.get(
             "version"
         )
+        cls._validate_optimizer_state(project_data.get("optimizer_state"), translator)
 
         if version != cls.PROJECT_VERSION:
             raise ValueError(
@@ -1034,6 +1055,14 @@ class ProjectIO:
                 )
                 raise ValueError(message)
             used_connection_pairs.add(pair)
+
+        optimizer = project_data.get("optimizer_state")
+        if optimizer is not None and optimizer.get("solver") == "adam":
+            try:
+                AdamOptimizer().restore(optimizer, {c["id"] for c in connections},
+                    {n["id"] for n in neurons if n["type"] != NeuronType.INPUT.value})
+            except ValueError as error:
+                raise ValueError(cls._history_error_text("adam.error.state", translator)) from error
 
         cls._validate_project_topology(neurons, connections, translator)
 
@@ -1516,6 +1545,13 @@ class ProjectIO:
                 "Trainingseinstellungen."
             )
 
+        enabled = training_settings.get("record_weight_trajectory", False)
+        pair = training_settings.get("weight_trajectory_pair")
+        if type(enabled) is not bool or (pair is not None and not valid_pair(pair)) or (enabled and pair is None):
+            raise ValueError(ProjectIO._history_error_text("trajectory.invalid", None))
+        if training_settings.get("solver", "sgd") not in ("sgd", "adam"):
+            raise ValueError(ProjectIO._history_error_text("adam.error.solver", None))
+
         required_fields = {
             "initialize_network",
             "weight_initialization",
@@ -1762,6 +1798,21 @@ class ProjectIO:
                     + ", ".join(sorted(missing_fields))
                 )
 
+            if entry.get("solver", "sgd") not in ("sgd", "adam"):
+                raise ValueError(ProjectIO._history_error_text("adam.error.solver", translator))
+            if entry.get("solver") == "adam":
+                state = entry.get("network_state")
+                optimizer = state.get("optimizer_state") if isinstance(state, dict) else None
+                if not isinstance(optimizer, dict) or optimizer.get("solver") != "adam":
+                    raise ValueError(ProjectIO._history_error_text("adam.error.state", translator))
+                ProjectIO._validate_optimizer_state(optimizer, translator)
+
+            state = entry.get("network_state")
+            if isinstance(state, dict):
+                optimizer = state.get("optimizer_state")
+                if isinstance(optimizer, dict) and optimizer.get("solver") != entry.get("solver", "sgd"):
+                    raise ValueError(ProjectIO._history_error_text("adam.error.state", translator))
+
             run_id = entry["run_id"]
 
             if (
@@ -1939,6 +1990,10 @@ class ProjectIO:
             ProjectIO._validate_training_network_state(
                 entry.get("initial_network_state"), translator=translator
             )
+            try:
+                validate_trajectory(entry.get("weight_trajectory"), entry["completed_epochs"], entry.get("initial_network_state"))
+            except (ValueError, TypeError, KeyError, OverflowError) as error:
+                raise ValueError(ProjectIO._history_error_text("trajectory.invalid", translator)) from error
 
     @staticmethod
     def _validate_training_network_state(network_state, translator=None):
@@ -1954,7 +2009,7 @@ class ProjectIO:
             )
 
         if not {"neurons", "connections"}.issubset(network_state.keys()) or (
-            set(network_state.keys()) - {"neurons", "connections", "momentum_state"}
+            set(network_state.keys()) - {"neurons", "connections", "momentum_state", "optimizer_state"}
         ):
             raise ValueError(
                 "Der gespeicherte Netzwerkzustand ist unvollständig."
@@ -1962,6 +2017,7 @@ class ProjectIO:
 
         neurons = network_state["neurons"]
         connections = network_state["connections"]
+        ProjectIO._validate_optimizer_state(network_state.get("optimizer_state"), translator)
         momentum_state = network_state.get("momentum_state")
         if momentum_state is not None:
             if not isinstance(momentum_state, dict):
@@ -2080,6 +2136,20 @@ class ProjectIO:
                 "ungültiges Gewicht."
             )
             connection_ids.add(connection_id)
+
+        optimizer = network_state.get("optimizer_state")
+        if optimizer is not None and optimizer.get("solver") == "adam":
+            if (optimizer["step"] > 0 and {int(k) for k in optimizer["connections"]} != connection_ids
+                    or optimizer["step"] > 0 and {int(k) for k in optimizer["biases"]} != {c["target"] for c in connections}
+                    or not {int(k) for k in optimizer["biases"]}.issubset(neuron_ids)):
+                raise ValueError(ProjectIO._history_error_text("adam.error.state", translator))
+
+    @staticmethod
+    def _validate_optimizer_state(state, translator=None):
+        try:
+            validate_optimizer_state(state)
+        except ValueError as error:
+            raise ValueError(ProjectIO._history_error_text("adam.error.state", translator)) from error
 
     @staticmethod
     def _validate_number(

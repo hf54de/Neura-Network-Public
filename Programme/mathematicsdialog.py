@@ -46,6 +46,7 @@ from numberformat import format_number
 from trainingdataio import TrainingDataIO
 from language import LanguageManager
 from network import NeuralNetwork
+from adamoptimizer import adam_calculation_lines
 
 
 class CompactDoubleSpinBox(QDoubleSpinBox):
@@ -382,6 +383,7 @@ class MathematicsDialog(QDialog):
             clone.add_connection(connection)
         clone.trainer.learning_rate = source_network.trainer.learning_rate
         clone.trainer.momentum = source_network.trainer.momentum
+        clone.restore_optimizer_state(source_network.get_optimizer_state())
         clone.trainer.restore_momentum_state(
             source_network.trainer.get_momentum_state()
         )
@@ -449,6 +451,14 @@ class MathematicsDialog(QDialog):
         self.learning_rate.setSingleStep(0.001)
         self.learning_rate.setValue(learning_rate)
 
+        self.solver_combo = QComboBox()
+        self.solver_combo.addItem(self.t("adam.solver.sgd"), "sgd")
+        self.solver_combo.addItem(self.t("adam.solver.adam"), "adam")
+        self.solver_combo.setCurrentIndex(max(0, self.solver_combo.findData(self.network.get_solver())))
+        self.solver_combo.setToolTip(self.t("adam.solver.tooltip"))
+        self._math_solver = self.network.get_solver()
+        self._math_solver_rates = {"sgd": 0.01, "adam": 0.001}
+        self._math_solver_rates[self._math_solver] = self.learning_rate.value()
         self.momentum = CompactDoubleSpinBox()
         self.momentum.setMaximumWidth(150)
         self.momentum.setDecimals(2)
@@ -501,8 +511,13 @@ class MathematicsDialog(QDialog):
         information_layout.addWidget(self.learning_rate, 1, 1)
         information_layout.addWidget(QLabel(self.t("math.precision.label")), 1, 2)
         information_layout.addWidget(self.precision_combo, 1, 3)
-        information_layout.addWidget(QLabel(self.t("math.momentum")), 2, 0)
-        information_layout.addWidget(self.momentum, 2, 1)
+        information_layout.addWidget(QLabel(self.t("adam.solver.label")), 2, 0)
+        information_layout.addWidget(self.solver_combo, 2, 1)
+        self.momentum_label = QLabel(self.t("math.momentum"))
+        information_layout.addWidget(self.momentum_label, 2, 2)
+        information_layout.addWidget(self.momentum, 2, 3)
+        self.solver_combo.currentIndexChanged.connect(self.math_solver_changed)
+        self.update_math_solver_controls()
         information_layout.addWidget(self.continue_radio, 3, 0, 1, 4)
         information_layout.addWidget(self.initialize_radio, 4, 0, 1, 4)
         self.initialization_widget = QWidget()
@@ -746,13 +761,26 @@ class MathematicsDialog(QDialog):
         else:
             start = self.t("math.source.current_state")
         self.source_summary_label.setText(self.t(
-            "math.source.summary",
+            "adam.math.source_summary" if self.solver_combo.currentData() == "adam" else "math.source.summary",
             neuron=self.selected_neuron.name,
             learning_rate=self.learning_rate.text(),
             momentum=self.momentum.text(),
             start=start,
             precision=self.precision_combo.currentData()
         ))
+
+    def update_math_solver_controls(self):
+        visible = self.solver_combo.currentData() == "sgd"
+        self.momentum.setVisible(visible)
+        self.momentum_label.setVisible(visible)
+
+    def math_solver_changed(self, _index=None):
+        self._math_solver_rates[self._math_solver] = self.learning_rate.value()
+        self._math_solver = self.solver_combo.currentData()
+        self.learning_rate.setValue(self._math_solver_rates[self._math_solver])
+        self.update_math_solver_controls()
+        if hasattr(self, "source_summary_label"):
+            self.update_source_summary()
 
     def collapse_source_panel(self):
         self.update_source_summary()
@@ -893,6 +921,7 @@ class MathematicsDialog(QDialog):
             self.update_interface()
             return
         self.restore_network_state(self.project_state["network"])
+        self.network.set_solver(self.solver_combo.currentData())
         self.epoch_number = 1
         self.record_index = 0
         self.epoch_complete = False
@@ -902,7 +931,7 @@ class MathematicsDialog(QDialog):
         self.history.clear()
         if self.initialize_radio.isChecked():
             self.initialize_parameters()
-            self.network.reset_momentum_state()
+            self.network.reset_optimizer_state()
             self.start_conditions_text = self.t(
                 "math.start.initialized",
                 weights=self.weight_initialization_combo.currentText(),
@@ -1059,6 +1088,8 @@ class MathematicsDialog(QDialog):
 
     def create_guided_html(self, phase, detail):
         step = detail["step"]
+        if step.get("solver") == "adam" and phase in {"start", "updates", "complete"}:
+            return self.create_adam_guided_html(phase, detail)
         neuron_step = step["neurons"][self.selected_neuron.id]
         connections = step["connections"]
         esc = lambda value: html.escape(str(value))
@@ -1483,6 +1514,47 @@ class MathematicsDialog(QDialog):
         body.append(f"<p class='note'>{esc(self.t('math.precision.note'))}</p>")
         return "".join(body)
 
+    def adam_parameters_for_selection(self, step):
+        neuron = step["neurons"][self.selected_neuron.id]
+        parameters = []
+        for cid, value in sorted(step["connections"].items()):
+            relevant = (value["source_id"] == self.selected_neuron.id if neuron["neuron_type"] == NeuronType.INPUT
+                        else value["target_id"] == self.selected_neuron.id)
+            if relevant:
+                parameters.append((f"W{cid}: {value['source_name']} → {value['target_name']}", value["weight_before"], value["adam"]))
+        if neuron["neuron_type"] != NeuronType.INPUT:
+            parameters.append((self.t("math.report.bias"), neuron["bias_before"], neuron["adam"]))
+        return parameters
+
+    def create_adam_guided_html(self, phase, detail):
+        esc = lambda value: html.escape(str(value))
+        number = self.display_number
+        step = detail["step"]
+        parts = ["<style>pre {white-space:pre-wrap;} td {padding:3px 10px;} th {text-align:left;}</style>",
+                 "<h2>" + esc(self.t("math.guide." + phase)) + " · Adam</h2>",
+                 "<p>" + esc(self.t("adam.math.explanation")) + "</p>"]
+        for label, before, values in self.adam_parameters_for_selection(step):
+            parts.append("<h3>" + esc(label) + "</h3>")
+            if phase == "start":
+                lines = [self.t("adam.math.previous_state", step=values["step"] - 1),
+                         "θ = " + number(before), "m = " + number(values["m_before"]),
+                         "v = " + number(values["v_before"])]
+            elif phase == "updates":
+                lines = adam_calculation_lines(values, step["learning_rate"], before, self.t, number)
+            else:
+                lines = [self.t("adam.math.parameter", before=number(before), change=number(values["change"]),
+                                after=number(before + values["change"])),
+                         "m_hat = " + number(values["m_hat"]), "v_hat = " + number(values["v_hat"])]
+            parts.append("<pre>" + esc("\n".join(lines)) + "</pre>")
+        if phase == "complete":
+            parts.append("<p>MSE = " + esc(number(detail.get("epoch_mean_squared_error", detail["result"]["mean_squared_error"]))) + "</p>")
+            post = detail.get("post_state", {}).get("neurons", {}).get(self.selected_neuron.id)
+            if post:
+                parts.append("<p>" + esc(self.t("math.guide.post_update_control")) + ": Σ = " + esc(number(post["sum"]))
+                             + "; Y = " + esc(number(post["output"])) + "</p>")
+        parts.append("<p>" + esc(self.t("math.precision.note")) + "</p>")
+        return "".join(parts)
+
     def apply_record(self, record):
         for mapping in self.input_columns:
             raw_value = record[mapping["column_index"]]
@@ -1537,6 +1609,7 @@ class MathematicsDialog(QDialog):
             "learning_rate": trainer.learning_rate,
             "momentum": trainer.momentum,
             "momentum_state": trainer.get_momentum_state(),
+            "optimizer_state": self.network.get_optimizer_state(),
             "weights": {
                 connection.id: connection.weight
                 for connection in self.network.get_connections()
@@ -1569,6 +1642,7 @@ class MathematicsDialog(QDialog):
     def restore_network_state(self, state):
         self.network.set_learning_rate(state["learning_rate"])
         self.network.set_momentum(state.get("momentum", 0.0))
+        self.network.restore_optimizer_state(state.get("optimizer_state"))
         self.network.restore_momentum_state(state.get("momentum_state"))
 
         for connection in self.network.get_connections():
@@ -1623,6 +1697,7 @@ class MathematicsDialog(QDialog):
             "epoch_errors": list(self.epoch_errors),
             "learning_rate_field": self.learning_rate.value()
             ,"momentum_field": self.momentum.value()
+            ,"solver_field": self.solver_combo.currentData()
         }
 
     def restore_session_state(self, state):
@@ -1635,6 +1710,11 @@ class MathematicsDialog(QDialog):
         self.epoch_errors = list(state["epoch_errors"])
         self.learning_rate.setValue(state["learning_rate_field"])
         self.momentum.setValue(state.get("momentum_field", 0.0))
+        self.solver_combo.blockSignals(True)
+        self.solver_combo.setCurrentIndex(max(0, self.solver_combo.findData(state.get("solver_field", "sgd"))))
+        self.solver_combo.blockSignals(False)
+        self._math_solver = self.solver_combo.currentData()
+        self.update_math_solver_controls()
         self.update_interface()
 
     def begin_next_epoch(self):
@@ -1658,6 +1738,7 @@ class MathematicsDialog(QDialog):
             current_index = self.record_index
             record = self.records[current_index]
             self.network.set_learning_rate(self.learning_rate.value())
+            self.network.set_solver(self.solver_combo.currentData())
             self.network.set_momentum(self.momentum.value())
             self.network.reset_runtime_values()
             self.network.reset_training_values()
@@ -1861,6 +1942,7 @@ class MathematicsDialog(QDialog):
         controls_enabled = not self.experiment_started
         self.neuron_combo.setEnabled(controls_enabled)
         self.learning_rate.setEnabled(controls_enabled)
+        self.solver_combo.setEnabled(controls_enabled)
         self.momentum.setEnabled(controls_enabled)
         self.continue_radio.setEnabled(controls_enabled)
         self.initialize_radio.setEnabled(controls_enabled)
@@ -2140,6 +2222,15 @@ class MathematicsDialog(QDialog):
                 ""
             ]
         )
+        if step.get("solver") == "adam":
+            lines.append(self.t("adam.math.explanation"))
+            for label, before, values in self.adam_parameters_for_selection(step):
+                lines.extend(["", label])
+                lines.extend(adam_calculation_lines(values, step["learning_rate"], before, self.t, format_number))
+            lines.extend(["", self.t("math.report.step_result"),
+                          "MSE = " + format_number(result["mean_squared_error"])])
+            return "\n".join(lines)
+
         relevant_connection_found = False
         for connection_id, details in sorted(connections.items()):
             if neuron_step["neuron_type"] == NeuronType.INPUT:

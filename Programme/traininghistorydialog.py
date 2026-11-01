@@ -32,6 +32,9 @@ from PySide6.QtWidgets import (
     QWidget
 )
 
+from weighttrajectory import WeightTrajectoryPlot
+from chartcolors import ChartColors
+from historycharacteristic import HistoryCharacteristic
 from numberformat import format_number as format_display_number
 from numberformat import linear_axis_ticks, linear_axis_label
 from language import LanguageManager
@@ -51,8 +54,10 @@ class CleanTableSelectionDelegate(QStyledItemDelegate):
         )
 
 
-class TrainingHistoryChart(QWidget):
+class TrainingHistoryChart(ChartColors, QWidget):
     """Zeigt die Fehlerkurven mehrerer ausgewählter Trainingsläufe."""
+
+    chart_colors_enabled = True
 
     COLORS = (
         QColor(34, 113, 165),
@@ -247,8 +252,8 @@ class TrainingHistoryChart(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
         outer_rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        painter.fillRect(outer_rect, QColor(255, 255, 255))
-        painter.setPen(QPen(QColor(185, 195, 205), 1.0))
+        painter.fillRect(outer_rect, self.chart_color(255, 255, 255))
+        painter.setPen(QPen(self.chart_color(185, 195, 205), 1.0))
         painter.drawRoundedRect(outer_rect, 4.0, 4.0)
 
         plot_rect = outer_rect.adjusted(72.0, 46.0, -20.0, -42.0)
@@ -264,7 +269,7 @@ class TrainingHistoryChart(QWidget):
             and run[metric_curve_key(self.error_metric)]
         ]
 
-        painter.setPen(QColor(38, 52, 66))
+        painter.setPen(self.chart_color(38, 52, 66))
         painter.drawText(
             QRectF(plot_rect.left(), 5.0, plot_rect.width(), 20.0),
             Qt.AlignmentFlag.AlignCenter,
@@ -276,7 +281,7 @@ class TrainingHistoryChart(QWidget):
         if not valid_runs:
             self.data_bounds = None
             self.view_bounds = None
-            painter.setPen(QColor(105, 115, 125))
+            painter.setPen(self.chart_color(105, 115, 125))
             painter.drawText(
                 plot_rect,
                 Qt.AlignmentFlag.AlignCenter,
@@ -365,7 +370,7 @@ class TrainingHistoryChart(QWidget):
             for value in linear_axis_ticks(y_minimum, y_maximum)
         ]
 
-        grid_pen = QPen(QColor(225, 230, 235), 1.0)
+        grid_pen = QPen(self.chart_color(225, 230, 235), 1.0)
 
         for fraction, error_value in y_ticks:
             y_position = plot_rect.bottom() - fraction * plot_rect.height()
@@ -374,7 +379,7 @@ class TrainingHistoryChart(QWidget):
                 QPointF(plot_rect.left(), y_position),
                 QPointF(plot_rect.right(), y_position)
             )
-            painter.setPen(QColor(70, 80, 90))
+            painter.setPen(self.chart_color(70, 80, 90))
             painter.drawText(
                 QRectF(
                     4.0,
@@ -392,7 +397,7 @@ class TrainingHistoryChart(QWidget):
         for epoch_value in self.integer_ticks(x_minimum, x_maximum):
             fraction = (epoch_value - x_minimum) / x_span
             x_position = plot_rect.left() + fraction * plot_rect.width()
-            painter.setPen(QColor(70, 80, 90))
+            painter.setPen(self.chart_color(70, 80, 90))
             painter.drawText(
                 QRectF(
                     x_position - 34.0,
@@ -404,7 +409,7 @@ class TrainingHistoryChart(QWidget):
                 str(epoch_value)
             )
 
-        painter.setPen(QPen(QColor(80, 90, 100), 1.0))
+        painter.setPen(QPen(self.chart_color(80, 90, 100), 1.0))
         painter.drawLine(plot_rect.bottomLeft(), plot_rect.topLeft())
         painter.drawLine(plot_rect.bottomLeft(), plot_rect.bottomRight())
         painter.drawText(
@@ -421,7 +426,7 @@ class TrainingHistoryChart(QWidget):
         legend_x = plot_rect.left()
 
         run_colors = {
-            run["run_id"]: self.COLORS[index % len(self.COLORS)]
+            run["run_id"]: self.chart_color(self.COLORS[index % len(self.COLORS)])
             for index, run in enumerate(self.runs)
         }
         for run_index, run in enumerate(valid_runs[:6]):
@@ -431,7 +436,7 @@ class TrainingHistoryChart(QWidget):
                 QPointF(legend_x, 34.0),
                 QPointF(legend_x + 18.0, 34.0)
             )
-            painter.setPen(QColor(55, 65, 75))
+            painter.setPen(self.chart_color(55, 65, 75))
             label = self.t("history.chart.run", run=run["run_id"])
             label_width = painter.fontMetrics().horizontalAdvance(label) + 28
             painter.drawText(
@@ -442,7 +447,7 @@ class TrainingHistoryChart(QWidget):
             legend_x += label_width + 22.0
 
         if len(valid_runs) > 6:
-            painter.setPen(QColor(80, 90, 100))
+            painter.setPen(self.chart_color(80, 90, 100))
             painter.drawText(
                 QRectF(legend_x, 25.0, 90.0, 18.0),
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
@@ -507,6 +512,7 @@ class TrainingHistoryDialog(QDialog):
         language_manager=None,
         restorable_run_ids=None,
         active_run_id=None,
+        characteristic_provider=None,
     ):
         super().__init__(parent)
         self.language = language_manager or LanguageManager()
@@ -518,7 +524,7 @@ class TrainingHistoryDialog(QDialog):
         }
         self.active_run_id = active_run_id
         self.restore_run_id = None
-        self.renumber_runs()
+        # Run identifiers remain permanent, including gaps after deletions.
 
         self.setWindowTitle(self.t("history.title"))
         self.resize(980, 720)
@@ -542,7 +548,8 @@ class TrainingHistoryDialog(QDialog):
             self.t("history.column.first_epoch_error"),
             self.t("history.column.end_error"),
             self.t("history.column.maximum_error"),
-            self.t("history.column.duration")
+            self.t("history.column.duration"),
+            self.t("adam.solver.label")
         ]
         self.table.setColumnCount(len(columns))
         self.table.setHorizontalHeaderLabels(columns)
@@ -592,9 +599,12 @@ class TrainingHistoryDialog(QDialog):
         self.metric_combo = QComboBox()
         self.metric_combo.addItem(self.t("training.metric.mse"), "mse")
         self.metric_combo.addItem(self.t("training.metric.maximum"), "maximum")
+        self.metric_combo.addItem(self.t("trajectory.title"), "trajectory")
+        self.metric_combo.addItem(self.t("training.characteristic.group"), "characteristic")
         self.metric_combo.setToolTip(self.t("training.metric.hint"))
         chart_controls.addWidget(self.metric_combo)
-        chart_controls.addWidget(QLabel(self.t("history.comparison_view")))
+        self.scale_label = QLabel(self.t("history.comparison_view"))
+        chart_controls.addWidget(self.scale_label)
         self.scale_combo = QComboBox()
         self.scale_combo.addItem(self.t("common.linear"), "linear")
         self.scale_combo.addItem(self.t("common.logarithmic"), "logarithmic")
@@ -612,7 +622,6 @@ class TrainingHistoryDialog(QDialog):
         main_layout.addLayout(chart_controls)
 
         self.chart = TrainingHistoryChart(language_manager=self.language)
-        self.chart.setToolTip(self.t("history.chart.mouse_help"))
         self.metric_combo.currentIndexChanged.connect(self.update_chart_metric)
         self.scale_combo.currentIndexChanged.connect(
             self.update_chart_scale
@@ -621,6 +630,14 @@ class TrainingHistoryDialog(QDialog):
             self.show_full_range
         )
         main_layout.addWidget(self.chart, 2)
+        self.weight_trajectory_plot = WeightTrajectoryPlot(self.language)
+        self.weight_trajectory_plot.chart_colors_enabled = True
+        self.weight_trajectory_plot.interactive = True
+        self.weight_trajectory_plot.hide()
+        main_layout.addWidget(self.weight_trajectory_plot, 2)
+        self.characteristic_view = HistoryCharacteristic(self.language, characteristic_provider)
+        self.characteristic_view.hide()
+        main_layout.addWidget(self.characteristic_view, 2)
 
         button_layout = QHBoxLayout()
         self.export_button = QPushButton(self.t("history.export"))
@@ -675,27 +692,6 @@ class TrainingHistoryDialog(QDialog):
         buttons.rejected.connect(dialog.reject)
         layout.addWidget(buttons)
         dialog.exec()
-
-    def renumber_runs(self):
-        """Nummeriert die verbliebenen Läufe chronologisch und lückenlos."""
-
-        old_active_run_id = self.active_run_id
-        old_restore_run_id = self.restore_run_id
-        old_to_new = {}
-        for new_run_id, entry in enumerate(self.training_history, start=1):
-            old_run_id = entry.get("run_id")
-            old_to_new[old_run_id] = new_run_id
-            entry["run_id"] = new_run_id
-        for entry in self.training_history:
-            parent_run_id = entry.get("parent_run_id")
-            entry["parent_run_id"] = old_to_new.get(parent_run_id)
-        self.restorable_run_ids = {
-            old_to_new[run_id]
-            for run_id in self.restorable_run_ids
-            if run_id in old_to_new
-        }
-        self.active_run_id = old_to_new.get(old_active_run_id)
-        self.restore_run_id = old_to_new.get(old_restore_run_id)
 
     @staticmethod
     def format_number(value):
@@ -775,12 +771,13 @@ class TrainingHistoryDialog(QDialog):
                 ),
                 self.training_mode_text(entry),
                 self.format_number(entry["learning_rate"]),
-                self.format_number(entry.get("momentum", 0.0)),
+                ("—" if entry.get("solver", "sgd") == "adam" else self.format_number(entry.get("momentum", 0.0))),
                 str(entry["completed_epochs"]),
                 self.format_error_number(entry["start_error"]),
                 self.format_error_number(entry["end_error"]),
                 self.format_error_number(entry["maximum_absolute_error"]),
-                f"{entry['elapsed_seconds']:.1f} s"
+                f"{entry['elapsed_seconds']:.1f} s",
+                self.t("adam.solver." + entry.get("solver", "sgd"))
             )
 
             for column, value in enumerate(values):
@@ -862,7 +859,25 @@ class TrainingHistoryDialog(QDialog):
             for entry in self.training_history
             if entry["run_id"] in selected_ids
         ]
-        self.chart.set_runs(selected_runs)
+        trajectory = self.metric_combo.currentData() == "trajectory"
+        characteristic = self.metric_combo.currentData() == "characteristic"
+        self.characteristic_view.setVisible(characteristic)
+        self.chart.setVisible(not trajectory and not characteristic)
+        self.weight_trajectory_plot.setVisible(trajectory)
+        self.scale_label.setVisible(not trajectory and not characteristic)
+        self.scale_combo.setVisible(not trajectory and not characteristic)
+        self.full_range_button.setVisible(True)
+        if characteristic:
+            self.characteristic_view.set_runs(selected_runs)
+        elif trajectory:
+            if len(selected_runs) == 1:
+                run = selected_runs[0]
+                self.weight_trajectory_plot.set_trajectory(run.get("weight_trajectory"), self.t("trajectory.run",
+                    run=run["run_id"], solver=self.t("adam.solver." + run.get("solver", "sgd"))))
+            else:
+                self.weight_trajectory_plot.set_trajectory(None, message=self.t("trajectory.select_one"))
+        else:
+            self.chart.set_runs(selected_runs)
         by_id = {entry["run_id"]: entry for entry in self.training_history}
         for row in range(self.table.rowCount()):
             item = self.table.item(row, 0)
@@ -872,7 +887,7 @@ class TrainingHistoryDialog(QDialog):
             if original_text is None:
                 original_text = item.text()
                 item.setData(original_role, original_text)
-            missing = self.chart.error_metric == "maximum" and not run.get("maximum_error_curve_points")
+            missing = self.metric_combo.currentData() == "maximum" and not run.get("maximum_error_curve_points")
             item.setText(original_text + (" –" if missing else ""))
             reason = run.get("invalidated_reason")
             item.setToolTip(self.t("history.invalid." + reason) if reason else (
@@ -885,7 +900,8 @@ class TrainingHistoryDialog(QDialog):
         )
 
     def update_chart_metric(self, index=None):
-        self.chart.error_metric = self.metric_combo.currentData() or "mse"
+        metric = self.metric_combo.currentData() or "mse"
+        if metric not in {"trajectory", "characteristic"}:self.chart.error_metric = metric
         self.update_chart_selection()
 
     def update_chart_scale(self, index=None):
@@ -896,18 +912,24 @@ class TrainingHistoryDialog(QDialog):
     def show_full_range(self):
         """Setzt den vollständigen Epochenbereich wieder her."""
 
-        self.chart.reset_view()
+        if self.metric_combo.currentData() == "characteristic":
+            self.characteristic_view.plot.reset_view()
+        elif self.metric_combo.currentData() == "trajectory":
+            self.weight_trajectory_plot.reset_view()
+        else:
+            self.chart.reset_view()
 
-    def delete_selected_runs(self):
-        selected_ids = self.selected_run_ids()
+    def delete_selected_runs(self, checked=False, *, run_id=None, confirmation_parent=None):
+        selected_ids = {run_id} if run_id is not None else self.selected_run_ids()
 
         if not selected_ids:
             return
 
-        message_box = QMessageBox(self)
+        message_box = QMessageBox(confirmation_parent or self)
         message_box.setIcon(QMessageBox.Icon.Question)
         message_box.setWindowTitle(self.t("history.delete_title"))
-        message_box.setText(self.t("history.delete_question", count=len(selected_ids)))
+        message_box.setText(self.t("training.delete_run_question", run=run_id) if run_id is not None
+                            else self.t("history.delete_question", count=len(selected_ids)))
         message_box.setStandardButtons(
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
@@ -925,7 +947,7 @@ class TrainingHistoryDialog(QDialog):
             for entry in self.training_history
             if entry["run_id"] not in selected_ids
         ]
-        self.renumber_runs()
+        self.restorable_run_ids.difference_update(selected_ids)
         if active_run_deleted:
             remaining = [entry for entry in self.training_history
                          if entry["run_id"] in self.restorable_run_ids
@@ -937,6 +959,7 @@ class TrainingHistoryDialog(QDialog):
                 self.active_run_id = None
                 self.restore_run_id = None
         self.populate_table()
+        return True
 
     def request_restore_selected_run(self):
         """Schließt den Dialog mit dem gewählten Netzwerkzustand."""
@@ -996,7 +1019,8 @@ class TrainingHistoryDialog(QDialog):
                         self.t("history.csv.end_error"),
                         self.t("history.csv.maximum_error"),
                         self.t("history.csv.duration_seconds"),
-                        self.t("history.csv.status")
+                        self.t("history.csv.status"),
+                        self.t("adam.solver.label")
                     )
                 )
 
@@ -1011,7 +1035,7 @@ class TrainingHistoryDialog(QDialog):
                             entry["weight_initialization"],
                             entry["bias_initialization"],
                             entry["learning_rate"],
-                            entry.get("momentum", 0.0),
+                            "–" if entry.get("solver", "sgd") == "adam" else entry.get("momentum", 0.0),
                             entry["error_limit"],
                             entry["requested_epochs"],
                             entry["completed_epochs"],
@@ -1020,7 +1044,8 @@ class TrainingHistoryDialog(QDialog):
                             entry["maximum_absolute_error"],
                             entry["elapsed_seconds"],
                             self.t("history.invalid") if entry.get("invalidated_reason")
-                            else entry["status_text"]
+                            else entry["status_text"],
+                            self.t("adam.solver." + entry.get("solver", "sgd"))
                         )
                     )
 

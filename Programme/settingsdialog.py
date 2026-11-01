@@ -300,6 +300,7 @@ class SettingsDialog(QDialog):
             button.set_color(data["display"]["colors"][key], emit_signal=False)
         ui = dict(self.base_ui_settings, **data["ui"])
         self.base_ui_settings = ui
+        self.chart_background_button.set_color(ui.get("chart_background", "#ffffff"), emit_signal=False)
         for key, value in ui.items():
             widget = getattr(self, "editor_zoom_step" if key == "editor_zoom_step_percent" else key, None)
             if isinstance(widget, QCheckBox):
@@ -443,6 +444,11 @@ class SettingsDialog(QDialog):
                 button
             )
 
+        self.chart_background_button = ColorButton(
+            self.base_ui_settings.get("chart_background", "#ffffff"), self.language_manager)
+        self.chart_background_button.color_changed.connect(self.emit_preview)
+        form.insertRow(0, self.language_manager.text("settings.color.chart_background") + ":",
+                       self.chart_background_button)
         scroll.setWidget(container)
         layout.addWidget(scroll, 1)
         self.pages.addWidget(page)
@@ -774,6 +780,7 @@ class SettingsDialog(QDialog):
         settings = dict(self.base_ui_settings)
         settings.update(
             {
+                "chart_background": self.chart_background_button.color_text,
                 "toolbar_icon_size": self.toolbar_icon_size.value(),
                 "toolbar_auto_size": self.toolbar_auto_size.isChecked(),
                 "toolbar_vertical_width": self.toolbar_vertical_width.value(),
@@ -809,6 +816,22 @@ class SettingsDialog(QDialog):
 
     def restore_current_defaults(self, _checked=False):
         page_index = self.category_list.currentRow()
+        if page_index == 1:
+            question = QMessageBox(self)
+            question.setIcon(QMessageBox.Icon.Question)
+            question.setWindowTitle(self.language_manager.text("settings.colors.reset_title"))
+            question.setText(self.language_manager.text("settings.colors.reset_question"))
+            question.setStandardButtons(QMessageBox.StandardButton.Reset | QMessageBox.StandardButton.Cancel)
+            question.button(QMessageBox.StandardButton.Reset).setText(
+                self.language_manager.text("settings.colors.reset_action"))
+            question.button(QMessageBox.StandardButton.Cancel).setText(
+                self.language_manager.text("common.cancel"))
+            question.setDefaultButton(QMessageBox.StandardButton.Cancel)
+            question.setEscapeButton(QMessageBox.StandardButton.Cancel)
+            result = question.exec()
+            question.deleteLater()
+            if result != QMessageBox.StandardButton.Reset:
+                return
         self.loading = True
 
         if page_index == 0:
@@ -824,6 +847,7 @@ class SettingsDialog(QDialog):
                 self.ui_defaults["show_project_assistant"]
             )
         elif page_index == 1:
+            self.chart_background_button.set_color("#ffffff", emit_signal=False)
             for key, button in self.color_buttons.items():
                 button.set_color(
                     self.project_defaults["colors"][key],

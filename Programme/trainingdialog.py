@@ -45,11 +45,13 @@ from numberformat import format_number
 from resultanalysisdialog import ResultAnalysisDialog
 from trainingdebugdialog import TrainingDebugDialog
 from trainingerrorchart import TrainingErrorChart
+from trainingchartwindow import TrainingChartWindow
 from analysisplot import CharacteristicPlot
 from trainingcomparison import (
     MAX_COMPARISON_RUNS, TrainingComparisonPopup, comparison_color, normalized_curve,
 )
 from trainingdataio import TrainingDataIO
+from weighttrajectory import WeightSelectionDialog, WeightTrajectoryPlot, valid_pair, new_trajectory, append_trajectory
 
 
 class CompactDoubleSpinBox(QDoubleSpinBox):
@@ -140,11 +142,6 @@ class TrainingDialog(QDialog):
         self.training_settings = self.normalize_training_settings(
             training_settings
         )
-        # Ein neu geöffneter Trainingsdialog beginnt stets mit der
-        # empfohlenen aktivierungsabhängigen Gewichtsinitialisierung.
-        # Damit überschreiben ältere, im Projekt gespeicherte Xavier-
-        # Vorgaben nicht den aktuellen Standard für einen neuen Lauf.
-        self.training_settings["weight_initialization"] = "auto"
         self.is_training = False
         self.stop_requested = False
         self.network_test_dialog = None
@@ -186,11 +183,13 @@ class TrainingDialog(QDialog):
         self.current_run_initialized = False
         self.current_run_learning_rate = None
         self.current_run_momentum = None
+        self.current_run_solver = "sgd"
         self.current_run_shuffle_seed = None
         self.current_run_parent_id = None
         self.current_run_can_continue = False
         self.current_run_stopped = False
         self.current_run_initial_state = None
+        self.current_run_weight_trajectory = None
         self.current_run_started_with_zero_biases = False
 
         self.input_columns = []
@@ -728,6 +727,12 @@ class TrainingDialog(QDialog):
         self.training_values_layout.setContentsMargins(9, 8, 9, 8)
         self.training_values_layout.setHorizontalSpacing(12)
         self.training_values_layout.setVerticalSpacing(5)
+        self.solver_combo = QComboBox()
+        self.solver_combo.addItem(text("adam.solver.sgd"), "sgd")
+        self.solver_combo.addItem(text("adam.solver.adam"), "adam")
+        self.solver_combo.setCurrentIndex(max(0, self.solver_combo.findData(self.training_settings.get("solver", "sgd"))))
+        self.solver_combo.setToolTip(text("adam.solver.tooltip"))
+        self.training_values_layout.addRow(text("adam.solver.label"), self.solver_combo)
         learning_rate_row = QWidget(self.training_values_group)
         learning_rate_row_layout = QHBoxLayout(learning_rate_row)
         learning_rate_row_layout.setContentsMargins(0, 0, 0, 0)
@@ -743,7 +748,8 @@ class TrainingDialog(QDialog):
         self.training_values_info_button.clicked.connect(
             lambda: self.show_training_information(
                 "training.info.parameters.title",
-                "training.info.parameters.text",
+                "training.info.parameters.adam" if self.solver_combo.currentData() == "adam"
+                else "training.info.parameters.text",
             )
         )
         learning_rate_row_layout.addWidget(self.training_values_info_button)
@@ -753,6 +759,11 @@ class TrainingDialog(QDialog):
         self.training_values_layout.addRow(
             text("training.parameters.momentum"), self.momentum
         )
+        self._selected_solver = self.solver_combo.currentData()
+        self._solver_rates = {"sgd": 0.01, "adam": 0.001}
+        self._solver_rates[self._selected_solver] = self.learning_rate.value()
+        self.solver_combo.currentIndexChanged.connect(self.solver_selection_changed)
+        self.update_solver_controls()
         self.training_values_layout.addRow(
             text("training.parameters.error_limit"), self.error_limit
         )
@@ -793,6 +804,24 @@ class TrainingDialog(QDialog):
             text("training.parameters.error_chart"), self.show_error_chart
         )
 
+        self.weight_trajectory_pair = self.training_settings.get("weight_trajectory_pair")
+        self.record_weight_trajectory = QCheckBox(text("trajectory.record"))
+        self.record_weight_trajectory.setToolTip(text("trajectory.record_help"))
+        self.weight_pair_button = QPushButton("…")
+        self.weight_pair_button.setFixedSize(26, 24)
+        self.weight_pair_button.setToolTip(text("trajectory.select_title"))
+        self.weight_pair_button.clicked.connect(self.choose_weight_pair)
+        row = QWidget()
+        row_layout = QHBoxLayout(row); row_layout.setContentsMargins(0,0,32,0)
+        row_layout.addWidget(self.record_weight_trajectory, 1); row_layout.addWidget(self.weight_pair_button)
+        self.execution_layout.addRow("", row)
+        available = {c.id for c in self.network.get_connections()}
+        self.record_weight_trajectory.setChecked(bool(self.training_settings.get("record_weight_trajectory"))
+            and valid_pair(self.weight_trajectory_pair) and set(self.weight_trajectory_pair).issubset(available))
+        self.record_weight_trajectory.setEnabled(len(available) >= 2)
+        self.weight_pair_button.setEnabled(self.record_weight_trajectory.isChecked())
+        self.record_weight_trajectory.toggled.connect(self.weight_recording_toggled)
+
         self.left_training_container = QWidget()
         self.left_training_layout = QVBoxLayout(self.left_training_container)
         self.left_training_layout.setContentsMargins(0, 0, 0, 0)
@@ -829,6 +858,7 @@ class TrainingDialog(QDialog):
         self.error_metric_combo.addItem(
             text("training.metric.characteristic"), "characteristic"
         )
+        self.error_metric_combo.addItem(text("trajectory.title"), "trajectory")
         metric_font = QFont(self.font())
         metric_font.setBold(False)
         self.error_metric_combo.setFont(metric_font)
@@ -1241,6 +1271,9 @@ class TrainingDialog(QDialog):
         self.error_chart_layout.setStretch(1, 1)
         self.error_chart_layout.setStretch(2, 1)
         self.error_chart_layout.setStretch(3, 1)
+        self.weight_trajectory_plot = WeightTrajectoryPlot(self.language)
+        self.weight_trajectory_plot.hide()
+        self.error_chart_layout.addWidget(self.weight_trajectory_plot, 1)
         self.comparison_legend = QLabel(self.error_chart_group)
         self.comparison_legend.setWordWrap(False)
         self.comparison_legend.setFont(comparison_font)
@@ -1248,6 +1281,13 @@ class TrainingDialog(QDialog):
         self.comparison_legend.setTextInteractionFlags(Qt.TextInteractionFlag.LinksAccessibleByMouse)
         self.comparison_legend.linkActivated.connect(self.hide_comparison_run)
         self.comparison_legend.hide()
+        self.enlarged_chart_window = None
+        for plot in (self.error_chart, self.training_characteristic_plot, self.weight_trajectory_plot):
+            plot.chart_colors_enabled = True
+            plot.installEventFilter(self)
+        self.training_characteristic_plot.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        self.finished.connect(self.close_enlarged_chart)
         self.error_metric_combo.currentIndexChanged.connect(self.update_error_metric)
         self.populate_training_characteristic_controls()
         self.training_characteristic_input.currentIndexChanged.connect(
@@ -1401,6 +1441,11 @@ class TrainingDialog(QDialog):
             text("training.button.load_history")
         )
 
+        self.delete_run_button = QPushButton(text("training.button.delete_run"))
+        self.delete_run_button.setToolTip(text("training.button.delete_run_tooltip"))
+        self.delete_run_button.setEnabled(False)
+        self.delete_run_button.clicked.connect(self.delete_current_training_run)
+
         self.training_buttons = [
             self.start_epochs_button,
             self.continue_button,
@@ -1479,12 +1524,15 @@ class TrainingDialog(QDialog):
         )
         training_control_layout = QHBoxLayout(self.training_control_group)
         training_control_layout.setContentsMargins(8, 5, 8, 3)
-        training_control_layout.setSpacing(8)
+        training_control_layout.setSpacing(4)
         training_control_layout.addWidget(self.repeat_initialization_button)
         training_control_layout.addStretch(1)
         training_control_layout.addWidget(self.start_epochs_button)
         training_control_layout.addWidget(self.continue_button)
         training_control_layout.addWidget(self.stop_button)
+        training_control_layout.addWidget(self.delete_run_button)
+        for button in (self.stop_button, self.continue_button):
+            button.setMinimumWidth(button.sizeHint().width())
         self.training_control_info = QPushButton("i")
         self.training_control_info.setFixedSize(26, 24)
         self.training_control_info.setToolTip(
@@ -1723,6 +1771,9 @@ class TrainingDialog(QDialog):
             2,
             1
         )
+        self.protocol_button = QPushButton(text("protocol.button"))
+        self.protocol_button.clicked.connect(self.open_training_protocol)
+        self.content_layout.addWidget(self.protocol_button, 3, 0, Qt.AlignmentFlag.AlignLeft)
         self.content_layout.addLayout(
             self.test_and_debug_layout,
             3,
@@ -2476,6 +2527,7 @@ class TrainingDialog(QDialog):
             "bias_initialization": "zero",
             "learning_rate": 0.01,
             "momentum": 0.0,
+            "solver": "sgd",
             "error_limit": 0.01,
             "maximum_epochs": 1000,
             "training_section_epochs": 1000,
@@ -2484,6 +2536,8 @@ class TrainingDialog(QDialog):
             "show_error_chart": True,
             "error_chart_scale": "linear",
             "comparison_full_length": False,
+            "record_weight_trajectory": False,
+            "weight_trajectory_pair": None,
             "training_target_mode": "epochs"
         }
 
@@ -2528,6 +2582,7 @@ class TrainingDialog(QDialog):
                 self.learning_rate.value()
             ),
             "momentum": float(self.momentum.value()),
+            "solver": str(self.solver_combo.currentData()),
             "error_limit": float(
                 max(
                     self.error_limit.value(),
@@ -2548,6 +2603,8 @@ class TrainingDialog(QDialog):
             "error_chart_scale": str(
                 self.error_chart_scale.currentData()
             ),
+            "record_weight_trajectory": self.record_weight_trajectory.isChecked(),
+            "weight_trajectory_pair": list(self.weight_trajectory_pair) if valid_pair(self.weight_trajectory_pair) else None,
             "comparison_full_length": bool(self.comparison_full_length),
             "training_target_mode": self.training_target_mode
         }
@@ -2564,6 +2621,8 @@ class TrainingDialog(QDialog):
     def update_training_run_label(self):
         """Zeigt Nummer und ursprünglichen Startzeitpunkt des aktuellen Laufs."""
 
+        self.error_chart.run_id = self.current_run_id
+        self.error_chart.update()
         if hasattr(self, "comparison_legend"):
             self.refresh_comparison_runs()
         if self.current_run_id is None or not self.current_run_timestamp:
@@ -2594,8 +2653,11 @@ class TrainingDialog(QDialog):
     def begin_new_training_run(self, parent_run_id=None):
         """Vergibt Nummer und Startzeit für einen bewusst neuen Lauf."""
 
-        self.current_run_id = self.next_training_run_id
-        self.next_training_run_id += 1
+        parent = self.parent()
+        self.current_run_id = (parent.reserve_training_run_id()
+            if parent is not None and hasattr(parent, "reserve_training_run_id")
+            else self.next_training_run_id)
+        self.next_training_run_id = self.current_run_id + 1
         self.current_run_timestamp = datetime.now().isoformat(
             timespec="seconds"
         )
@@ -2605,6 +2667,7 @@ class TrainingDialog(QDialog):
         self.current_run_initialized = self.initialize_network.isChecked()
         self.current_run_learning_rate = float(self.learning_rate.value())
         self.current_run_momentum = float(self.momentum.value())
+        self.current_run_solver = self.solver_combo.currentData()
         self.current_run_parent_id = (
             int(parent_run_id) if parent_run_id is not None else None
         )
@@ -2684,6 +2747,19 @@ class TrainingDialog(QDialog):
     def eventFilter(self, watched, event):
         """Wählt das Epochenfeld auch bei einem Klick ohne Wertänderung."""
 
+        plots = tuple(getattr(self, name, None) for name in (
+            "error_chart", "training_characteristic_plot", "weight_trajectory_plot"))
+        if watched in plots:
+            if (event.type() == QEvent.Type.MouseButtonDblClick
+                    and event.button() == Qt.MouseButton.LeftButton):
+                self.open_enlarged_chart()
+                return True
+            # The training characteristic remains a read-only display.
+            if watched is getattr(self, "training_characteristic_plot", None) and event.type() in (
+                    QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease,
+                    QEvent.Type.MouseMove, QEvent.Type.Wheel):
+                return True
+
         if event.type() == QEvent.Type.ToolTip:
             return True
 
@@ -2709,6 +2785,77 @@ class TrainingDialog(QDialog):
         ):
             self.select_training_target("epochs")
         return super().eventFilter(watched, event)
+
+    def open_enlarged_chart(self):
+        if self.enlarged_chart_window is None:
+            self.enlarged_chart_window = TrainingChartWindow(self)
+        self.enlarged_chart_window.show()
+        self.enlarged_chart_window.raise_()
+        self.enlarged_chart_window.activateWindow()
+
+    def close_enlarged_chart(self, *args):
+        if self.enlarged_chart_window is not None:
+            self.enlarged_chart_window.close()
+
+    def choose_weight_pair(self):
+        if self.is_training:return False
+        if len(self.network.get_connections()) < 2:
+            QMessageBox.information(self, self.language.text("trajectory.title"), self.language.text("trajectory.need_two"))
+            return False
+        dialog = WeightSelectionDialog(self.network, self.language, self.weight_trajectory_pair, self)
+        accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        if accepted:
+            self.weight_trajectory_pair = dialog.pair()
+            self.weight_pair_button.setToolTip(dialog.x_combo.currentText() + "\n" + dialog.y_combo.currentText())
+        dialog.deleteLater()
+        return accepted
+
+    def weight_recording_toggled(self, enabled):
+        if enabled and not self.choose_weight_pair():
+            self.record_weight_trajectory.blockSignals(True)
+            self.record_weight_trajectory.setChecked(False)
+            self.record_weight_trajectory.blockSignals(False)
+        self.weight_pair_button.setEnabled(self.record_weight_trajectory.isChecked() and not self.is_training)
+
+    def restore_weight_recording_controls(self, data):
+        self.record_weight_trajectory.blockSignals(True)
+        self.record_weight_trajectory.setChecked(data is not None)
+        self.record_weight_trajectory.blockSignals(False)
+        if data:
+            self.weight_trajectory_pair = [c["id"] for c in data["connections"]]
+            self.weight_pair_button.setToolTip("\n".join(c["label"] for c in data["connections"]))
+        self.weight_pair_button.setEnabled(data is not None and not self.is_training)
+
+    def refresh_weight_trajectory(self):
+        title = (self.language.text("trajectory.run", run=self.current_run_id,
+                 solver=self.language.text("adam.solver." + self.current_run_solver))
+                 if self.current_run_id is not None else None)
+        self.weight_trajectory_plot.set_trajectory(self.current_run_weight_trajectory, title)
+
+    def update_solver_controls(self):
+        visible = self.solver_combo.currentData() == "sgd"
+        self.momentum.setVisible(visible)
+        label = self.training_values_layout.labelForField(self.momentum)
+        if label is not None:
+            label.setVisible(visible)
+
+    def solver_selection_changed(self, _index=None):
+        selected = self.solver_combo.currentData()
+        self._solver_rates[self._selected_solver] = self.learning_rate.value()
+        self.learning_rate.setValue(self._solver_rates[selected])
+        self._selected_solver = selected
+        self.update_solver_controls()
+        if self.current_run_id is not None and selected != self.current_run_solver:
+            self.initialize_network.setChecked(False)
+        if hasattr(self, "content_layout"):
+            self.schedule_training_layout_resize()
+
+    def restore_solver_selection(self, solver):
+        self.solver_combo.blockSignals(True)
+        self.solver_combo.setCurrentIndex(max(0, self.solver_combo.findData(solver)))
+        self.solver_combo.blockSignals(False)
+        self._selected_solver = self.solver_combo.currentData()
+        self.update_solver_controls()
 
     def update_training_target_display(self):
         """Synchronisiert Optionsfelder und zugehöriges Zahlenfeld."""
@@ -2801,6 +2948,9 @@ class TrainingDialog(QDialog):
                 "training.suggestion.reason.small_network"
             )
 
+        if self.solver_combo.currentData() == "adam":
+            learning_rate = 0.001
+            activation_reason = self.language.text("adam.suggestion.reason")
         momentum = 0.0
         error_limit = 0.001 if all_binary_outputs else 0.0001
         if len(connections) <= 100 and len(self.records) <= 100:
@@ -2830,7 +2980,8 @@ class TrainingDialog(QDialog):
         )
         message_box.setText(
             self.language.text(
-                "training.suggestion.values",
+                "adam.suggestion.values" if self.solver_combo.currentData() == "adam"
+                else "training.suggestion.values",
                 learning_rate=display_number(learning_rate),
                 momentum="0,00" if self.language.current_language == "de" else "0.00",
                 error_limit=display_number(error_limit),
@@ -2874,6 +3025,9 @@ class TrainingDialog(QDialog):
         if self.is_training or not self.current_run_can_continue:
             return None
 
+        if self.solver_combo.currentData() != self.current_run_solver:
+            return "changed"
+
         original_rate = self.current_run_learning_rate
         if original_rate is None:
             original_rate = float(self.learning_rate.value())
@@ -2896,7 +3050,7 @@ class TrainingDialog(QDialog):
             rel_tol=1e-12,
             abs_tol=1e-12,
         )
-        if learning_rate_changed or momentum_changed:
+        if learning_rate_changed or (momentum_changed and self.current_run_solver == "sgd"):
             message_box = QMessageBox(self)
             message_box.setIcon(QMessageBox.Icon.Question)
             message_box.setWindowTitle(
@@ -2904,7 +3058,8 @@ class TrainingDialog(QDialog):
             )
             message_box.setText(
                 self.language.text(
-                    "training.resume.parameters_changed",
+                    "adam.resume.parameters_changed" if self.current_run_solver == "adam"
+                    else "training.resume.parameters_changed",
                     learning_rate=format_number(original_rate),
                     momentum=format_number(original_momentum),
                 )
@@ -2981,18 +3136,36 @@ class TrainingDialog(QDialog):
             continue_existing=True,
         )
 
-    def load_previous_training_run(self):
+    def open_training_protocol(self):
+        parent = self.parent()
+        if parent is not None and hasattr(parent, "open_training_protocol"):
+            parent.training_settings = self.get_training_settings()
+            parent.open_training_protocol()
+
+    def delete_current_training_run(self):
+        if self.is_training or self.current_run_id is None:
+            return
+        self.load_previous_training_run(delete_run_id=self.current_run_id)
+        self.refresh_comparison_runs()
+        parent = self.parent()
+        if parent is not None:
+            self.set_next_training_run_id(max(getattr(parent, "last_training_run_id", 0),
+                max((entry.get("run_id", 0) for entry in getattr(parent, "training_history", [])), default=0)) + 1)
+
+    def load_previous_training_run(self, *, delete_run_id=None):
         """Nutzt die zentrale Historie zum Wiederherstellen eines Netzstandes."""
 
         parent = self.parent()
         if parent is None or not hasattr(parent, "open_training_history"):
             return
-        restored_entry = parent.open_training_history()
+        restored_entry = (parent.open_training_history() if delete_run_id is None
+                          else parent.open_training_history(delete_run_id=delete_run_id))
         if not isinstance(restored_entry, dict):
             return
         settings = self.normalize_training_settings(
             getattr(parent, "training_settings", None)
         )
+        self.restore_solver_selection(settings.get("solver", "sgd"))
         self.initialize_network.setChecked(settings["initialize_network"])
         self.learning_rate.setValue(settings["learning_rate"])
         self.momentum.setValue(settings.get("momentum", 0.0))
@@ -3083,6 +3256,11 @@ class TrainingDialog(QDialog):
             self.current_run_id = int(history_entry.get("run_id"))
         except (TypeError, ValueError):
             self.current_run_id = None
+        self.current_run_weight_trajectory = deepcopy(history_entry.get("weight_trajectory"))
+        self.restore_weight_recording_controls(self.current_run_weight_trajectory)
+        self.current_run_solver = history_entry.get("solver", "sgd")
+        self.refresh_weight_trajectory()
+        self.restore_solver_selection(self.current_run_solver)
         self.current_run_timestamp = str(history_entry.get("timestamp", ""))
         self.current_run_completed_epochs = max(0, completed_epochs)
         try:
@@ -3192,12 +3370,15 @@ class TrainingDialog(QDialog):
         self.current_run_momentum = None
         self.current_run_shuffle_seed = None
         self.current_run_parent_id = None
-        self.network.reset_momentum_state()
+        self.network.reset_optimizer_state()
         self.current_run_can_continue = False
         self.current_run_stopped = False
         self.current_run_initial_state = None
         self.current_run_started_with_zero_biases = False
-        self.next_training_run_id = 1
+        self.current_run_weight_trajectory = None
+        self.restore_weight_recording_controls(None)
+        self.refresh_weight_trajectory()
+        # Clearing the display must never recycle a previous run number.
 
         self.error_chart_start_value = None
         self.error_chart_current_value = None
@@ -3275,7 +3456,7 @@ class TrainingDialog(QDialog):
         ):
             legend_tip += "\n–: " + self.language.text("training.metric.unavailable")
         self.comparison_legend.setToolTip(legend_tip)
-        self.comparison_legend.setVisible(bool(selected))
+        self.comparison_legend.setVisible(bool(selected) and self.error_metric_combo.currentData() in ("mse", "maximum"))
 
     def set_comparison_full_length(self, enabled):
         """Schaltet alle gewählten Referenzkurven zwischen Ausschnitt und Gesamtlauf."""
@@ -3298,7 +3479,9 @@ class TrainingDialog(QDialog):
         metric = self.error_metric_combo.currentData() or "mse"
         characteristic_visible = metric == "characteristic"
         self.training_characteristic_notice.hide()
-        self.error_chart.setVisible(not characteristic_visible)
+        trajectory_visible = metric == "trajectory"
+        self.weight_trajectory_plot.setVisible(trajectory_visible)
+        self.error_chart.setVisible(not characteristic_visible and not trajectory_visible)
         self.training_characteristic_plot.setVisible(characteristic_visible)
         self.training_characteristic_controls.setVisible(characteristic_visible)
         for widget in (
@@ -3308,7 +3491,13 @@ class TrainingDialog(QDialog):
             self.error_chart_y_axis_label,
             self.error_chart_scale,
         ):
-            widget.setVisible(not characteristic_visible)
+            widget.setVisible(not characteristic_visible and not trajectory_visible)
+        if trajectory_visible:
+            self.comparison_legend.hide()
+            if self.comparison_popup is not None:self.comparison_popup.hide()
+            self.error_chart_group.setTitle(self.language.text("trajectory.title"))
+            self.refresh_weight_trajectory()
+            return
         if characteristic_visible:
             self.comparison_legend.hide()
             if self.comparison_popup is not None:
@@ -3371,6 +3560,7 @@ class TrainingDialog(QDialog):
     def training_chart_visibility_changed(self, visible):
         if visible:
             self.refresh_training_characteristic()
+            self.refresh_weight_trajectory()
 
     def refresh_training_characteristic(self):
         """Berechnet ausschließlich die aktuell ausgewählte Live-Kennlinie."""
@@ -3497,6 +3687,8 @@ class TrainingDialog(QDialog):
         self.training_characteristic_plot.set_data(
             curve_points,
             data_points,
+            stable_range_key=(self.current_run_id, input_mapping["neuron"].id,
+                              output_mapping["neuron"].id),
             x_label=ResultAnalysisDialog.characteristic_axis_label(
                 input_mapping
             ),
@@ -3880,7 +4072,9 @@ class TrainingDialog(QDialog):
             self.input_columns,
             self.output_columns,
             self,
-            language_manager=self.language
+            language_manager=self.language,
+            solver=self.solver_combo.currentData(),
+            learning_rate=self.learning_rate.value(),
         )
 
         dialog.exec()
@@ -4406,6 +4600,9 @@ class TrainingDialog(QDialog):
         Sperrt die Bedienelemente während eines Trainingslaufes.
         """
 
+        self.record_weight_trajectory.setEnabled(enabled and len(self.network.get_connections()) >= 2)
+        self.weight_pair_button.setEnabled(enabled and self.record_weight_trajectory.isChecked())
+        self.solver_combo.setEnabled(enabled)
         self.learning_rate.setEnabled(
             enabled
         )
@@ -4466,7 +4663,9 @@ class TrainingDialog(QDialog):
             enabled
         )
 
+        self.protocol_button.setEnabled(enabled)
         self.load_history_button.setEnabled(enabled)
+        self.delete_run_button.setEnabled(enabled and self.current_run_id is not None)
 
         self.stop_button.setEnabled(
             not enabled
@@ -5134,7 +5333,7 @@ class TrainingDialog(QDialog):
                 connections[int(item["id"])].weight = float(item["weight"])
         except (KeyError, TypeError, ValueError):
             return False
-        self.network.reset_momentum_state()
+        self.network.reset_optimizer_state()
         self.network.reset_runtime_values()
         for connection in connections.values():
             if connection.isVisible():
@@ -5155,11 +5354,13 @@ class TrainingDialog(QDialog):
             "current_run_initialized",
             "current_run_learning_rate",
             "current_run_momentum",
+            "current_run_solver",
             "current_run_shuffle_seed",
             "current_run_parent_id",
             "current_run_can_continue",
             "current_run_stopped",
             "current_run_initial_state",
+            "current_run_weight_trajectory",
             "current_run_started_with_zero_biases",
             "next_training_run_id",
             "training_elapsed_base",
@@ -5176,6 +5377,7 @@ class TrainingDialog(QDialog):
         return {
             "network": self.capture_training_state(),
             "momentum": self.network.get_momentum_state(),
+            "optimizer": self.network.get_optimizer_state(),
             "processed_training_records": int(
                 getattr(self, "processed_training_records", 0)
             ),
@@ -5210,6 +5412,7 @@ class TrainingDialog(QDialog):
         if not self.restore_training_state(state.get("network")):
             return False
 
+        self.network.restore_optimizer_state(state.get("optimizer"))
         self.network.restore_momentum_state(state.get("momentum"))
         self.processed_training_records = int(
             state.get("processed_training_records", 0)
@@ -5268,6 +5471,7 @@ class TrainingDialog(QDialog):
         self.update_training_run_label()
         self.set_training_controls_enabled(True)
         self.refresh_training_characteristic()
+        self.refresh_weight_trajectory()
         return True
 
     def execute_fixed_epochs(
@@ -5319,6 +5523,10 @@ class TrainingDialog(QDialog):
             )
             return
 
+        if self.record_weight_trajectory.isChecked():
+            available = {c.id for c in self.network.get_connections()}
+            if not valid_pair(self.weight_trajectory_pair) or not set(self.weight_trajectory_pair).issubset(available):
+                if not self.choose_weight_pair():return
         execution_state = self.capture_training_execution_state()
 
         try:
@@ -5340,10 +5548,20 @@ class TrainingDialog(QDialog):
             )
             return
 
+        # Explicit start values take precedence, including when changing solver.
+        if (initial_state is None and self.current_run_id is not None
+                and self.solver_combo.currentData() != self.current_run_solver
+                and (continue_existing or not self.initialize_network.isChecked())):
+            parent_run_id = self.current_run_id
+            initial_state = self.capture_training_state()
+            continue_existing = False
+        self.network.set_solver(self.solver_combo.currentData())
+        if continue_existing:
+            self.restore_weight_recording_controls(self.current_run_weight_trajectory)
         maximum_epochs = max(1, int(maximum_epochs))
         if not continue_existing:
             self.begin_new_training_run(parent_run_id=parent_run_id)
-            self.network.reset_momentum_state()
+            self.network.reset_optimizer_state()
             self.current_run_shuffle_seed = (
                 int(shuffle_seed)
                 if shuffle_seed is not None
@@ -5461,6 +5679,13 @@ class TrainingDialog(QDialog):
                 )
             )
 
+        if not continue_existing:
+            self.current_run_weight_trajectory = (new_trajectory(self.network, self.weight_trajectory_pair)
+                if self.record_weight_trajectory.isChecked() else None)
+        self.refresh_weight_trajectory()
+        parent = self.parent()
+        if parent is not None and hasattr(parent, "protocol_training_started"):
+            parent.protocol_training_started(self, continue_existing)
         self.is_training = True
         self.stop_requested = False
         self.current_run_can_continue = False
@@ -5539,6 +5764,9 @@ class TrainingDialog(QDialog):
                 self.record_maximum_error(current_epoch, maximum_absolute_error)
 
                 completed_epochs = current_epoch
+                append_trajectory(self.current_run_weight_trajectory, self.network, completed_epochs, mean_squared_error)
+                if self.error_metric_combo.currentData() == "trajectory" and self.show_error_chart.isChecked():
+                    self.refresh_weight_trajectory()
                 self.update_plateau_detection(
                     completed_epochs,
                     mean_squared_error,
@@ -5807,6 +6035,7 @@ class TrainingDialog(QDialog):
                     self.current_run_learning_rate
                 ),
                 "momentum": float(self.current_run_momentum),
+                "solver": self.current_run_solver,
                 "shuffle_seed": int(self.current_run_shuffle_seed),
                 "error_limit": float(
                     self.error_limit.value()
@@ -5824,6 +6053,7 @@ class TrainingDialog(QDialog):
                 ),
                 "run_id": self.current_run_id,
                 "timestamp": self.current_run_timestamp,
+                **({"weight_trajectory": deepcopy(self.current_run_weight_trajectory)} if self.current_run_weight_trajectory is not None else {}),
                 "continue_existing": bool(continue_existing),
                 "parent_run_id": self.current_run_parent_id,
                 "continuable": True,

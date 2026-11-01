@@ -92,6 +92,7 @@ from projectoverviewdialog import ProjectCheckDialog, ProjectOverviewDialog
 from resultanalysisdialog import ResultAnalysisDialog
 from projectsavedialog import ProjectSaveDialog
 from settings import Settings
+from chartcolors import set_chart_background
 from settingsdialog import SettingsDialog
 from spsexportdialog import SpsExportDialog
 from xmlexportdialog import XmlExportDialog
@@ -104,7 +105,10 @@ from trainingvalidity import training_context, invalidate_history
 from toolbaricons import ToolbarIcons
 
 
-class MainWindow(QMainWindow):
+from trainingprotocol import TrainingProtocolMixin
+
+
+class MainWindow(QMainWindow, TrainingProtocolMixin):
     """
     Hauptfenster des NeuronNetz-Editors.
 
@@ -157,6 +161,8 @@ class MainWindow(QMainWindow):
         # Projektbezogene Kennzahlen und kompakte Fehlerkurven
         # bereits ausgeführter Trainingsläufe.
         self.training_history = []
+        self.last_training_run_id = 0
+        self.training_protocol = None
         self._invalidated_training_runs = {}
         self.active_training_run_id = None
         self.analysis_tolerances = {}
@@ -168,6 +174,7 @@ class MainWindow(QMainWindow):
 
         # Persönliche, projektunabhängige Einstellungen.
         self.ui_settings = Settings.get_ui_settings()
+        set_chart_background(self.ui_settings["chart_background"])
         self.language = LanguageManager(
             self.ui_settings["language"]
         )
@@ -2648,6 +2655,7 @@ class MainWindow(QMainWindow):
         self.ui_settings = Settings.normalize_ui_settings(
             ui_settings
         )
+        set_chart_background(self.ui_settings["chart_background"])
         icon_size = self.ui_settings["toolbar_icon_size"]
         button_style = (
             Qt.ToolButtonStyle.ToolButtonTextUnderIcon
@@ -7090,6 +7098,7 @@ class MainWindow(QMainWindow):
         """
 
         self.refresh_training_history_validity()
+        self.protocol_checkpoint()
         self.update_status_summary()
         self.update_result_analysis_action_state()
         self.update_project_workflow()
@@ -7898,7 +7907,7 @@ class MainWindow(QMainWindow):
             and isinstance(entry.get("run_id"), int)
         ]
         dialog.set_next_training_run_id(
-            max(existing_run_ids, default=0) + 1
+            max(getattr(self, "last_training_run_id", 0), max(existing_run_ids, default=0)) + 1
         )
 
         active_entry = self.active_training_history_entry()
@@ -8038,6 +8047,7 @@ class MainWindow(QMainWindow):
         ):
             self.set_project_modified(True)
 
+        self.protocol_checkpoint()
         self.leave_training_observation_mode()
         self.training_dialog = None
         dialog.deleteLater()
@@ -8082,9 +8092,14 @@ class MainWindow(QMainWindow):
                     self.current_object
                 )
 
-    def open_training_history(self):
+    def open_training_history(self, *, delete_run_id=None):
         """Öffnet die projektbezogene Übersicht früherer Trainingsläufe."""
 
+        if delete_run_id is not None and (
+            getattr(self.training_dialog, "is_training", False)
+            or not any(entry.get("run_id") == delete_run_id for entry in self.training_history)
+        ):
+            return
         self.refresh_training_history_validity()
         previous_snapshot = self.capture_editor_snapshot()
         active_entry_before = next(
@@ -8110,11 +8125,19 @@ class MainWindow(QMainWindow):
             language_manager=self.language,
             restorable_run_ids=restorable_run_ids,
             active_run_id=self.active_training_run_id,
+            characteristic_provider=self.history_characteristic_source,
         )
-        dialog.exec()
+        if delete_run_id is None:
+            dialog.exec()
+        else:
+            dialog.active_run_id = delete_run_id
+            if not dialog.delete_selected_runs(run_id=delete_run_id, confirmation_parent=self.training_dialog or self):
+                dialog.deleteLater()
+                return None
 
         updated_history = dialog.get_training_history()
         restore_run_id = dialog.get_restore_run_id()
+        dialog.deleteLater()
 
         if restore_run_id is not None:
             selected_entry = next(
@@ -8140,11 +8163,13 @@ class MainWindow(QMainWindow):
                 )
                 return
 
+            self.protocol_deleted_runs(self.training_history, updated_history)
             self.training_history = updated_history
             self.active_training_run_id = restore_run_id
             self.restore_training_settings_from_history(
                 selected_entry
             )
+            self.protocol_run_loaded(restore_run_id)
             self.commit_explicit_history_step(
                 previous_snapshot
             )
@@ -8159,6 +8184,7 @@ class MainWindow(QMainWindow):
             return deepcopy(selected_entry)
 
         if updated_history != self.training_history:
+            self.protocol_deleted_runs(self.training_history, updated_history)
             self.training_history = updated_history
             retained_active = None
             if active_entry_before is not None:
@@ -8186,7 +8212,7 @@ class MainWindow(QMainWindow):
             self.update_project_workflow()
 
             if (
-                not self.training_history
+                self.active_training_history_entry() is None
                 and self.training_dialog is not None
             ):
                 self.training_dialog.clear_training_run_display()
@@ -8231,6 +8257,22 @@ class MainWindow(QMainWindow):
         )
         return active if active is not None else (matching[-1] if matching else None)
 
+    def history_characteristic_source(self, entry):
+        """Use saved parameters on a detached network, with matching current data only."""
+        state = entry.get("network_state")
+        if (entry.get("invalidated_reason") or not self.training_run_matches_active_data(entry)
+                or not self.training_network_state_is_compatible(state)):
+            return None
+        from mathematicsdialog import MathematicsDialog
+        network = MathematicsDialog.clone_network(self.scene.network)
+        for item in state["neurons"]:
+            network.get_neuron(item["id"]).bias = float(item["bias"])
+        for item in state["connections"]:
+            network.get_connection(item["id"]).weight = float(item["weight"])
+        records, inputs, outputs = NetworkTestDialog.prepare_document(
+            network, self.training_data_manager.document, translator=self.language.text)
+        return network, {"records": records, "inputs": inputs, "outputs": outputs}
+
     def capture_training_network_state(self):
         """Erfasst Gewichte und Bias-Werte am Ende eines Trainingslaufes."""
 
@@ -8273,6 +8315,7 @@ class MainWindow(QMainWindow):
                 for connection in connections
             ],
             "momentum_state": self.scene.network.get_momentum_state(),
+            "optimizer_state": self.scene.network.get_optimizer_state(),
         }
 
     def training_network_state_is_compatible(self, network_state):
@@ -8346,6 +8389,16 @@ class MainWindow(QMainWindow):
             ):
                 return False
 
+        optimizer = network_state.get("optimizer_state")
+        if optimizer is not None:
+            try:
+                from adamoptimizer import validate_optimizer_state, AdamOptimizer
+                validate_optimizer_state(optimizer)
+                if optimizer["solver"] == "adam":
+                    AdamOptimizer().restore(optimizer, current_connections,
+                        {n.id for n in current_neurons.values() if n.neuron_type != NeuronType.INPUT})
+            except ValueError:
+                return False
         return True
 
     def restore_training_network_state(self, network_state):
@@ -8366,6 +8419,7 @@ class MainWindow(QMainWindow):
             )
             connection.weight = float(connection_state["weight"])
 
+        self.scene.network.restore_optimizer_state(network_state.get("optimizer_state"))
         self.scene.network.restore_momentum_state(
             network_state.get("momentum_state")
         )
@@ -8393,6 +8447,10 @@ class MainWindow(QMainWindow):
         restored_settings["learning_rate"] = float(
             history_entry["learning_rate"]
         )
+        trajectory = history_entry.get("weight_trajectory")
+        restored_settings["record_weight_trajectory"] = trajectory is not None
+        restored_settings["weight_trajectory_pair"] = [c["id"] for c in trajectory["connections"]] if trajectory else None
+        restored_settings["solver"] = history_entry.get("solver", "sgd")
         restored_settings["momentum"] = float(
             history_entry.get("momentum", 0.0)
         )
@@ -8485,7 +8543,7 @@ class MainWindow(QMainWindow):
                 requested_run_id
                 if requested_run_id > 0
                 and requested_run_id not in existing_run_ids
-                else max(existing_run_ids, default=0) + 1
+                else max(getattr(self, "last_training_run_id", 0), max(existing_run_ids, default=0)) + 1
             )
             continuation = False
 
@@ -8538,6 +8596,7 @@ class MainWindow(QMainWindow):
                     result.get("learning_rate", 0.01)
                 ),
                 "momentum": float(result.get("momentum", 0.0)),
+                "solver": str(result.get("solver", "sgd")),
                 "shuffle_seed": result.get("shuffle_seed"),
                 "error_limit": float(
                     result.get("error_limit", 0.01)
@@ -8585,6 +8644,8 @@ class MainWindow(QMainWindow):
                 "network_state": self.capture_training_network_state(),
                 "training_context": self.current_training_context(),
             }
+        if result.get("weight_trajectory") is not None:
+            updated_values["weight_trajectory"] = deepcopy(result["weight_trajectory"])
         if continuation:
             # Nummer, ursprünglicher Startzeitpunkt und Startfehler gehören
             # weiterhin zum selben Lauf; alle fortgeschriebenen Werte werden
@@ -8613,6 +8674,9 @@ class MainWindow(QMainWindow):
             existing_entry.update(updated_values)
         else:
             self.training_history.append(updated_values)
+        self._protocol_runs = list(self.training_history)
+        self.last_training_run_id = max(getattr(self, "last_training_run_id", 0), run_id)
+        self.protocol_training_result(updated_values)
         self.active_training_run_id = run_id
         self.update_project_workflow()
 
@@ -8789,6 +8853,7 @@ class MainWindow(QMainWindow):
                 self.display_settings
             ),
             "momentum_state": self.scene.network.get_momentum_state(),
+            "optimizer_state": self.scene.network.get_optimizer_state(),
         }
 
         if include_training_data:
@@ -8952,6 +9017,7 @@ class MainWindow(QMainWindow):
             self.scene.network.set_momentum(
                 self.training_settings.get("momentum", 0.0)
             )
+            self.scene.network.restore_optimizer_state(snapshot.get("optimizer_state"))
             self.scene.network.restore_momentum_state(
                 snapshot.get("momentum_state")
             )
@@ -9011,6 +9077,7 @@ class MainWindow(QMainWindow):
         finally:
             self._history_restoring = False
         self.refresh_training_history_validity()
+        self.protocol_checkpoint()
 
     def commit_explicit_history_step(
         self,
@@ -9052,6 +9119,7 @@ class MainWindow(QMainWindow):
         )
 
         self.redo_history.clear()
+        self.protocol_checkpoint()
 
         self.project_modified = True
 
@@ -9087,6 +9155,7 @@ class MainWindow(QMainWindow):
 
         if self._history_restoring:
             return
+        self.protocol_checkpoint()
 
         current_snapshot = (
             self.capture_editor_snapshot()
@@ -9484,6 +9553,9 @@ class MainWindow(QMainWindow):
         """
 
         self._no_active_project = False
+        self.training_protocol = None
+        self.last_training_run_id = 0
+        self._protocol_error_shown = False
         self.training_history = []
         self._invalidated_training_runs = {}
         self.scene.clear_project()
@@ -9515,7 +9587,8 @@ class MainWindow(QMainWindow):
         self.scene.network.set_momentum(
             self.training_settings.get("momentum", 0.0)
         )
-        self.scene.network.reset_momentum_state()
+        self.scene.network.reset_optimizer_state()
+        self.scene.network.set_solver("sgd")
 
         self.current_object = None
         self.current_project_path = None
@@ -9551,6 +9624,7 @@ class MainWindow(QMainWindow):
         """Setzt ohne weitere Rückfrage auf ein leeres Projekt zurück."""
 
         self.reset_project()
+        self.initialize_training_protocol()
 
         self.statusBar().showMessage(
             self.language.text("status.new_project"),
@@ -10777,6 +10851,10 @@ class MainWindow(QMainWindow):
             active_history_entry.get("network_state")
             if isinstance(active_history_entry, dict) else None
         )
+        saved_optimizer_state = project_data.get("optimizer_state")
+        if saved_optimizer_state is None and isinstance(active_network_state, dict):
+            saved_optimizer_state = active_network_state.get("optimizer_state")
+        self.scene.network.restore_optimizer_state(saved_optimizer_state)
         saved_momentum_state = project_data.get("momentum_state")
         self.scene.network.restore_momentum_state(
             saved_momentum_state
@@ -10850,6 +10928,12 @@ class MainWindow(QMainWindow):
         )
         self.active_training_run_id = project_data.get("active_training_run_id")
 
+        stored_last_id = project_data.get("last_training_run_id", 0)
+        if isinstance(stored_last_id, bool) or not isinstance(stored_last_id, int):
+            stored_last_id = 0
+        self.last_training_run_id = max(stored_last_id,
+            max((entry["run_id"] for entry in self.training_history), default=0))
+        self.initialize_training_protocol()
         history_invalidated = self.refresh_training_history_validity()
 
         self.reset_undo_history(
@@ -11278,6 +11362,10 @@ class MainWindow(QMainWindow):
                 if data_file_paths is not None
                 else self.test_data_manager.file_path
             )
+            if getattr(self, "training_protocol", None) is None:
+                self.initialize_training_protocol()
+            self.protocol_checkpoint()
+            self.training_protocol.flush(Path(file_path).parent / "trainingsprotokoll.txt")
             ProjectIO.save_project(
                 file_path,
                 self.scene,
@@ -11294,8 +11382,10 @@ class MainWindow(QMainWindow):
                 display_settings=self.display_settings,
                 plc_export_options=self.plc_export_options,
                 training_history=self.training_history,
+                last_training_run_id=getattr(self, "last_training_run_id", 0),
                 active_training_run_id=self.active_training_run_id,
                 momentum_state=self.scene.network.get_momentum_state(),
+                optimizer_state=self.scene.network.get_optimizer_state(),
                 project_description=self.project_description,
                 is_example_project=(
                     False if save_as_normal_copy else self.is_example_project

@@ -541,6 +541,7 @@ class Settings:
     def default_ui_settings():
         return {
             "language": "en",
+            "chart_background": "#ffffff",
             "toolbar_icon_size": 18,
             "toolbar_show_text": True,
             "toolbars_visible": True,
@@ -569,6 +570,11 @@ class Settings:
 
         if not isinstance(ui_settings, dict):
             return normalized
+
+        from PySide6.QtGui import QColor
+        background = ui_settings.get("chart_background")
+        if isinstance(background, str) and QColor(background).isValid():
+            normalized["chart_background"] = QColor(background).name()
 
         language = ui_settings.get("language")
 

@@ -8,6 +8,7 @@
 import math
 
 from neurontype import NeuronType
+from adamoptimizer import AdamOptimizer, validate_optimizer_state
 
 
 class TrainingNumericalError(ValueError):
@@ -68,6 +69,8 @@ class BackpropagationTrainer:
         self.visual_updates_enabled = True
         self.connection_velocities = {}
         self.bias_velocities = {}
+        self.solver = "sgd"
+        self.adam = AdamOptimizer()
 
     def _error_text(self, key, fallback, **values):
         translator = getattr(self.network, "translator", None)
@@ -170,6 +173,76 @@ class BackpropagationTrainer:
             except (TypeError, ValueError):
                 continue
         self.normalize_momentum_state()
+
+    def set_solver(self, solver):
+        if solver not in ("sgd", "adam"):
+            raise ValueError(self._error_text("adam.error.solver", "Ungültiges Optimierungsverfahren."))
+        if solver != self.solver:
+            self.reset_optimizer_state()
+            self.solver = solver
+            self.last_step_details = None
+
+    def reset_optimizer_state(self):
+        self.reset_momentum_state()
+        self.adam.reset()
+
+    def get_optimizer_state(self):
+        if self.solver == "sgd":
+            return {"solver": "sgd"}
+        connections = {c.id for c in self.network.get_connections()}
+        biases = {n.id for n in self.network.get_neurons() if n.neuron_type != NeuronType.INPUT}
+        if self.adam.step and (set(self.adam.connections) != connections or set(self.adam.biases) != biases):
+            self.adam.reset()
+        return self.adam.state()
+
+    def restore_optimizer_state(self, state):
+        validate_optimizer_state(state)
+        solver = state["solver"] if state else "sgd"
+        if solver == "adam":
+            restored = AdamOptimizer()
+            restored.restore(state, {c.id for c in self.network.get_connections()},
+                             {n.id for n in self.network.get_neurons() if n.neuron_type != NeuronType.INPUT})
+            self.set_solver(solver)
+            self.adam = restored
+        else:
+            self.set_solver("sgd")
+            self.adam.reset()
+
+    def apply_adam_gradients(self):
+        connections = self.network.get_connections()
+        neurons = self.network.get_neurons()
+        # Existing deltas point DOWN the loss gradient, hence the minus sign.
+        cg = {c.id: -self.delta_values[c.target_neuron.id] * c.source_neuron.output_value for c in connections}
+        bg = {n.id: -self.delta_values[n.id] for n in neurons if n.neuron_type != NeuronType.INPUT}
+        try:
+            step, updates, moments, details = self.adam.propose(cg, bg, self.learning_rate)
+            if not all(math.isfinite(c.weight + updates["connections"][c.id]) for c in connections):
+                raise ValueError("Invalid Adam weight.")
+            if not all(math.isfinite(n.bias + updates["biases"][n.id]) for n in neurons if n.id in bg):
+                raise ValueError("Invalid Adam bias.")
+        except (ValueError, OverflowError) as error:
+            raise TrainingNumericalError("adam.error.unstable", "Adam hat ungültige Werte berechnet. Der vorherige Trainingsstand bleibt erhalten.") from error
+        self.last_step_details = {
+            "solver": "adam", "learning_rate": self.learning_rate, "step": step,
+            "neurons": {n.id: {"neuron_type": n.neuron_type, "activation": n.activation_function,
+                "sum": n.sum_value, "output": n.output_value, "target": n.target_value,
+                "error": n.error_value, "delta": n.delta_value, "bias_before": n.bias,
+                "bias_update": updates["biases"].get(n.id), "adam": details["biases"].get(n.id)} for n in neurons},
+            "connections": {c.id: {"source_id": c.source_neuron.id, "source_name": c.source_neuron.name,
+                "target_id": c.target_neuron.id, "target_name": c.target_neuron.name,
+                "weight_before": c.weight, "weight_update": updates["connections"][c.id],
+                "source_output": c.source_neuron.output_value, "target_delta": c.target_neuron.delta_value,
+                "adam": details["connections"][c.id]} for c in connections},
+        } if self.capture_step_details else None
+        for c in connections:
+            c.set_weight(c.weight + updates["connections"][c.id], update_display=self.visual_updates_enabled)
+        for n in neurons:
+            if n.id in bg:
+                n.bias += updates["biases"][n.id]
+                if self.visual_updates_enabled:
+                    n.update()
+        self.adam.commit(step, moments)
+        return {"connection_updates": updates["connections"], "bias_updates": updates["biases"], "solver": "adam"}
 
     def clear_runtime_values(self):
         """
@@ -448,6 +521,9 @@ class BackpropagationTrainer:
             raise ValueError(
                 self._error_text("calculation.error.no_deltas", "Es wurden noch keine Deltas berechnet.")
             )
+
+        if self.solver == "adam":
+            return self.apply_adam_gradients()
 
         connection_updates = {}
         bias_updates = {}

@@ -1,3 +1,4 @@
+from chartcolors import ChartColors
 # -------------------------------------------------------------------------------------------------
 # Datei: trainingerrorchart.py
 # Zweck: Zeichnet und aktualisiert den Fehlerverlauf eines Trainingslaufs.
@@ -19,7 +20,7 @@ from trainingcomparison import (
 )
 
 
-class TrainingErrorChart(QWidget):
+class TrainingErrorChart(ChartColors, QWidget):
     """
     Zeigt wahlweise den mittleren Epochenfehler oder maximalen Einzelfehler.
 
@@ -32,6 +33,7 @@ class TrainingErrorChart(QWidget):
         super().__init__(parent)
 
         self.language = language_manager or LanguageManager()
+        self.run_id = None
         self.points = []
         self.comparison_runs = []
         self.show_full_comparison_runs = False
@@ -223,11 +225,11 @@ class TrainingErrorChart(QWidget):
         )
         painter.setPen(
             QPen(
-                QColor(194, 204, 214),
+                self.chart_color(194, 204, 214),
                 1.0
             )
         )
-        painter.setBrush(QColor(255, 255, 255))
+        painter.setBrush(self.chart_color(255, 255, 255))
         painter.drawRoundedRect(
             outer_rect,
             7.0,
@@ -249,7 +251,7 @@ class TrainingErrorChart(QWidget):
 
         if not active_points:
             painter.setPen(
-                QColor(38, 52, 66)
+                self.chart_color(38, 52, 66)
             )
             painter.drawText(
                 QRectF(
@@ -262,7 +264,7 @@ class TrainingErrorChart(QWidget):
                 metric_chart_title(self.language, self.error_metric)
             )
             painter.setPen(
-                QColor(105, 115, 125)
+                self.chart_color(105, 115, 125)
             )
             painter.drawText(
                 plot_rect,
@@ -371,7 +373,7 @@ class TrainingErrorChart(QWidget):
                 )
 
         painter.setPen(
-            QColor(38, 52, 66)
+            self.chart_color(38, 52, 66)
         )
         painter.drawText(
             QRectF(
@@ -383,15 +385,17 @@ class TrainingErrorChart(QWidget):
             Qt.AlignmentFlag.AlignCenter,
             (
                 metric_chart_title(self.language, self.error_metric, logarithmic_scale)
+                + (self.language.text("training.chart.run_suffix", run=self.run_id)
+                   if self.run_id is not None else "")
             )
         )
 
         grid_pen = QPen(
-            QColor(225, 230, 235),
+            self.chart_color(225, 230, 235),
             1.0
         )
         axis_pen = QPen(
-            QColor(80, 90, 100),
+            self.chart_color(80, 90, 100),
             1.0
         )
 
@@ -450,7 +454,7 @@ class TrainingErrorChart(QWidget):
             )
 
             painter.setPen(
-                QColor(70, 80, 90)
+                self.chart_color(70, 80, 90)
             )
             painter.drawText(
                 QRectF(
@@ -486,7 +490,7 @@ class TrainingErrorChart(QWidget):
             )
 
             painter.setPen(
-                QColor(70, 80, 90)
+                self.chart_color(70, 80, 90)
             )
             painter.drawText(
                 QRectF(
@@ -537,7 +541,7 @@ class TrainingErrorChart(QWidget):
                 - scale_error(error_limit) * plot_rect.height()
             )
             limit_pen = QPen(
-                QColor(190, 95, 55),
+                self.chart_color(190, 95, 55),
                 1.5,
                 Qt.PenStyle.DashLine
             )
@@ -587,7 +591,7 @@ class TrainingErrorChart(QWidget):
                     reference_path.moveTo(point)
                 else:
                     reference_path.lineTo(point)
-            painter.setPen(QPen(QColor(comparison_color(run_id)), 1.3))
+            painter.setPen(QPen(self.chart_color(comparison_color(run_id)), 1.3))
             painter.drawPath(reference_path)
             if len(points) == 1:
                 painter.drawPoint(point)
@@ -624,8 +628,8 @@ class TrainingErrorChart(QWidget):
 
         painter.setPen(
             QPen(
-                QColor(34, 113, 165),
-                2.0
+                self.chart_color(34, 113, 165),
+                1.2
             )
         )
         painter.drawPath(
@@ -643,7 +647,7 @@ class TrainingErrorChart(QWidget):
             - scale_error(last_error) * plot_rect.height()
         )
         painter.setBrush(
-            QColor(34, 113, 165)
+            self.chart_color(34, 113, 165)
         )
         painter.drawEllipse(
             QPointF(
