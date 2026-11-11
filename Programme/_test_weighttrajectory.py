@@ -159,7 +159,7 @@ class TrajectoryTests(unittest.TestCase):
             self.assertEqual(history.weight_trajectory_plot.data,data)
             history.table.selectAll()
             self.assertIsNone(history.weight_trajectory_plot.data)
-            self.assertEqual(history.weight_trajectory_plot.message,self.w.language.text('trajectory.select_one'))
+            self.assertEqual(history.weight_trajectory_plot.message,self.w.language.text('trajectory.incompatible'))
             history.table.clearSelection();history.table.selectRow(1)
             self.assertIsNone(history.weight_trajectory_plot.data)
             self.assertEqual(history.weight_trajectory_plot.message,self.w.language.text('trajectory.no_data'))

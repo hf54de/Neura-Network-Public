@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QFormLayout,
                                QLabel, QVBoxLayout, QWidget, QSizePolicy)
 from neurontype import NeuronType
+from numberformat import linear_axis_ticks, linear_axis_label
 
 
 def valid_pair(pair):
@@ -120,10 +121,13 @@ class WeightSelectionDialog(QDialog):
 
 
 class WeightTrajectoryPlot(ChartColors, QWidget):
-    def __init__(self, language, parent=None):
+    def __init__(self, language, parent=None, *, end_label=None):
         super().__init__(parent)
         self.language = language
+        self.end_label = end_label or language.text("trajectory.current")
         self.data = None
+        self.comparison = []
+        self.joined_comparison = False
         self.title = language.text("trajectory.title")
         self.message = language.text("trajectory.no_data")
         self._count, self._bounds = 0, None
@@ -134,6 +138,11 @@ class WeightTrajectoryPlot(ChartColors, QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def set_trajectory(self, data, title=None, message=None):
+        if self.comparison:
+            self._count, self._bounds = 0, None
+            self.reset_view()
+        self.comparison = []
+        self.joined_comparison = False
         if data is not self.data or (data and len(data["points"]) < self._count):
             self._count, self._bounds = 0, None
             self.reset_view()
@@ -149,12 +158,30 @@ class WeightTrajectoryPlot(ChartColors, QWidget):
             self._count = len(data["points"])
         self.update()
 
+    def set_comparison(self, series, joined=False):
+        """Show two immutable historical traces on shared axes."""
+        self.set_trajectory(series[0][1])
+        self.comparison = list(series)
+        end = series[0][1]["points"][-1]
+        start = series[1][1]["points"][0]
+        self.joined_comparison = bool(joined) and all(
+            math.isclose(end[i],start[i],rel_tol=1e-12,abs_tol=1e-12) for i in (1,2))
+        self.reset_view()
+        self._bounds = None
+        for _,data in series:
+            for _,x,y,_ in data["points"]:
+                if self._bounds is None:self._bounds = [x,x,y,y]
+                else:
+                    self._bounds = [min(self._bounds[0],x),max(self._bounds[1],x),
+                                    min(self._bounds[2],y),max(self._bounds[3],y)]
+        self.update()
+
     def number(self, value):
-        text = f"{value:.5g}"
-        return text.replace('.',',') if self.language.current_language == 'de' else text
+        return linear_axis_label(value, self.language.current_language)
 
     def plot_area(self):
-        return QRectF(84,39,max(30,self.width()-108),max(30,self.height()-91))
+        return QRectF(84,59 if self.comparison else 39,max(30,self.width()-108),
+                      max(30,self.height()-(111 if self.comparison else 91)))
 
     def full_bounds(self):
         if self._bounds is None:
@@ -245,42 +272,84 @@ class WeightTrajectoryPlot(ChartColors, QWidget):
                              Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,self.message)
             return
         fm = painter.fontMetrics()
+        if self.comparison:
+            width = max(1,(self.width()-108)//2)
+            for index,(label,_) in enumerate(self.comparison):
+                color = ('#167bc1','#ef7528')[index]
+                painter.setPen(QPen(self.chart_color(color),1.7))
+                left = 84+index*width
+                painter.drawLine(QPointF(left,20),QPointF(left+16,20))
+                painter.drawText(QRectF(left+22,8,width-25,24),Qt.AlignmentFlag.AlignVCenter,
+                                 fm.elidedText(label,Qt.TextElideMode.ElideRight,width-25))
+            painter.save()
+            painter.translate(0,20)
         x = 90
         for color, key in (('#25844b', 'trajectory.start'), ('#ef7528', 'trajectory.current')):
-            label = self.language.text(key)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(self.chart_color(color))
+            label = self.language.text(key) if key == "trajectory.start" else self.end_label
+            painter.setPen(QPen(self.chart_color('#244563'),1) if self.comparison else Qt.PenStyle.NoPen)
+            painter.setBrush(self.chart_color('white' if key == 'trajectory.start' else '#244563') if self.comparison else self.chart_color(color))
             painter.drawEllipse(QPointF(x,20),3,3)
             painter.setPen(self.chart_color('#244563'))
             painter.drawText(QRectF(x+9,8,fm.horizontalAdvance(label)+2,24),
                              Qt.AlignmentFlag.AlignVCenter,label)
             x += 9 + fm.horizontalAdvance(label) + 24
         title_width = max(0, self.width()-24-x)
-        title = fm.elidedText(self.title,Qt.TextElideMode.ElideRight,title_width)
+        title = fm.elidedText("" if self.comparison else self.title,Qt.TextElideMode.ElideRight,title_width)
         painter.drawText(QRectF(x,8,title_width,24),
                          Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,title)
+        if self.comparison:painter.restore()
         area = self.plot_area()
         xmin,xmax,ymin,ymax = self.view_bounds or self.full_bounds()
+        def x_position(value):
+            return area.left() + (value - xmin) / (xmax - xmin) * area.width()
+
+        def y_position(value):
+            return area.bottom() - (value - ymin) / (ymax - ymin) * area.height()
+
         def position(point):
-            return QPointF(area.left()+(point[1]-xmin)/(xmax-xmin)*area.width(),
-                           area.bottom()-(point[2]-ymin)/(ymax-ymin)*area.height())
-        for i in range(5):
-            fraction=i/4;x=area.left()+area.width()*fraction;y=area.bottom()-area.height()*fraction
-            painter.setPen(QPen(self.chart_color('#e0e8f0')))
-            painter.drawLine(QPointF(x,area.top()),QPointF(x,area.bottom()))
-            painter.drawLine(QPointF(area.left(),y),QPointF(area.right(),y))
-            painter.setPen(self.chart_color('#496178'))
-            painter.drawText(QRectF(x-36,area.bottom()+5,72,18),Qt.AlignmentFlag.AlignCenter,self.number(xmin+(xmax-xmin)*fraction))
-            painter.drawText(QRectF(22,y-10,55,20),Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,self.number(ymin+(ymax-ymin)*fraction))
+            return QPointF(x_position(point[1]), y_position(point[2]))
+
+        grid_pen = QPen(self.chart_color('#e0e8f0'))
+        label_color = self.chart_color('#496178')
+        for value in linear_axis_ticks(xmin, xmax):
+            x = x_position(value)
+            painter.setPen(grid_pen)
+            painter.drawLine(QPointF(x, area.top()), QPointF(x, area.bottom()))
+            painter.setPen(label_color)
+            painter.drawText(
+                QRectF(x - 36, area.bottom() + 5, 72, 18),
+                Qt.AlignmentFlag.AlignCenter, self.number(value),
+            )
+        for value in linear_axis_ticks(ymin, ymax):
+            y = y_position(value)
+            painter.setPen(grid_pen)
+            painter.drawLine(QPointF(area.left(), y), QPointF(area.right(), y))
+            painter.setPen(label_color)
+            painter.drawText(
+                QRectF(22, y - 10, 55, 20),
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, self.number(value),
+            )
         painter.setPen(QPen(self.chart_color('#91a4b8')));painter.setBrush(Qt.BrushStyle.NoBrush);painter.drawRect(area)
-        points=self.data['points'];path=QPainterPath(position(points[0]))
-        # Limit drawing cost, while retaining every recorded epoch in the file.
-        count=min(len(points),3000)
-        for i in range(1,count):path.lineTo(position(points[round(i*(len(points)-1)/(count-1))]))
         painter.save();painter.setClipRect(area.adjusted(-5,-5,5,5))
-        painter.setPen(QPen(self.chart_color('#167bc1'),1.7));painter.drawPath(path)
-        for point,color in ((points[0],'#25844b'),(points[-1],'#ef7528')):
-            painter.setPen(QPen(self.chart_color('white'),1));painter.setBrush(self.chart_color(color));painter.drawEllipse(position(point),4.5,4.5)
+        series = self.comparison or [(self.title,self.data)]
+        for index,(_,data) in enumerate(series):
+            points=data['points'];path=QPainterPath(position(points[0]))
+            count=min(len(points),3000)
+            for i in range(1,count):path.lineTo(position(points[round(i*(len(points)-1)/(count-1))]))
+            color = ('#167bc1','#ef7528')[index]
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(self.chart_color(color),1.7));painter.drawPath(path)
+            for end,point in enumerate((points[0],points[-1])):
+                # In a continuation chain, mark only the overall start and end.
+                if self.joined_comparison and ((index == 0 and end == 1) or (index == 1 and end == 0)):
+                    continue
+                if self.comparison:
+                    painter.setPen(QPen(self.chart_color(color),1.5))
+                    painter.setBrush(self.chart_color(color if end else 'white'))
+                else:
+                    painter.setPen(QPen(self.chart_color('white'),1))
+                    painter.setBrush(self.chart_color('#ef7528' if end else '#25844b'))
+                painter.drawEllipse(position(point),4.5,4.5)
         painter.restore();painter.setPen(self.chart_color('#244563'))
         fm=painter.fontMetrics()
         x_label=fm.elidedText(self.data['connections'][0]['label'],Qt.TextElideMode.ElideMiddle,int(area.width()))

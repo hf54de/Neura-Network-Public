@@ -6,7 +6,7 @@
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPen, QTransform
+from PySide6.QtGui import QBrush, QColor, QPen, QTransform, QActionGroup
 from PySide6.QtWidgets import (
     QGraphicsRectItem,
     QGraphicsScene,
@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 
+from bundledconnections import BundledConnections
 from commentitem import CommentItem
 from connection import Connection
 from connectionpreview import ConnectionPreview
@@ -40,6 +41,8 @@ class EditorScene(QGraphicsScene):
     """
 
     # Signal: Ein Objekt wurde ausgewählt.
+    connection_display_requested = Signal(str)
+
     object_selected = Signal(object)
 
     # Signal: Die Position eines Objektes wurde geändert.
@@ -82,6 +85,11 @@ class EditorScene(QGraphicsScene):
         self.next_comment_id = 1
 
         # Darstellungsoption für Gewichtsanzeigen.
+        self.bundle_connections = False
+        self.bundled_connections = BundledConnections(self)
+        self.scene_geometry_changed.connect(self.bundled_connections.invalidate)
+        self.scene_content_changed.connect(self.bundled_connections.invalidate)
+        self.object_position_changed.connect(self.bundled_connections.invalidate)
         self.connections_visible = True
         self.weight_labels_visible = True
         self.focused_neuron_id = None
@@ -332,6 +340,16 @@ class EditorScene(QGraphicsScene):
             )
 
         self.update()
+
+    def drawBackground(self, painter, rect):
+        super().drawBackground(painter, rect)
+        if self.bundle_connections and self.connections_visible:
+            self.bundled_connections.paint(painter)
+
+    def set_connection_display_mode(self, visible, bundled=False):
+        self.bundle_connections = bool(bundled) and bool(visible)
+        self.bundled_connections.invalidate()
+        self.set_connections_visible(visible)
 
     def set_connections_visible(self, visible):
         """Blendet alle Verbindungen aus, ohne das Netzwerk zu verändern."""
@@ -1117,6 +1135,22 @@ class EditorScene(QGraphicsScene):
         # im Eigenschaftenfenster angezeigt.
         self.object_selected.emit(None)
 
+    def add_connection_display_menu(self, menu):
+        submenu = menu.addMenu(self.t("settings.connections.mode").rstrip(":"))
+        menu.connection_display_submenu = submenu
+        group = QActionGroup(submenu)
+        submenu.connection_display_group = group
+        group.setExclusive(True)
+        current = "hidden" if not self.connections_visible else ("bundled" if self.bundle_connections else "all")
+        actions = {}
+        for mode in ("all", "hidden", "bundled"):
+            action = submenu.addAction(self.t("settings.connections."+mode))
+            action.setCheckable(True)
+            action.setChecked(mode == current)
+            group.addAction(action)
+            actions[action] = mode
+        return actions
+
     def contextMenuEvent(self, event):
         """
         Öffnet das Kontextmenü der Zeichenfläche.
@@ -1140,6 +1174,7 @@ class EditorScene(QGraphicsScene):
         edit_action = None
         delete_action = None
         focus_action = None
+        mode_actions = {}
 
         if isinstance(item, Neuron):
             edit_action = menu.addAction(
@@ -1176,6 +1211,10 @@ class EditorScene(QGraphicsScene):
                 self.t("canvas.insert_comment")
             )
 
+        if item is None:
+            menu.addSeparator()
+            mode_actions = self.add_connection_display_menu(menu)
+
         action = menu.exec(
             event.screenPos()
         )
@@ -1183,7 +1222,9 @@ class EditorScene(QGraphicsScene):
         if action is None:
             return
 
-        if action == edit_action:
+        if action in mode_actions:
+            self.connection_display_requested.emit(mode_actions[action])
+        elif action == edit_action:
             # Eine bestehende Mehrfachauswahl bleibt beim Rechtsklick auf
             # eines ihrer Elemente erhalten.
             if item not in self.selectedItems():
@@ -1256,7 +1297,7 @@ class EditorScene(QGraphicsScene):
 
         for connection in self.network.get_connections():
             self._apply_connection_visibility(connection)
-        if self.connections_visible and self.weight_labels_visible:
+        if self.connections_visible and self.weight_labels_visible and not self.bundle_connections:
             Connection.request_scene_weight_label_layout(self)
         self.update()
 
@@ -1266,6 +1307,7 @@ class EditorScene(QGraphicsScene):
         focused_id = self.focused_neuron_id
         visible = (
             self.connections_visible
+            and not self.bundle_connections
             and (
                 focused_id is None
                 or connection.source_neuron.id == focused_id

@@ -203,7 +203,10 @@ def calculate_forward_snapshot(specification, input_values):
     return sums, values
 
 
-class CompactInputSpinBox(QDoubleSpinBox):
+from inputsteps import SteppedInputMixin, configure_editor, configure_slider, slider_value, sync_slider
+
+
+class CompactInputSpinBox(SteppedInputMixin, QDoubleSpinBox):
     """Zeigt Rohwerte kompakt an, behält intern aber ihre Genauigkeit."""
 
     def textFromValue(self, value):
@@ -213,7 +216,8 @@ class CompactInputSpinBox(QDoubleSpinBox):
         elif abs(number) < 0.01:
             text = f"{number:.{self.decimals()}f}".rstrip("0").rstrip(".")
         else:
-            text = f"{number:.2f}".rstrip("0").rstrip(".")
+            digits = max(2, self._input_grid.decimals) if getattr(self, "_input_grid", None) else 2
+            text = f"{number:.{digits}f}".rstrip("0").rstrip(".")
         decimal_point = self.locale().decimalPoint()
         return text.replace(".", decimal_point)
 
@@ -1618,6 +1622,8 @@ class CharacteristicCard(ExperimentCard):
 class SimplifiedNetworkCard(ExperimentCard):
     """Zeigt das aktuelle Netz kompakt und ohne Bearbeitungsfunktionen an."""
 
+    MAX_NEURONS = 50
+
     def __init__(
         self, network, translate, color_settings=None, input_mappings=None,
         output_mappings=None, parent=None,
@@ -1648,19 +1654,25 @@ class SimplifiedNetworkCard(ExperimentCard):
         self.formula_details = {}
         self.node_hit_areas = []
         self.connection_hit_areas = []
-        # Die Netzstruktur ändert sich während eines Experiments nicht. Sie
-        # wird deshalb nur einmal ermittelt; Laufzeitwerte bleiben weiterhin
-        # direkt an den Neuron- und Verbindungsobjekten aktuell.
-        try:
-            self.cached_layers = [
-                list(layer) for layer in self.network.get_topological_layers()
-                if layer
-            ]
-        except (AttributeError, ValueError):
-            self.cached_layers = []
-        self.cached_connections = list(self.network.get_connections())
-        self.cached_inputs = list(self.network.get_input_neurons())
-        self.cached_outputs = list(self.network.get_output_neurons())
+        self.neuron_count = len(self.network.get_neurons())
+        self.cached_layers = []
+        self.cached_connections = []
+        self.cached_inputs = []
+        self.cached_outputs = []
+        if self.neuron_count <= self.MAX_NEURONS:
+            # Die Netzstruktur ändert sich während eines Experiments nicht. Sie
+            # wird deshalb nur einmal ermittelt; Laufzeitwerte bleiben weiterhin
+            # direkt an den Neuron- und Verbindungsobjekten aktuell.
+            try:
+                self.cached_layers = [
+                    list(layer) for layer in self.network.get_topological_layers()
+                    if layer
+                ]
+            except (AttributeError, ValueError):
+                self.cached_layers = []
+            self.cached_connections = list(self.network.get_connections())
+            self.cached_inputs = list(self.network.get_input_neurons())
+            self.cached_outputs = list(self.network.get_output_neurons())
         # Schnell aufeinanderfolgende Reglerereignisse dürfen nicht für jeden
         # Zwischenwert ein vollständiges Neuzeichnen der Netzwerkkarte starten.
         self.repaint_timer = QTimer(self)
@@ -1669,6 +1681,12 @@ class SimplifiedNetworkCard(ExperimentCard):
         self.repaint_timer.timeout.connect(self.update)
         self.setMouseTracking(True)
         self.setMinimumSize(240, 170)
+
+    def limit_message(self):
+        return self.translate(
+            "Die vereinfachte Netzwerkansicht ist nur f\u00fcr Netzwerke mit maximal {limit} Neuronen verf\u00fcgbar. Das aktuelle Netzwerk enth\u00e4lt {count} Neuronen.",
+            "The simplified network view is only available for networks with a maximum of {limit} neurons. The current network contains {count} neurons.",
+        ).format(limit=self.MAX_NEURONS,count=self.neuron_count)
 
     @staticmethod
     def activity_ratio(value):
@@ -1880,6 +1898,13 @@ class SimplifiedNetworkCard(ExperimentCard):
 
     def paintEvent(self, event):
         super().paintEvent(event)
+        if self.neuron_count > self.MAX_NEURONS:
+            painter = QPainter(self)
+            painter.setPen(self.palette().text().color())
+            painter.drawText(QRectF(self.rect()).adjusted(16,16,-16,-16),
+                             Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
+                             self.limit_message())
+            return
         layers = self.layers()
         if not layers:
             return
@@ -6522,8 +6547,20 @@ class GraphicalExperimentDialog(QDialog):
         self.update_element_actions()
         self.status_label.setText(self.edit_status_text())
 
+    def network_view_insertion_allowed(self, proxy):
+        if proxy.card_role != "network_view":
+            return True
+        card = proxy.widget()
+        if card.neuron_count <= card.MAX_NEURONS:
+            return True
+        QMessageBox.information(self,
+            self.tr("Vereinfachte Netzwerkansicht", "Simplified network view"),card.limit_message())
+        return False
+
     def request_existing_element_placement(self, proxy):
         if not self.edit_mode or proxy is None or proxy.isVisible():
+            return
+        if not self.network_view_insertion_allowed(proxy):
             return
         self.begin_history_action()
         proxy.setVisible(True)
@@ -6672,6 +6709,8 @@ class GraphicalExperimentDialog(QDialog):
 
     def add_existing_element(self, proxy, position=None):
         if not self.edit_mode or proxy is None or proxy.isVisible():
+            return
+        if not self.network_view_insertion_allowed(proxy):
             return
         self.begin_history_action()
         proxy.setVisible(True)
@@ -8073,6 +8112,7 @@ class GraphicalExperimentDialog(QDialog):
             )
             editor.setRange(minimum, maximum)
             editor.setDecimals(5)
+            minimum, maximum = configure_editor(editor, mapping, minimum, maximum)
             editor.setMinimumWidth(64)
             editor.setMaximumWidth(90)
             editor.setProperty("nn_base_minimum_width", 64)
@@ -8123,6 +8163,11 @@ class GraphicalExperimentDialog(QDialog):
         vertical_slider.setRange(0, 1000)
         vertical_slider.set_foreground_color(card.text_color)
         self.sync_slider(vertical_slider, initial_value, minimum, maximum)
+        if not is_binary:
+            initial_value = editor.value()
+            for control in (slider, dial, vertical_slider):
+                configure_slider(control, getattr(editor, "_input_grid", None))
+                self.sync_slider(control, initial_value, minimum, maximum)
         display_stack = QStackedWidget(card)
         display_stack.addWidget(slider)
         display_stack.addWidget(dial)
@@ -8134,8 +8179,8 @@ class GraphicalExperimentDialog(QDialog):
                 control.sliderPressed.connect(self.input_slider_pressed)
                 control.sliderReleased.connect(self.input_slider_released)
                 control.valueChanged.connect(
-                    lambda position, target=editor, low=minimum, high=maximum:
-                    target.setValue(low + position / 1000.0 * (high - low))
+                    lambda position, target=editor, source=control, low=minimum, high=maximum:
+                    target.setValue(slider_value(source, position, low, high))
                 )
             editor.valueChanged.connect(
                 lambda value, target=slider, low=minimum, high=maximum:
@@ -8490,12 +8535,7 @@ class GraphicalExperimentDialog(QDialog):
 
     @staticmethod
     def sync_slider(slider, value, minimum, maximum):
-        if maximum <= minimum:
-            return
-        position = round((float(value) - minimum) / (maximum - minimum) * 1000.0)
-        slider.blockSignals(True)
-        slider.setValue(max(0, min(1000, position)))
-        slider.blockSignals(False)
+        sync_slider(slider, value, minimum, maximum)
 
     def input_value(self, controls, mapping):
         if mapping.get("data_type") == "binary":

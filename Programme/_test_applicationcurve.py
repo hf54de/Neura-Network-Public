@@ -843,3 +843,113 @@ if __name__ == "__main__":
     APP.processEvents()
     APP.clipboard().clear()
     raise SystemExit(0 if result.wasSuccessful() else 1)
+
+
+class InputStepTests(unittest.TestCase):
+    def test_grid_and_typed_input(self):
+        from inputsteps import InputGrid, infer_step, configure_editor
+        from forwardcalibrationdialog import CompactDoubleSpinBox
+        from graphicalexperimentdialog import CompactInputSpinBox
+        from PySide6.QtCore import QLocale
+        self.assertEqual(infer_step([1, 2, 3]), 1)
+        self.assertEqual(infer_step([.1, .2, .3]), .1)
+        self.assertEqual(infer_step([-.3, -.1, .1]), .2)
+        self.assertIsNone(infer_step([1, 1]))
+        grid = InputGrid(-.25, .3, .1)
+        self.assertEqual(grid.maximum, .25)
+        self.assertEqual(grid.snap(.3), .25)
+        self.assertEqual(grid.snap(-.19), -.15)
+        for cls in (CompactDoubleSpinBox, CompactInputSpinBox):
+            e = cls(); e.setLocale(QLocale("de_DE"))
+            configure_editor(e, {"input_step": .001}, -.25, .3)
+            e.setValue(.1234); self.assertEqual(e.value(), .123)
+            self.assertEqual(e.valueFromText("0,1236"), .124)
+            e.lineEdit().setText("0,1236");e.interpretText()
+            self.assertEqual(e.value(), .124)
+            self.assertIn("124", e.text())
+            e.stepUp(); self.assertEqual(e.value(), .125)
+            e.deleteLater()
+
+    def test_column_metadata_and_file_roundtrip(self):
+        from trainingdatadialog import ColumnPropertiesDialog
+        from trainingvalidity import data_signature
+        from networktestdialog import NetworkTestDialog
+        net, m = build()
+        doc = TrainingDataIO.create_document_for_network(net.get_input_neurons(), net.get_output_neurons())
+        doc["records"] = [[1., 0., 2.], [2., 1., 4.], [3., 0., 6.]]
+        before = deepcopy(doc)
+        for code in ("de", "en"):
+            d = ColumnPropertiesDialog(before["columns"][0], net, [1, 2, 3], language_manager=lang(code))
+            self.assertEqual(d.step_spin.value(), 0)
+            d.calculate_automatic_values(); self.assertEqual(d.step_spin.value(), 1)
+            d.accept(); doc["columns"][0] = d.column_data
+            self.assertEqual(doc["columns"][0]["input_step"], 1)
+            d.deleteLater()
+        self.assertEqual(doc["records"], before["records"])
+        # Isolate the new metadata from the existing automatic calibration operation.
+        pure = deepcopy(before); pure["columns"][0]["input_step"] = .1
+        self.assertEqual(data_signature(before), data_signature(pure))
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+            path = Path(tmp)/"steps.nndata"
+            TrainingDataIO.save(path, pure)
+            self.assertEqual(TrainingDataIO.load(path), pure)
+            TrainingDataIO.save(path, before)
+            self.assertNotIn("input_step", TrainingDataIO.load(path)["columns"][0])
+        for bad in (0, -1, True, float("nan"), float("inf"), "1"):
+            invalid = deepcopy(pure);invalid["columns"][0]["input_step"] = bad
+            with self.assertRaises(ValueError): TrainingDataIO.validate(invalid)
+
+    def test_forward_sliders_and_legacy(self):
+        from forwardcalibrationdialog import ForwardCalibrationDialog
+        net, m = build(); net.remove_neuron(m[1]["neuron"])
+        m[2]["column_index"] = 1
+        m[0]["input_step"] = .1
+        d = ForwardCalibrationDialog(net, m[:1], m[2:], [[-.25, 0], [.3, 1]], language_manager=lang("de"))
+        try:
+            data = d.input_widgets[0]; e = data["input_widget"]; slider = data["slider"]
+            self.assertEqual((e.minimum(), e.maximum()), (-.25, .25))
+            self.assertEqual(slider.maximum(), 5)
+            slider.setValue(3);self.assertEqual(e.value(), .05)
+            e.setValue(.11);self.assertEqual(e.value(), .15)
+            self.assertEqual(slider.value(), 4)
+            d.characteristic_button.click();APP.processEvents()
+            plot=d.characteristic_plot
+            self.assertEqual(plot.input_slider.maximum(), 5)
+            plot.input_slider.setValue(2);self.assertEqual(e.value(), -.05)
+        finally:
+            APP.processEvents();d.deleteLater();APP.sendPostedEvents(None, QEvent.Type.DeferredDelete);APP.processEvents()
+        m[0].pop("input_step")
+        d = ForwardCalibrationDialog(net, m[:1], m[2:], [[1., 0], [3., 1]], language_manager=lang("en"))
+        try:
+            data=d.input_widgets[0]
+            self.assertEqual(data["slider"].maximum(),1000)
+            data["slider"].setValue(250);self.assertEqual(data["input_widget"].value(),1.5)
+        finally:
+            APP.processEvents();d.deleteLater();APP.sendPostedEvents(None, QEvent.Type.DeferredDelete);APP.processEvents()
+
+    def test_application_all_controls_and_curve(self):
+        net, m = build();net.remove_neuron(m[1]["neuron"])
+        m[2]["column_index"]=1;m[0]["input_step"]=1
+        with patch.object(GraphicalExperimentDialog,"restore_window_geometry"):
+            d=GraphicalExperimentDialog(net,m[:1],m[2:],[[1,0],[3,1]],None,language_manager=lang("de"))
+        try:
+            drain(lambda:not d.forward_calculation_running and not d.calculation_timer.isActive())
+            d.mode_combo.setCurrentIndex(d.mode_combo.findData("edit"))
+            controls=d.input_cards[0][1];e=controls["editor"]
+            for key in ("slider","dial","vertical_slider"):
+                control=controls[key]
+                self.assertEqual(control.maximum(),2)
+                control.setValue(0);self.assertEqual(e.value(),1)
+                control.setValue(1);self.assertEqual(e.value(),2)
+                control.setValue(2);self.assertEqual(e.value(),3)
+            e.setValue(1.6);self.assertEqual(e.value(),2)
+            self.assertTrue(all(controls[k].value()==1 for k in ("slider","dial","vertical_slider")))
+            proxy=d.curves.create()
+            d.mode_combo.setCurrentIndex(d.mode_combo.findData("experiment"))
+            d.curves.sync_input_sliders()
+            plot=proxy.widget().plot
+            self.assertEqual(plot.input_slider.maximum(),2)
+            plot.input_slider.setValue(0);self.assertEqual(e.value(),1)
+        finally:
+            d.stop_forward_executor();drain(lambda:not d.curves.busy)
+            d.deleteLater();APP.sendPostedEvents(None,QEvent.Type.DeferredDelete);APP.processEvents()

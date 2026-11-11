@@ -369,6 +369,8 @@ Ein bestehendes Netzwerk kann über **Netzwerk → Anordnen** neu angeordnet wer
 
 **Trainingsdaten → Trainingsdaten bearbeiten** öffnet die Tabelle. Jede Zeile ist ein Datensatz; jede Spalte gehört zu einem Input oder Output/Sollwert.
 
+In der Autorenfassung exportiert **Speichern als HTML** die angezeigte Tabelle mit allen Zeilen als eigenständige `.htm`-Datei. Die Datei lässt sich im Browser öffnen oder auf einer Webseite in einem Iframe einbinden.
+
 Oben rechts kennzeichnet **Herkunft der Trainingsdaten**, wie die Werte entstanden sind: empirische Messdaten, formelbasiert erzeugte Daten, Simulationsdaten, gemischte Daten oder nicht angegeben. Neue und ältere Dateien verwenden zunächst **Nicht angegeben**. Die Auswahl wird in der `.nndata`-Datei gespeichert und im Trainingsfenster sowie in Trainingsberichten angezeigt.
 
 Mögliche Eingaben:
@@ -455,6 +457,8 @@ Bei geeigneten Netzen verändert der Schieberegler den Eingangswert. Die blaue N
 Zwischen benachbarten passenden analogen Sollpunkten wird linear interpoliert. Solche Sollwerte und die Abweichung zu ihnen werden ausdrücklich als Schätzung gekennzeichnet. Außerhalb der vorhandenen Sollpunkte wird nicht extrapoliert. Binäre Werte und widersprüchliche Sollwerte an den Interpolationsgrenzen werden nicht interpoliert. Ist kein Sollwert verfügbar, erscheint keine Fehlerstrecke.
 
 # 22. Netzwerk erproben
+
+In der Autorenfassung exportiert **Speichern als HTML** die Erproben-Ansicht als eigenständige Webseite. Die Eingaben und Regler berechnen die Ausgaben im Browser neu. Die Datei lässt sich in einem Iframe einbinden.
 
 Beim Erproben werden äußere Eingabewerte in ihren ursprünglichen Einheiten verändert. Das Netz führt sofort eine Vorwärtsrechnung aus und zeigt die resultierenden Outputs.
 
@@ -554,7 +558,7 @@ Relative Verweise innerhalb eines strukturierten Projektordners erleichtern das 
 
 **Netzwerk prüfen…** zeigt Struktur, Datenzuordnung und festgestellte Hinweise in einem modalen Prüfungsfenster. Eine Schaltfläche zum erneuten Prüfen ist dort nicht erforderlich, weil das Projekt während des geöffneten Fensters nicht geändert werden kann. Nach einer Änderung wird die Prüfung erneut über das Netzwerkmenü geöffnet.
 
-Der Projektbericht kann als Word- oder PDF-Dokument exportiert werden. Sprache und Dateiformat richten sich nach den gewählten Einstellungen beziehungsweise dem Speicherdialog.
+Der Projektbericht kann als Word- oder PDF-Dokument exportiert werden. Die Autorenfassung bietet zusätzlich HTML an. Sprache und Dateiformat richten sich nach den gewählten Einstellungen beziehungsweise dem Speicherdialog.
 
 # 29. Beispielprojekte und Projektassistent
 

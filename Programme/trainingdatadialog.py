@@ -11,6 +11,7 @@ import io
 import math
 import os
 import random
+from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import (
@@ -48,10 +49,12 @@ from PySide6.QtWidgets import (
     QVBoxLayout
 )
 
+from buildfeatures import author_html_export
 from neurontype import NeuronType
 from numberformat import format_number
 from language import LanguageManager
 from trainingdataio import TrainingDataIO
+from inputsteps import infer_step
 from binaryarraydialog import BinaryInputArrayDialog
 
 
@@ -113,7 +116,7 @@ class NumericItemDelegate(QStyledItemDelegate):
 class AutomaticScalingPreviewDialog(QDialog):
     """Content-sized preview with editable methods and explicit confirmation."""
 
-    def __init__(self, rows, language_manager, parent=None, modes=None, bounds=None):
+    def __init__(self, rows, language_manager, parent=None, modes=None, bounds=None, steps=None):
         super().__init__(parent)
         text = language_manager.text
         self.language = language_manager
@@ -122,11 +125,11 @@ class AutomaticScalingPreviewDialog(QDialog):
                                      for row in self.original_bounds}
         self.setWindowTitle(text("data.auto_scale_preview.title"))
         layout = QVBoxLayout(self)
-        self.table = QTableWidget(len(rows), 5, self)
+        self.table = QTableWidget(len(rows), 6, self)
         self.table.setHorizontalHeaderLabels([
             text("data.auto_scale_preview.neuron"), text("data.auto_scale_preview.type"),
             text("data.auto_scale_preview.minimum"), text("data.auto_scale_preview.maximum"),
-            text("data.auto_scale_preview.method")])
+            text("data.auto_scale_preview.method"), text("data.auto_scale_preview.step")])
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked
                                    | QAbstractItemView.EditTrigger.EditKeyPressed
                                    | QAbstractItemView.EditTrigger.AnyKeyPressed)
@@ -156,8 +159,24 @@ class AutomaticScalingPreviewDialog(QDialog):
             combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
             self.table.setCellWidget(row, 4, combo)
             self.method_combos[row] = combo
+        self.step_spins = {}
+        for row in range(len(rows)):
+            item = QTableWidgetItem("—")
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 5, item)
+        for row, value in (steps or {}).items():
+            spin = QDoubleSpinBox(self.table)
+            spin.setDecimals(10)
+            spin.setRange(0, 1.0e12)
+            spin.setSpecialValueText(text("data.input_step.none"))
+            spin.setToolTip(text("data.input_step.hint"))
+            spin.setKeyboardTracking(False)
+            spin.setValue(value or 0)
+            self.table.item(row, 5).setText("")
+            self.table.setCellWidget(row, 5, spin)
+            self.step_spins[row] = spin
         metrics = self.table.fontMetrics()
-        for column in range(5):
+        for column in range(6):
             labels = [self.table.horizontalHeaderItem(column).text()]
             labels.extend(self.table.item(row, column).text() for row in range(len(rows)))
             self.table.setColumnWidth(column, max(metrics.horizontalAdvance(label) for label in labels) + 20)
@@ -169,8 +188,14 @@ class AutomaticScalingPreviewDialog(QDialog):
         for row in self.method_combos:
             self.table.item(row, 4).setText("")
             self.table.item(row, 4).setToolTip("")
+        step_width = max(metrics.horizontalAdvance(text("data.input_step.none")),
+                         metrics.horizontalAdvance(text("data.auto_scale_preview.step")),
+                         metrics.horizontalAdvance("0.0000000001")) + 30
+        self.table.setColumnWidth(5, step_width)
+        for spin in self.step_spins.values():
+            spin.setFixedWidth(step_width-2)
         self.table.resizeRowsToContents()
-        for row, combo in self.method_combos.items():
+        for row, combo in {**self.method_combos, **self.step_spins}.items():
             self.table.setRowHeight(row, max(self.table.rowHeight(row), combo.sizeHint().height()+2))
         layout.addWidget(self.table)
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -189,10 +214,10 @@ class AutomaticScalingPreviewDialog(QDialog):
         # is shortened if the full table would exceed the available screen.
         rows_shown = min(len(rows), 12)
         scrollbar = self.table.verticalScrollBar().sizeHint().width() if len(rows) > rows_shown else 0
-        others = sum(self.table.columnWidth(i) for i in range(1, 5))
+        others = sum(self.table.columnWidth(i) for i in range(1, 6))
         max_name = max(40, available.width()-40-chrome-scrollbar-others)
         self.table.setColumnWidth(0, min(self.table.columnWidth(0), max_name))
-        width = chrome + scrollbar + sum(self.table.columnWidth(i) for i in range(5))
+        width = chrome + scrollbar + sum(self.table.columnWidth(i) for i in range(6))
         button_width = self.buttons.sizeHint().width() + margins.left() + margins.right()
         self.setFixedWidth(min(available.width()-40, max(width, button_width)))
         table_height = (header.sizeHint().height() + sum(self.table.rowHeight(i) for i in range(rows_shown))
@@ -204,6 +229,11 @@ class AutomaticScalingPreviewDialog(QDialog):
 
     def selected_methods(self):
         return {row: combo.currentData() for row, combo in self.method_combos.items()}
+
+    def selected_steps(self):
+        for spin in self.step_spins.values():
+            spin.interpretText()
+        return {row: spin.value() or None for row, spin in self.step_spins.items()}
 
     def selected_bounds(self):
         bounds = {}
@@ -223,6 +253,7 @@ class AutomaticScalingPreviewDialog(QDialog):
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setFocus()
         try:
             self.selected_bounds()
+            self.selected_steps()
         except (ValueError, OverflowError):
             QMessageBox.warning(self, self.windowTitle(),
                                 self.language.text("data.auto_scale_preview.invalid_bounds"))
@@ -484,6 +515,15 @@ class ColumnPropertiesDialog(QDialog):
             self.calibration_note_label, 6, 0, 1, 3
         )
 
+        self.step_label = QLabel(text("data.input_step.label"))
+        self.step_spin = QDoubleSpinBox()
+        self.step_spin.setDecimals(10)
+        self.step_spin.setRange(0, 1.0e12)
+        self.step_spin.setSpecialValueText(text("data.input_step.none"))
+        self.step_spin.setToolTip(text("data.input_step.hint"))
+        self.step_spin.setValue(float(self.column_data.get("input_step") or 0))
+        self.calibration_layout.addWidget(self.step_label, 7, 0)
+        self.calibration_layout.addWidget(self.step_spin, 7, 1, 1, 2)
         self.main_layout.addWidget(
             self.calibration_group
         )
@@ -566,6 +606,10 @@ class ColumnPropertiesDialog(QDialog):
         return spin_box
 
     def update_calibration_controls(self):
+        step_visible = (self.column_data_original.get("role", "input") == "input"
+                        and self.data_type_combo.currentData() != "binary")
+        self.step_label.setVisible(step_visible)
+        self.step_spin.setVisible(step_visible)
         if self.data_type_combo.currentData() == "binary":
             self.calibration_group.setEnabled(False)
             return
@@ -653,6 +697,8 @@ class ColumnPropertiesDialog(QDialog):
             for value in values
         ) / len(values)
 
+        if self.column_data_original.get("role", "input") == "input":
+            self.step_spin.setValue(infer_step(values) or 0)
         self.source_min_spin.setValue(source_min)
         self.source_max_spin.setValue(source_max)
         self.mean_spin.setValue(mean)
@@ -802,6 +848,9 @@ class ColumnPropertiesDialog(QDialog):
             "mapped_neuron_name": neuron_name,
             "calibration": calibration
         }
+
+        if role == "input" and data_type != "binary" and self.step_spin.value() > 0:
+            self.column_data["input_step"] = self.step_spin.value()
 
         if data_type == "binary":
             self.column_data["analog_calibration"] = copy.deepcopy(
@@ -1240,13 +1289,15 @@ class TrainingDataDialog(QDialog):
         training_file_path=None,
         language_manager=None,
         temporary_mappings=False,
-        color_settings=None
+        color_settings=None,
+        project_file_path=None,
     ):
         super().__init__(parent)
 
         self.language = language_manager or LanguageManager()
         text = self.language.text
         self.network = network
+        self.project_file_path = Path(project_file_path) if project_file_path else None
         self.color_settings = dict(color_settings or {})
         self.temporary_mappings = bool(temporary_mappings)
         self.data_extension = str(
@@ -1699,6 +1750,10 @@ class TrainingDataDialog(QDialog):
         self.file_button_layout.addWidget(
             self.save_as_button
         )
+        if author_html_export is not None and self.data_kind == "training":
+            self.save_html_button = QPushButton(text("data.editor.save_html"), self)
+            self.save_html_button.clicked.connect(self.save_table_as_html)
+            self.file_button_layout.addWidget(self.save_html_button)
         self.file_button_layout.addStretch()
 
         self.button_box = QDialogButtonBox(
@@ -2185,16 +2240,20 @@ class TrainingDataDialog(QDialog):
 
         modes = []
         bounds = {}
+        steps = {}
         for index, column in enumerate(self.document.get("columns", [])):
             values = self.get_column_numeric_values(index)
             editable = column.get("data_type", "analog") != "binary" and values and min(values) < max(values)
             modes.append(self.automatic_calibration_mode(column) if editable else None)
             if editable:
                 bounds[index] = (min(values), max(values))
-        preview = AutomaticScalingPreviewDialog(self.automatic_scaling_preview_rows(), self.language, self, modes=modes, bounds=bounds)
+                if column.get("role", "input") == "input":
+                    steps[index] = infer_step(values)
+        preview = AutomaticScalingPreviewDialog(self.automatic_scaling_preview_rows(), self.language, self, modes=modes, bounds=bounds, steps=steps)
         accepted = preview.exec() == QDialog.DialogCode.Accepted
         selected_methods = preview.selected_methods()
         selected_bounds = preview.selected_bounds() if accepted else {}
+        selected_steps = preview.selected_steps() if accepted else {}
         preview.deleteLater()
         if not accepted:
             return
@@ -2260,6 +2319,14 @@ class TrainingDataDialog(QDialog):
                 document_changed = True
 
             column["calibration"] = new_calibration
+            if data_index in selected_steps:
+                step = selected_steps[data_index]
+                if column.get("input_step") != step:
+                    document_changed = True
+                if step is None:
+                    column.pop("input_step", None)
+                else:
+                    column["input_step"] = step
 
             if (
                 "calibration_source" in column
@@ -4513,6 +4580,37 @@ class TrainingDataDialog(QDialog):
 
         return self.write_document(
             file_path
+        )
+
+    def save_table_as_html(self):
+        if author_html_export is None:
+            return
+        text = self.language.text
+        try:
+            directory = self.current_data_directory()
+            name = Path(self.current_file_path).stem if self.current_file_path else ""
+            if self.project_file_path:
+                export_directory = self.project_file_path.resolve().parent / "exporte"
+                export_directory.mkdir(exist_ok=True)
+                directory = export_directory
+                name = self.project_file_path.stem
+
+            suffix = text("data.editor.html_file_suffix")
+            filename = f"{name}_{suffix}.htm" if name else f"{suffix}.htm"
+            file_path = author_html_export.choose_html_path(
+                self, text("data.editor.save_html"), directory,
+                text("data.editor.html_filter"), filename,
+            )
+            if file_path:
+                author_html_export.write_html_file(file_path, self.table_as_html())
+        except OSError as error:
+            QMessageBox.critical(self, text("data.message.save_error_title"), str(error))
+
+    def table_as_html(self):
+        if author_html_export is None:
+            return None
+        return author_html_export.training_table_html(
+            self.table, self.language.current_language, self.data_label
         )
 
     def current_data_directory(self):

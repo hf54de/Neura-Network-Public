@@ -373,6 +373,7 @@ class NetworkTestDialog(QDialog):
             mapping = {
                 "column_index": column_index,
                 "column_name": column_name,
+                "input_step": column.get("input_step"),
                 "unit": str(column.get("unit", "")).strip(),
                 "data_type": column.get("data_type", "analog"),
                 "neuron": neuron,

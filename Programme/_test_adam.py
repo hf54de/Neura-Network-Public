@@ -191,7 +191,8 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(len(self.w.training_history), 1)
         self.assertEqual(self.w.scene.network.get_optimizer_state()["step"], 10)
         self.assertEqual(self.dialog.current_run_completed_epochs, 5)
-        self.assertIn("Adam", self.w.training_protocol.text())
+        self.assertTrue(any((b.get("parameters") or {}).get("solver") == "adam"
+                            for b in self.w.training_protocol.blocks))
 
     def test_solver_change_starts_linked_run_without_reinitializing_weights(self):
         from unittest.mock import patch

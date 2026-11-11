@@ -36,6 +36,12 @@ def linear_axis_label(value, language_code):
     return text.replace(".", ",") if language_code == "de" else text
 
 
+def logarithmic_axis_exponents(minimum, maximum):
+    """Liefert Zehnerpotenzen für einen logarithmischen Achsenbereich."""
+    step = max(1, math.ceil((maximum - minimum) / 5))
+    return (*range(minimum, maximum, step), maximum)
+
+
 def format_number(
     value,
     significant_digits=6,

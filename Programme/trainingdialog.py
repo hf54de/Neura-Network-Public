@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 
 from neurontype import NeuronType
 from language import LanguageManager
+from network import estimate_training_operations
 from networktestdialog import NetworkTestDialog
 from numberformat import format_number
 from resultanalysisdialog import ResultAnalysisDialog
@@ -1924,6 +1925,17 @@ class TrainingDialog(QDialog):
         self.fit_training_areas_to_window()
         if top_left is not None:
             self.move(top_left)
+        QTimer.singleShot(0, self, self.refresh_training_surface)
+
+    def refresh_training_surface(self):
+        """Repaint the whole backing surface after controls moved during a resize."""
+        if not self.isVisible():
+            return
+        self.update(self.rect())
+        for widget in self.findChildren(QWidget):
+            if widget.isVisible():
+                widget.update(widget.rect())
+        self.repaint(self.rect())
 
     def format_workload_integer(self, value):
         """Formatiert große Zählwerte passend zur gewählten Sprache."""
@@ -1973,9 +1985,8 @@ class TrainingDialog(QDialog):
             if neuron.neuron_type != NeuronType.INPUT
         )
         parameter_count = weight_count + bias_count
-        forward_operations = weight_count * len(self.records)
-        training_operations = forward_operations * 3
-        self.training_operations_per_record = weight_count * 3
+        training_operations = estimate_training_operations(weight_count, len(self.records))
+        self.training_operations_per_record = estimate_training_operations(weight_count, 1)
 
         labels = (
             self.language.text("training.data.network_short"),
@@ -3140,7 +3151,7 @@ class TrainingDialog(QDialog):
         parent = self.parent()
         if parent is not None and hasattr(parent, "open_training_protocol"):
             parent.training_settings = self.get_training_settings()
-            parent.open_training_protocol()
+            parent.open_training_protocol(training_dialog=self)
 
     def delete_current_training_run(self):
         if self.is_training or self.current_run_id is None:
@@ -4281,6 +4292,7 @@ class TrainingDialog(QDialog):
             mapping = {
                 "column_index": column_index,
                 "column_name": column_name,
+                "input_step": column.get("input_step"),
                 "unit": str(column.get("unit", "")).strip(),
                 "data_type": column.get("data_type", "analog"),
                 "neuron": neuron,

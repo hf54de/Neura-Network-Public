@@ -31,7 +31,7 @@ class GraphicsView(QGraphicsView):
         super().__init__(scene, parent)
 
         self.zoom_factor = 1.15
-        self.minimum_zoom = 0.20
+        self.minimum_zoom = 0.10
         self.maximum_zoom = 4.00
         self.hand_pan_dragging = False
         self.hand_pan_last_position = None

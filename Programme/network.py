@@ -19,6 +19,11 @@ from topology import NetworkTopology
 from trainer import BackpropagationTrainer
 
 
+def estimate_training_operations(connection_count, record_count):
+    """Schätzt den Verbindungsaufwand für Vorwärtslauf und Training."""
+    return 3 * connection_count * record_count
+
+
 class NeuralNetwork(QObject):
     """
     Verwaltet die Neuronen und Verbindungen

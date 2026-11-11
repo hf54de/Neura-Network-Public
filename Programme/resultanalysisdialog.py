@@ -5,12 +5,17 @@
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
+from base64 import b64encode
 from collections import defaultdict
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from html import escape
 import math
 from math import log10
 from pathlib import Path
+import re
+from time import monotonic
 
 from PySide6.QtCore import (
     QByteArray,
@@ -18,13 +23,15 @@ from PySide6.QtCore import (
     QEvent,
     QEventLoop,
     QIODevice,
+    QLocale,
     QMarginsF,
     QRectF,
+    QThread,
     Qt,
     QTimer,
     QUrl,
 )
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QFontDatabase, QImage, QPageLayout, QPainter, QPen, QTextDocument
+from PySide6.QtGui import QBrush, QColor, QDesktopServices, QFont, QFontDatabase, QFontMetrics, QImage, QPageLayout, QPageSize, QPainter, QPen, QTextDocument
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -55,13 +62,43 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from buildfeatures import author_html_export
 from docxreport import DocxReport
 from language import LanguageManager
-from numberformat import format_number
+from network import estimate_training_operations
+from numberformat import format_number, linear_axis_ticks, linear_axis_label, logarithmic_axis_exponents
+from pdfreportlayout import draw_pdf_frames, pdf_frame_marker, prepare_pdf_frames
+from reportdescription import report_description_parts
 from trainingdataio import TrainingDataIO
+from weighttrajectory import WeightTrajectoryPlot
 from analysisplot import CharacteristicPlot, FeatureImportancePlot, SollIstPlot
 from graphicalexperimentdialog import (show_yellow_information_dialog,
     GraphicalExperimentDialog, calculate_forward_snapshot)
+
+
+@dataclass(frozen=True)
+class ReportFigure:
+    key: str
+    title: str
+    image: QImage
+    subtitle: str = ""
+    caption: str = ""
+
+    @property
+    def headings(self):
+        if self.key.startswith("sensitivity_") and self.subtitle:
+            return f"{self.title} – {self.subtitle}", ""
+        if self.key == "scatter_all":
+            return self.title, ""
+        return self.title, self.subtitle
+
+    @property
+    def width_inches(self):
+        return min(6.75, 7.6 * self.image.width() / self.image.height())
+
+    @property
+    def height_inches(self):
+        return self.width_inches * self.image.height() / self.image.width()
 
 
 class FillingErrorTable(QTableWidget):
@@ -107,6 +144,98 @@ class FillingErrorTable(QTableWidget):
             self.setColumnWidth(column, minima[column]+extra)
 
 
+class AnalysisCancelled(Exception):
+    """The user stopped the calculation before a result was produced."""
+
+
+class ReportFileWriter(QThread):
+    """Runs the document writer without blocking the progress window."""
+
+    def __init__(self, write):
+        super().__init__()
+        self.write = write
+        self.error = None
+
+    def run(self):
+        try:
+            self.write()
+        except Exception as error:
+            self.error = error
+
+
+class AnalysisProgressDialog(QDialog):
+    def __init__(self, parent, translate, title_key):
+        super().__init__(parent)
+        self.translate = translate
+        self.setWindowTitle(translate(title_key))
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
+        self.setMinimumWidth(430)
+        self.label = QLabel(self)
+        self.label.setWordWrap(True)
+        self.bar = QProgressBar(self)
+        self._last_count_update = 0.0
+        self._cancel_requested = False
+        buttons = QDialogButtonBox(self)
+        self.cancel_button = buttons.addButton(
+            translate("common.cancel"), QDialogButtonBox.ButtonRole.RejectRole
+        )
+        buttons.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.label)
+        layout.addWidget(self.bar)
+        layout.addWidget(buttons)
+
+    def reject(self):
+        if self.cancel_button.isEnabled():
+            self._cancel_requested = True
+            self.cancel_button.setEnabled(False)
+
+    def process_progress_events(self):
+        # Application modality keeps the other windows locked while the
+        # progress dialog can receive the Cancel click.
+        QApplication.processEvents()
+        if self._cancel_requested:
+            raise AnalysisCancelled
+
+    def phase(self, key, **values):
+        self.bar.setRange(0, 0)
+        self.label.setText(self.translate(key, **values))
+        self.process_progress_events()
+
+    def begin_count(self, total, key):
+        self.count_text = self.translate(key)
+        self.bar.setRange(0, max(1, total))
+        self.set_count(0, force=True)
+
+    def set_count(self, value, force=False):
+        maximum = self.bar.maximum()
+        now = monotonic()
+        if not force and value != maximum and now - self._last_count_update < 0.2:
+            return
+        self._last_count_update = now
+        percent = round(value / maximum * 100)
+        self.label.setText(
+            self.count_text.replace("%v", str(value)).replace("%m", str(maximum)).replace("%p", str(percent))
+        )
+        self.bar.setValue(value)
+        self.process_progress_events()
+
+    def save(self, write):
+        self.phase("analysis.report.progress.save")
+        self.cancel_button.setEnabled(False)
+        writer = ReportFileWriter(write)
+        loop = QEventLoop()
+        writer.finished.connect(loop.quit, Qt.ConnectionType.QueuedConnection)
+        writer.start()
+        try:
+            loop.exec()
+        finally:
+            writer.wait()
+        if writer.error is not None:
+            raise writer.error
+
+
 class ResultAnalysisDialog(QDialog):
     """Fasst reine Vorwärtsberechnungen verständlich in Rohwerten zusammen."""
 
@@ -120,6 +249,8 @@ class ResultAnalysisDialog(QDialog):
         initial_source_kind=None,
         tolerances=None,
         report_context=None,
+        *,
+        report_only=False,
     ):
         super().__init__(parent)
         self.language = language_manager or LanguageManager()
@@ -130,6 +261,8 @@ class ResultAnalysisDialog(QDialog):
         self.plot_percent_values = {}
         self.report_context = report_context if isinstance(report_context, dict) else {}
         self.current_result = None
+        self._operation_progress = None
+        self._tolerance_table_key = None
         self.results_by_source = {}
         self.sensitivity_cache = {}
         self.characteristic_values = {}
@@ -427,6 +560,7 @@ class ResultAnalysisDialog(QDialog):
         self.characteristic_plot = CharacteristicPlot(
             language_manager=self.language
         )
+        self.characteristic_plot.chart_colors_enabled = True
         self.characteristic_plot.setMinimumHeight(220)
         self.characteristic_show_all_button.clicked.connect(
             self.characteristic_plot.reset_view
@@ -451,7 +585,7 @@ class ResultAnalysisDialog(QDialog):
         self.tolerance_spin = QDoubleSpinBox()
         self.tolerance_spin.setDecimals(6)
         self.tolerance_spin.setRange(0.0, 1_000_000_000.0)
-        self.tolerance_spin.valueChanged.connect(self.refresh_tolerance)
+        self.tolerance_spin.valueChanged.connect(self.tolerance_changed)
         tolerance_controls.addWidget(self.tolerance_spin)
         tolerance_controls.addStretch(1)
         tolerance_layout.addLayout(tolerance_controls)
@@ -496,6 +630,23 @@ class ResultAnalysisDialog(QDialog):
             self.t("analysis.tab.sensitivity")
         )
 
+        self.trajectory_tab = None
+        run = self.report_context.get("training_run") or {}
+        trajectory = run.get("weight_trajectory")
+        if trajectory and len(trajectory.get("points", ())) > 1:
+            self.trajectory_tab = QWidget()
+            trajectory_layout = QVBoxLayout(self.trajectory_tab)
+            plot = WeightTrajectoryPlot(self.language, self.trajectory_tab,
+                                        end_label=self.t("trajectory.end"))
+            plot.chart_colors_enabled = True
+            plot.interactive = True
+            plot.set_trajectory(trajectory, self.t(
+                "trajectory.run", run=run["run_id"],
+                solver=self.t("adam.solver." + run.get("solver", "sgd")),
+            ))
+            trajectory_layout.addWidget(plot)
+            self.tabs.addTab(self.trajectory_tab, self.t("trajectory.title"))
+
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.button(QDialogButtonBox.StandardButton.Close).setText(
             self.t("common.close")
@@ -508,13 +659,14 @@ class ResultAnalysisDialog(QDialog):
                 if source.get("kind") == initial_source_kind:
                     self.source_combo.setCurrentIndex(index)
                     break
-        self.tabs.setCurrentIndex(max(0, min(5, int(initial_tab))))
+        self.tabs.setCurrentIndex(max(0, min(self.tabs.count() - 1, int(initial_tab))))
         self.source_combo.currentIndexChanged.connect(self.refresh_analysis)
         self.output_combo.currentIndexChanged.connect(self.output_changed)
         self.tabs.currentChanged.connect(self.tab_changed)
         # Start only after exec() has made the dialog visible so the progress
         # bar can be painted during the first evaluation as well.
-        QTimer.singleShot(0, self.refresh_analysis)
+        if not report_only:
+            QTimer.singleShot(0, self.refresh_analysis)
 
     def show_information(self):
         """Zeigt die Erklärung zum aktuell sichtbaren Analyseregister."""
@@ -526,6 +678,7 @@ class ResultAnalysisDialog(QDialog):
             self.characteristic_tab: "characteristic",
             self.tolerance_tab: "tolerance",
             self.sensitivity_tab: "sensitivity",
+            self.trajectory_tab: "trajectory",
         }
         section = information_keys.get(
             self.tabs.currentWidget(),
@@ -641,12 +794,12 @@ class ResultAnalysisDialog(QDialog):
                 )
         index = self.output_combo.findData(previous)
         self.output_combo.setCurrentIndex(index if index >= 0 else 0)
-        self.output_combo.blockSignals(False)
         self.update_output_selection_options()
+        self.output_combo.blockSignals(False)
 
     def update_output_selection_options(self):
         current_tab = self.tabs.currentWidget()
-        show_selector = current_tab is not self.records_tab
+        show_selector = current_tab not in (self.records_tab, self.trajectory_tab)
         self.output_combo.setVisible(show_selector)
         self.output_selector_label.setVisible(show_selector)
         if self.output_combo.count():
@@ -661,7 +814,11 @@ class ResultAnalysisDialog(QDialog):
             self.output_combo.setCurrentIndex(1)
 
     def tab_changed(self, index):
+        previous_output = self.output_combo.currentIndex()
         self.update_output_selection_options()
+        if previous_output != self.output_combo.currentIndex():
+            # The selection signal already refreshed the newly visible tab.
+            return
         self.refresh_plot_and_tolerance()
         current_tab = self.tabs.widget(index)
         if current_tab is self.characteristic_tab:
@@ -689,6 +846,9 @@ class ResultAnalysisDialog(QDialog):
     def begin_analysis_progress(self, total, text_key):
         """Blendet für umfangreiche synchrone Auswertungen Fortschritt ein."""
         total = max(0, int(total))
+        if self._operation_progress is not None:
+            self._operation_progress.begin_count(total, text_key)
+            return
         self._analysis_progress_visible = total >= 100
         self._analysis_progress_interval = max(1, total // 100)
         if not self._analysis_progress_visible:
@@ -712,6 +872,9 @@ class ResultAnalysisDialog(QDialog):
         self.analysis_progress_text.setText(text)
 
     def update_analysis_progress(self, value, force=False):
+        if self._operation_progress is not None:
+            self._operation_progress.set_count(value, force=force)
+            return
         if not getattr(self, "_analysis_progress_visible", False):
             return
         value = int(value)
@@ -726,6 +889,8 @@ class ResultAnalysisDialog(QDialog):
         self.analysis_progress_text.repaint()
 
     def finish_analysis_progress(self):
+        if self._operation_progress is not None:
+            return
         if not getattr(self, "_analysis_progress_visible", False):
             return
         self.analysis_progress.setValue(self.analysis_progress.maximum())
@@ -920,6 +1085,7 @@ class ResultAnalysisDialog(QDialog):
             return
         self.source_note.setText(self.source_information(source))
         self.current_result = self.calculate(source)
+        self._tolerance_table_key = None
         self.populate_output_combo()
         self.populate_characteristic_inputs()
         self.results_by_source[id(source)] = self.current_result
@@ -1418,27 +1584,30 @@ class ResultAnalysisDialog(QDialog):
             self.characteristic_context.setText(str(error))
 
     def refresh_sensitivity(self):
-        if self.tabs.currentWidget() is not self.sensitivity_tab:
+        if self.tabs.currentWidget() is not self.sensitivity_tab or self._operation_progress is not None:
             return
         source = self.current_source()
         mapping = self.selected_output_mapping()
-        if source is None:
+        if source is None or mapping is None:
             self.sensitivity_plot.set_values([])
             return
-        if mapping is None:
-            self.sensitivity_plot.set_values([])
-            return
-        cache_key = (id(source), int(mapping['neuron'].id))
-        if cache_key not in self.sensitivity_cache:
-            values = self.calculate_all_sensitivities(source)
-            for neuron_id, result in values.items():
-                self.sensitivity_cache[(id(source), neuron_id)] = result
-        values = self.sensitivity_cache[cache_key]
-        self.sensitivity_plot.set_values(sorted(values, key=lambda item: item[1], reverse=True))
+        try:
+            values = self.calculate_sensitivity(source, mapping)
+        except AnalysisCancelled:
+            values = []
+        self.sensitivity_plot.set_values(values)
 
     def calculate_sensitivity(self, source, output_mapping):
-        values = self.calculate_all_sensitivities(source)[int(output_mapping['neuron'].id)]
-        return sorted(values, key=lambda item: item[1], reverse=True)
+        cache_key = (id(source), int(output_mapping["neuron"].id))
+        if cache_key not in self.sensitivity_cache:
+            if self._operation_progress is None:
+                with self.operation_progress("analysis.tab.sensitivity"):
+                    values = self.calculate_all_sensitivities(source)
+            else:
+                values = self.calculate_all_sensitivities(source)
+            for neuron_id, result in values.items():
+                self.sensitivity_cache[(id(source), neuron_id)] = result
+        return sorted(self.sensitivity_cache[cache_key], key=lambda item: item[1], reverse=True)
 
     def calculate_all_sensitivities(self, source):
         """Schätzt den mittleren lokalen Einfluss jedes Inputs per Vorwärtslauf."""
@@ -1785,9 +1954,10 @@ class ResultAnalysisDialog(QDialog):
             )
         )
 
-    def refresh_combined_plot(self):
-        source = self.current_source()
-        outputs = source['outputs'] if source else []
+    @staticmethod
+    def combined_plot_data(source, result):
+        """Bereitet die farbigen Punkte und die Legende für alle Ausgänge vor."""
+        outputs = source['outputs']
         colors = {m['neuron'].id: QColor.fromHsv((i * 137) % 360, 190, 185).name()
                   for i, m in enumerate(outputs)}
         legend = []
@@ -1795,10 +1965,14 @@ class ResultAnalysisDialog(QDialog):
             unit = str(m.get('unit') or '')
             title = m['column_name'] + (f' (in {unit})' if unit else '')
             legend.append(f'<span style="color:{colors[m["neuron"].id]}">●</span> {escape(title)}')
-        self.output_legend.setText(' &nbsp; &nbsp; '.join(legend))
         rows = [dict(row, plot_color=colors[row['neuron_id']],
                      source_kind=source.get('kind', 'data'), source_label=source.get('label', ''))
-                for row in (self.current_result or {}).get('rows', [])]
+                for row in result.get('rows', [])]
+        return rows, ' &nbsp; &nbsp; '.join(legend)
+
+    def refresh_combined_plot(self):
+        rows, legend = self.combined_plot_data(self.current_source(), self.current_result or {})
+        self.output_legend.setText(legend)
         self.plot.set_rows(rows)
         self.plot.set_tolerance(0, False)
         german = self.language.current_language == 'de'
@@ -1848,8 +2022,7 @@ class ResultAnalysisDialog(QDialog):
         rows, mapping = self.rows_for_selected_output()
         if mapping is None:
             self.plot.set_rows([])
-            self.tolerance_summary.setText(self.t("analysis.output_required"))
-            self.tolerance_table.setRowCount(0)
+            self.refresh_tolerance()
             return
         binary = mapping.get("data_type") == "binary"
         source = self.current_source()
@@ -1896,12 +2069,9 @@ class ResultAnalysisDialog(QDialog):
         )
         self.tolerance_spin.setValue(float(self.tolerances[key]))
         self.tolerance_spin.blockSignals(False)
-        self.plot_tolerance_spin.blockSignals(True)
-        self.plot_tolerance_spin.setSuffix(
-            "" if binary or not mapping.get("unit") else f" {mapping['unit']}"
-        )
-        self.plot_tolerance_spin.setValue(float(self.tolerances[key]))
-        self.plot_tolerance_spin.blockSignals(False)
+        if not binary:
+            self.tolerances[key] = float(self.tolerance_spin.value())
+        self.plot_tolerance_mode_changed()
         self.refresh_tolerance()
 
     def tolerance_key(self, mapping):
@@ -2064,24 +2234,34 @@ class ResultAnalysisDialog(QDialog):
             self.plot_percent_values[self.tolerance_key(mapping)] = float(value)
             self.update_plot_tolerance()
             return
-        self.tolerances[self.tolerance_key(mapping)] = float(value)
         self.tolerance_spin.blockSignals(True)
         self.tolerance_spin.setValue(float(value))
         self.tolerance_spin.blockSignals(False)
+        self.tolerance_changed(self.tolerance_spin.value())
+
+    def tolerance_changed(self, value):
+        _, mapping = self.rows_for_selected_output()
+        if mapping is None or mapping.get("data_type") == "binary":
+            return
+        self.tolerances[self.tolerance_key(mapping)] = float(value)
+        self.plot_tolerance_mode_changed()
         self.refresh_tolerance()
 
-    def refresh_tolerance(self, value=None):
+    def refresh_tolerance(self):
+        if self.tabs.currentWidget() is not self.tolerance_tab:
+            return
         rows, mapping = self.rows_for_selected_output()
         if mapping is None:
+            self.tolerance_summary.setText(self.t("analysis.output_required"))
+            self.tolerance_table.setRowCount(0)
+            self._tolerance_table_key = None
             return
         binary = mapping.get("data_type") == "binary"
-        key = self.tolerance_key(mapping)
-        if not binary:
-            self.tolerances[key] = float(self.tolerance_spin.value())
-            self.plot_tolerance_spin.blockSignals(True)
-            self.plot_tolerance_spin.setValue(float(self.tolerance_spin.value()))
-            self.plot_tolerance_spin.blockSignals(False)
-        tolerance = float(self.tolerances.get(key, 0.0))
+        tolerance = float(self.tolerances.get(self.tolerance_key(mapping), 0.0))
+        table_key = (mapping["neuron"].id, None if binary else tolerance)
+        if self._tolerance_table_key == table_key:
+            return
+        self._tolerance_table_key = None
         if binary:
             outside = [row for row in rows if row.get("binary_error")]
             correct = len(rows) - len(outside)
@@ -2107,30 +2287,35 @@ class ResultAnalysisDialog(QDialog):
                     tolerance=f"{self.display_number(tolerance)}{suffix}",
                 )
             )
-        self.tolerance_table.setRowCount(len(outside))
-        for row_index, item in enumerate(outside):
-            if item.get("is_binary"):
-                target = self.t("binary.on" if item["target"] > 0.5 else "binary.off")
-                actual = self.t("binary.on" if item["actual"] > 0.5 else "binary.off")
-                deviation = self.t("analysis.binary.incorrect")
-            else:
-                unit = str(item.get("unit") or "")
-                suffix = f" {unit}" if unit else ""
-                target = f"{self.display_number(item['target'])}{suffix}"
-                actual = f"{self.display_number(item['actual'])}{suffix}"
-                deviation = (
-                    f"{self.display_number(item['raw_absolute'])} %"
-                    if unit == "%" else f"{self.display_number(item['raw_absolute'])}{suffix}"
-                )
-            values = (item["record"], item["output"], target, actual, deviation)
-            for column, cell_value in enumerate(values):
-                self.tolerance_table.setItem(
-                    row_index, column, self.table_item(cell_value, column != 1)
-                )
-        self.tolerance_table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.ResizeToContents
-        )
-        self.plot_tolerance_mode_changed()
+        self.begin_analysis_progress(len(outside), "analysis.progress.tolerance")
+        try:
+            self.tolerance_table.setRowCount(len(outside))
+            for row_index, item in enumerate(outside):
+                if item.get("is_binary"):
+                    target = self.t("binary.on" if item["target"] > 0.5 else "binary.off")
+                    actual = self.t("binary.on" if item["actual"] > 0.5 else "binary.off")
+                    deviation = self.t("analysis.binary.incorrect")
+                else:
+                    unit = str(item.get("unit") or "")
+                    suffix = f" {unit}" if unit else ""
+                    target = f"{self.display_number(item['target'])}{suffix}"
+                    actual = f"{self.display_number(item['actual'])}{suffix}"
+                    deviation = (
+                        f"{self.display_number(item['raw_absolute'])} %"
+                        if unit == "%" else f"{self.display_number(item['raw_absolute'])}{suffix}"
+                    )
+                values = (item["record"], item["output"], target, actual, deviation)
+                for column, cell_value in enumerate(values):
+                    self.tolerance_table.setItem(
+                        row_index, column, self.table_item(cell_value, column != 1)
+                    )
+                self.update_analysis_progress(row_index + 1)
+            self.tolerance_table.horizontalHeader().setSectionResizeMode(
+                QHeaderView.ResizeMode.ResizeToContents
+            )
+            self._tolerance_table_key = table_key
+        finally:
+            self.finish_analysis_progress()
 
     def select_record(self, record):
         row_index = max(0, int(record) - 1)
@@ -2239,24 +2424,19 @@ class ResultAnalysisDialog(QDialog):
         self.deviations_table.configure_widths(
             (68, 90, 74, 74, 90, 90, 94), (1, 1, 1, 1, 2, 2, 2))
 
-    @staticmethod
-    def report_chart_image(
-        points, scatter=False, tolerance=0.0, axis_label="", logarithmic=False,
-        binary=False, image_width=1200, image_height=520,
-    ):
-        """Zeichnet eine druckfähige Fehler- oder Soll-Ist-Grafik."""
-        image = QImage(
-            int(image_width), int(image_height), QImage.Format.Format_ARGB32
-        )
+    def report_error_curve_image(self, points, axis_label, logarithmic, *, compact=False):
+        """Zeichnet eine Fehlerkurve mit glatten Teilstrichen für den Bericht."""
+        size = (780, 410) if compact else (1200, 520)
+        image = QImage(*size, QImage.Format.Format_ARGB32)
         image.fill(QColor("white"))
         painter = QPainter(image)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        left, top, right, bottom = 132, 30, 82, 64
+        left, top, right, bottom = (125, 28, 58, 69) if compact else (132, 30, 82, 64)
         width = image.width() - left - right
         height = image.height() - top - bottom
-        painter.setPen(QPen(QColor("#c9d2dc"), 1))
-        painter.drawRect(left, top, width, height)
         if not points:
+            painter.setPen(QPen(QColor("#c9d2dc"), 1))
+            painter.drawRect(left, top, width, height)
             painter.setPen(QColor("#666666"))
             painter.drawText(left, top, width, height, Qt.AlignmentFlag.AlignCenter, "–")
             painter.end()
@@ -2264,22 +2444,42 @@ class ResultAnalysisDialog(QDialog):
 
         xs = [float(point[0]) for point in points]
         ys = [float(point[1]) for point in points]
-        if logarithmic and not scatter:
-            positive = [value for value in ys if value > 0.0]
-            logarithmic = bool(positive) and len(positive) == len(ys)
-            if logarithmic:
-                ys = [log10(value) for value in ys]
-        low = min(xs + ys) if scatter else min(ys)
-        high = max(xs + ys) if scatter else max(ys)
-        if high <= low:
-            high = low + 1.0
-        padding = (high - low) * 0.06
-        low -= padding
-        high += padding
-        x_low = low if scatter else min(xs)
-        x_high = high if scatter else max(xs)
+        low, high = min(ys), max(ys)
+        if logarithmic:
+            low = math.floor(log10(low))
+            high = max(low + 1, math.ceil(log10(high)))
+            y_ticks = logarithmic_axis_exponents(low, high)
+        else:
+            if high <= low:
+                high = low + 1.0
+            padding = (high - low) * 0.06
+            low -= padding
+            high += padding
+            y_ticks = linear_axis_ticks(low, high)
+        x_low, x_high = min(xs), max(xs)
         if x_high <= x_low:
             x_high = x_low + 1.0
+
+        tick_font = QFont("Segoe UI")
+        tick_font.setPixelSize(26 if compact else 22)
+        painter.setFont(tick_font)
+        intervals = 4 if compact else 5
+        x_ticks = [x_low + (x_high - x_low) * index / intervals for index in range(intervals + 1)]
+        y_labels = [
+            f"1e{value:+d}" if logarithmic and not -4 <= value <= 6
+            else linear_axis_label(10.0 ** value if logarithmic else value, self.language.current_language)
+            for value in y_ticks
+        ]
+        label_width = 110
+        if compact:
+            metrics = QFontMetrics(tick_font)
+            left = max(
+                max((metrics.horizontalAdvance(label) for label in y_labels), default=0) + 16,
+                metrics.horizontalAdvance(f"{x_ticks[0]:.0f}") // 2 + 6,
+            )
+            right = metrics.horizontalAdvance(f"{x_ticks[-1]:.0f}") // 2 + 7
+            label_width = max(metrics.horizontalAdvance(f"{value:.0f}") for value in x_ticks) + 8
+            width = image.width() - left - right
 
         def px(value):
             return left + (float(value) - x_low) / (x_high - x_low) * width
@@ -2289,83 +2489,61 @@ class ResultAnalysisDialog(QDialog):
 
         tick_pen = QPen(QColor("#d4dee7"), 2)
         label_pen = QPen(QColor("#465968"), 1)
-        tick_font = QFont("Segoe UI")
-        tick_font.setPixelSize(22)
-        painter.setFont(tick_font)
-        for index in range(6):
-            fraction = index / 5.0
-            x_value = x_low + (x_high - x_low) * fraction
-            y_value = low + (high - low) * fraction
+        label_height = 30 if compact else 25
+        for x_value in x_ticks:
             x_position = int(px(x_value))
-            y_position = int(py(y_value))
             painter.setPen(tick_pen)
             painter.drawLine(x_position, top, x_position, top + height)
+            painter.setPen(label_pen)
+            painter.drawText(
+                x_position - label_width // 2, top + height + 7, label_width, label_height,
+                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, f"{x_value:.0f}",
+            )
+        for value, label in zip(y_ticks, y_labels, strict=True):
+            y_position = int(py(value))
+            painter.setPen(tick_pen)
             painter.drawLine(left, y_position, left + width, y_position)
             painter.setPen(label_pen)
             painter.drawText(
-                x_position - 55, top + height + 7, 110, 25,
-                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
-                (f"{x_value:.0f}" if not scatter else f"{x_value:.5g}"),
-            )
-            painter.drawText(
-                2, y_position - 12, left - 10, 24,
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
-                f"{(10 ** y_value if logarithmic else y_value):.5g}",
+                2, y_position - label_height // 2, left - 10, label_height if compact else 24,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, label,
             )
         painter.setPen(QPen(QColor("#aebbc7"), 1))
         painter.drawRect(left, top, width, height)
         axis_font = QFont("Segoe UI")
-        axis_font.setPixelSize(23)
+        axis_font.setPixelSize(26 if compact else 23)
         axis_font.setBold(True)
         painter.setFont(axis_font)
         painter.drawText(
-            left, top + height + 29, width, 23,
+            left, top + height + label_height + 4, width, label_height if compact else 23,
             Qt.AlignmentFlag.AlignCenter, str(axis_label)
         )
-        if scatter:
-            painter.setPen(QPen(QColor("#6f7f8f"), 2, Qt.PenStyle.DashLine))
-            painter.drawLine(int(px(low)), int(py(low)), int(px(high)), int(py(high)))
-            if binary:
-                painter.setPen(QPen(QColor("#8495a5"), 2, Qt.PenStyle.DashLine))
-                painter.drawLine(int(px(0.5)), top, int(px(0.5)), top + height)
-                painter.drawLine(left, int(py(0.5)), left + width, int(py(0.5)))
-                painter.setPen(QColor("#566573"))
-                labels = (
-                    ("fälschlich Ein", 0.25, 0.82),
-                    ("richtig Ein", 0.75, 0.82),
-                    ("richtig Aus", 0.25, 0.18),
-                    ("fälschlich Aus", 0.75, 0.18),
-                )
-                for label, x_value, y_value in labels:
-                    painter.drawText(
-                        int(px(x_value)) - 70, int(py(y_value)) - 10, 140, 20,
-                        Qt.AlignmentFlag.AlignCenter, label,
-                    )
-            if tolerance > 0:
-                painter.setPen(QPen(QColor("#80b894"), 1, Qt.PenStyle.DashLine))
-                painter.drawLine(int(px(low)), int(py(low + tolerance)), int(px(high)), int(py(high + tolerance)))
-                painter.drawLine(int(px(low)), int(py(low - tolerance)), int(px(high)), int(py(high - tolerance)))
-            for target, actual in points:
-                outside = abs(float(target) - float(actual)) > tolerance if tolerance > 0 else False
-                painter.setBrush(QColor("#d62828" if outside else "#1676b8"))
-                painter.setPen(QPen(QColor("white"), 1))
-                painter.drawEllipse(int(px(target)) - 4, int(py(actual)) - 4, 8, 8)
-        else:
-            painter.setPen(QPen(QColor("#1676b8"), 2))
-            previous = None
-            for epoch, error in points:
-                if logarithmic:
-                    error = log10(float(error))
-                current = (int(px(epoch)), int(py(error)))
-                if previous is not None:
-                    painter.drawLine(previous[0], previous[1], current[0], current[1])
-                previous = current
+        painter.setPen(QPen(QColor("#1676b8"), 2))
+        previous = None
+        for epoch, error in zip(xs, ys):
+            current = (int(px(epoch)), int(py(log10(error) if logarithmic else error)))
+            if previous is not None:
+                painter.drawLine(previous[0], previous[1], current[0], current[1])
+            previous = current
         painter.end()
         return image
 
     @staticmethod
-    def image_png_bytes(image):
-        """Wandelt ein QImage verlustfrei in PNG-Daten um."""
+    def image_png_bytes(image, *, corner_radius=0):
+        """Encode an image as PNG, optionally rounding its corners by a pixel radius."""
+        if corner_radius:
+            rounded = QImage(image.size(), QImage.Format.Format_ARGB32_Premultiplied)
+            rounded.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(rounded)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(Qt.GlobalColor.white)
+            painter.drawRoundedRect(QRectF(rounded.rect()), corner_radius, corner_radius)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+            painter.drawImage(rounded.rect(), image)
+            painter.end()
+            image = rounded
+
         data = QByteArray()
         buffer = QBuffer(data)
         buffer.open(QIODevice.OpenModeFlag.WriteOnly)
@@ -2373,7 +2551,7 @@ class ResultAnalysisDialog(QDialog):
         buffer.close()
         return bytes(data)
 
-    def report_network_image(self):
+    def report_network_image(self, *, image_width=1400, transparent_background=False):
         """Rendert das vollständige Netzwerk für den Bericht."""
         scene = self.report_context.get("scene")
         if scene is None:
@@ -2388,17 +2566,16 @@ class ResultAnalysisDialog(QDialog):
             7.35,
             max(3.2, (report_width_inches / max(source_ratio, 0.05)) * 1.10),
         )
-        image_width = 1400
         image_height = int(round(
             image_width * desired_height_inches / report_width_inches
         ))
         image = QImage(
             image_width, image_height, QImage.Format.Format_ARGB32
         )
-        image.fill(QColor("white"))
+        image.fill(QColor("transparent" if transparent_background else "white"))
         painter = QPainter(image)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        padding = 38.0
+        padding = 38.0 * image_width / 1400
         available_width = image.width() - 2.0 * padding
         available_height = image.height() - 2.0 * padding
         available_ratio = available_width / max(available_height, 1.0)
@@ -2414,25 +2591,28 @@ class ResultAnalysisDialog(QDialog):
             target_width,
             target_height,
         )
-        scene.render(
-            painter,
-            target,
-            bounds,
-            Qt.AspectRatioMode.KeepAspectRatio,
-        )
-        painter.end()
+        background = scene.backgroundBrush() if transparent_background else None
+        try:
+            if background is not None:
+                scene.setBackgroundBrush(QBrush())
+            scene.render(painter, target, bounds, Qt.AspectRatioMode.KeepAspectRatio)
+        finally:
+            painter.end()
+            if background is not None:
+                scene.setBackgroundBrush(background)
         return image
 
     def report_default_path(self, suffix):
         """Schlägt den Exporte-Ordner des aktuellen Projekts vor."""
         name = str(self.report_context.get("project_name") or "NeuronNetz")
         report_suffix = self.t("analysis.report.file_suffix")
+        filename = f"{name}_{report_suffix}.{suffix}".replace(" ", "-")
         export_dir = str(self.report_context.get("export_dir") or "").strip()
         if export_dir:
             directory = Path(export_dir)
             directory.mkdir(parents=True, exist_ok=True)
-            return str(directory / f"{name}_{report_suffix}.{suffix}")
-        return f"{name}_{report_suffix}.{suffix}"
+            return str(directory / filename)
+        return filename
 
     @staticmethod
     def report_integer(value):
@@ -2501,31 +2681,65 @@ class ResultAnalysisDialog(QDialog):
         )
 
     def export_report(self):
-        """Lässt PDF oder DOCX wählen und erzeugt den gewünschten Bericht."""
+        """Lässt das Berichtsformat passend zur Programmfassung wählen."""
 
         word_filter = self.t("analysis.report.word_filter")
         pdf_filter = self.t("analysis.report.filter")
+        exporters = {
+            word_filter: (".docx", self.export_word_report),
+            pdf_filter: (".pdf", self.export_pdf_report),
+        }
+        if author_html_export is not None:
+            exporters[self.t("analysis.report.html_filter")] = (".html", self.export_html_report)
         file_path, selected_filter = QFileDialog.getSaveFileName(
             self,
             self.t("analysis.report.create_title"),
             self.report_default_path("docx"),
-            f"{word_filter};;{pdf_filter}",
+            ";;".join(exporters),
             word_filter,
         )
         if not file_path:
             return False
 
-        pdf_selected = selected_filter == pdf_filter
-        desired_suffix = ".pdf" if pdf_selected else ".docx"
+        desired_suffix, export = exporters.get(selected_filter, exporters[word_filter])
         selected_path = Path(file_path)
-        if selected_path.suffix.lower() in {".pdf", ".docx"}:
+        if selected_path.suffix.lower() in {".pdf", ".docx", ".html", ".htm"}:
             selected_path = selected_path.with_suffix(desired_suffix)
-        elif selected_path.suffix.lower() != desired_suffix:
+        else:
             selected_path = Path(f"{selected_path}{desired_suffix}")
+        return export(str(selected_path))
 
-        if pdf_selected:
-            return self.export_pdf_report(str(selected_path))
-        return self.export_word_report(str(selected_path))
+    @contextmanager
+    def operation_progress(self, title_key):
+        parent = self if self.isVisible() else self.parentWidget()
+        progress = AnalysisProgressDialog(parent, self.t, title_key)
+        self._operation_progress = progress
+        try:
+            progress.show()
+            yield progress
+        finally:
+            self._operation_progress = None
+            progress.hide()
+            progress.deleteLater()
+
+    def run_report_export(self, file_path, write):
+        if self._operation_progress is not None:
+            return False
+        try:
+            with self.operation_progress("analysis.report.create_title") as progress:
+                progress.phase("analysis.report.progress.prepare")
+                write(file_path)
+        except AnalysisCancelled:
+            return False
+        except (OSError, RuntimeError, ValueError) as error:
+            QMessageBox.warning(self, self.t("analysis.report.error_title"), str(error))
+            return False
+        self.offer_open_report(file_path)
+        return True
+
+    def report_export_phase(self, key, **values):
+        if self._operation_progress is not None:
+            self._operation_progress.phase(key, **values)
 
     def offer_open_report(self, file_path):
         """Fragt nach erfolgreichem Export, ob die Datei geöffnet werden soll."""
@@ -2546,11 +2760,765 @@ class ResultAnalysisDialog(QDialog):
                 QUrl.fromLocalFile(str(Path(file_path).resolve()))
             )
 
+    REPORT_HISTORY_COLUMNS = (
+        ("history.column.run", 7),
+        ("history.column.time", 14),
+        ("adam.solver.label", 20),
+        ("history.column.learning_rate", 9),
+        ("history.column.momentum", 11),
+        ("history.column.epochs", 9),
+        ("history.column.end_error", 10),
+        ("history.column.maximum_error", 13),
+        ("history.column.duration", 7),
+    )
+
+    PDF_REPORT_CSS = """
+        body{font-family:'Segoe UI';font-size:10pt;color:#172c44;}
+        h1{font-size:24pt;margin-top:4px;margin-bottom:15px;color:#172c44;}
+        h2{font-size:15pt;margin-top:10px;margin-bottom:7px;color:#172c44;}
+        h3{font-size:11pt;margin-top:8px;margin-bottom:5px;color:#172c44;}
+        p{margin-top:4px;margin-bottom:5px;}
+        .pdf-eyebrow{font-size:9pt;font-weight:bold;color:#21517c;}
+        td,th{vertical-align:top;}
+        th{background:#eff5fa;color:#172c44;text-align:left;}
+        .note,.pdf-caption{color:#415a71;font-size:9pt;}
+    """
+
+    def report_training_figures(self, run, *, compact=False, pair_trajectory=False):
+        """Rendert die optionalen Diagramme aus dem gespeicherten Trainingslauf."""
+        provider = self.report_context.get("characteristic_provider")
+        if run and provider:
+            from historycharacteristic import HistoryCharacteristic
+
+            view = HistoryCharacteristic(self.language, provider)
+            view.setParent(self)
+            try:
+                view.set_runs([run])
+                view.plot.chart_colors_enabled = False
+                if compact:
+                    font = view.plot.font()
+                    font.setPixelSize(16)
+                    view.plot.setFont(font)
+                view.plot.resize(*(570, 350) if compact else (850, 450))
+                for index in range(view.output.count()):
+                    view.output.setCurrentIndex(index)
+                    if not view.plot.isHidden() and view.plot.curve_points:
+                        title = (
+                            f"{self.t('analysis.characteristic.legend_curve')} – "
+                            f"{view.output.itemText(index)}"
+                        )
+                        yield ReportFigure(f"training_figure_{index}", title, view.plot.grab().toImage())
+            finally:
+                view.deleteLater()
+
+        trajectory = run.get("weight_trajectory")
+        if trajectory and len(trajectory.get("points", ())) > 1:
+            title = self.t("trajectory.title")
+            plot = WeightTrajectoryPlot(self.language, self, end_label=self.t("trajectory.end"))
+            try:
+                if pair_trajectory:
+                    font = plot.font()
+                    font.setPixelSize(16)
+                    plot.setFont(font)
+                plot.resize(*(570, 350) if pair_trajectory else (850, 450))
+                plot.set_trajectory(trajectory, self.t("analysis.report.run", run=run["run_id"]))
+                yield ReportFigure("weight_trajectory", title, plot.grab().toImage())
+            finally:
+                plot.deleteLater()
+
+    def report_single_plot_image(self, mapping, rows, tolerance, *, compact=False):
+        plot = SollIstPlot(self, language_manager=self.language)
+        try:
+            plot.chart_colors_enabled = False
+            font = plot.font()
+            font.setPixelSize(17 if compact else 15)
+            plot.setFont(font)
+            plot.resize(*(570, 350) if compact else (1050, 340))
+            plot.set_rows(rows, binary=mapping.get("data_type") == "binary", unit=mapping.get("unit"))
+            plot.set_tolerance(tolerance, visible=tolerance > 0)
+            return plot.grab().toImage()
+        finally:
+            plot.deleteLater()
+
+    def report_combined_plot_image(self, source, result, *, compact=False):
+        """Rendert die Ansicht „Alle Outputs“ mitsamt Legende für den Bericht."""
+        rows, legend = self.combined_plot_data(source, result)
+        panel = QWidget(self)
+        try:
+            panel.setStyleSheet("background-color:#ffffff; color:#243746;")
+            layout = QVBoxLayout(panel)
+            layout.setContentsMargins(8, 6, 8, 6)
+            label = QLabel(legend, panel)
+            label.setWordWrap(True)
+            layout.addWidget(label)
+            plot = SollIstPlot(panel, language_manager=self.language)
+            plot.chart_colors_enabled = False
+            plot.set_rows(rows)
+            layout.addWidget(plot, 1)
+            width, height = (570, 350) if compact else (900, 425)
+            if compact:
+                font = plot.font()
+                font.setPixelSize(17)
+                plot.setFont(font)
+                label.setFont(font)
+            panel.resize(width, height + max(0, label.heightForWidth(width - 16)))
+            return panel.grab().toImage()
+        finally:
+            panel.deleteLater()
+
+    def report_sensitivity_figures(self, source, *, print_layout=False):
+        if not source.get("records") or not source.get("inputs"):
+            return
+        rows_per_page = 20
+        pages_per_output = (len(source["inputs"]) + rows_per_page - 1) // rows_per_page
+        figure_count = pages_per_output * len(source["outputs"])
+        figure_number = 0
+        for mapping in source["outputs"]:
+            values = self.calculate_sensitivity(source, mapping)
+            page_count = (len(values) + rows_per_page - 1) // rows_per_page
+            output_label = self.characteristic_axis_label(mapping)
+            plot = FeatureImportancePlot(self, language_manager=self.language)
+            font = plot.font()
+            font.setPixelSize(17)
+            plot.setFont(font)
+            try:
+                for page, start in enumerate(range(0, len(values), rows_per_page), 1):
+                    rows = values[start:start + rows_per_page]
+                    figure_number += 1
+                    paired = print_layout and (figure_number < figure_count or figure_count % 2 == 0)
+                    plot.set_values(rows, maximum=100.0)
+                    plot.resize(570 if paired else 900, 34 + 28 * len(rows))
+                    label = output_label
+                    if page_count > 1:
+                        label += f" ({page}/{page_count})"
+                    yield label, plot.grab().toImage()
+            finally:
+                plot.deleteLater()
+
+    def report_output_summary(self, mapping, rows):
+        if not rows:
+            return self.t("analysis.report.no_output_data"), 0.0
+        if mapping.get("data_type") == "binary":
+            correct = sum(not row["binary_error"] for row in rows)
+            return self.t(
+                "analysis.tolerance.binary_summary",
+                correct=correct, total=len(rows), incorrect=len(rows) - correct,
+            ), 0.0
+
+        key = self.tolerance_key(mapping)
+        if key not in self.tolerances:
+            raw_values = [row["target"] for row in rows]
+            raw_range = max(raw_values) - min(raw_values)
+            self.tolerances[key] = 5.0 if mapping.get("unit") == "%" else raw_range * 0.05
+        tolerance = float(self.tolerances[key])
+        inside = sum(row["raw_absolute"] <= tolerance for row in rows)
+        return self.t(
+            "analysis.report.tolerance_result",
+            inside=inside, total=len(rows), tolerance=self.display_number(tolerance),
+            unit=str(mapping.get("unit") or ""),
+        ), tolerance
+
+    def report_figures(self, run, source, result, *, print_layout=False):
+        for curve_key, title_key, image_key in (
+            ("curve_points", "analysis.report.active_curve", "error_curve"),
+            ("maximum_error_curve_points", "analysis.report.active_maximum_curve", "maximum_error_curve"),
+        ):
+            curve = run.get(curve_key)
+            if not curve:
+                continue
+            logarithmic = self.report_curve_is_logarithmic(curve)
+            scale = self.t("analysis.report.scale_logarithmic" if logarithmic else "analysis.report.scale_linear")
+            caption = " · ".join((
+                self.t("analysis.report.run", run=run.get("run_id", "–")),
+                self.report_datetime(run.get("timestamp")),
+                self.t("analysis.report.epoch_count", epochs=self.report_integer(run.get("completed_epochs"))),
+                scale,
+            ))
+            yield ReportFigure(
+                image_key, self.t(title_key),
+                self.report_error_curve_image(
+                    curve, self.t("history.chart.epoch"), logarithmic, compact=print_layout,
+                ),
+                caption=caption,
+            )
+
+        outputs = source.get("outputs", ())
+        has_scatter = bool(outputs and result["rows"])
+        trajectory = run.get("weight_trajectory")
+        paired = print_layout and has_scatter and bool(trajectory and len(trajectory.get("points", ())) > 1)
+        yield from self.report_training_figures(run, compact=print_layout, pair_trajectory=paired)
+
+        if has_scatter:
+            title = self.t("analysis.report.output_results")
+            if len(outputs) > 1:
+                yield ReportFigure(
+                    "scatter_all", title, self.report_combined_plot_image(source, result, compact=paired),
+                    subtitle=self.t("analysis.output_all"),
+                )
+            else:
+                mapping = outputs[0]
+                rows = result["rows"]
+                summary, tolerance = self.report_output_summary(mapping, rows)
+                image = self.report_single_plot_image(mapping, rows, tolerance, compact=paired)
+                yield ReportFigure("scatter_0", title, image, self.report_output_title(mapping), summary)
+
+        for index, (label, image) in enumerate(self.report_sensitivity_figures(source, print_layout=print_layout)):
+            yield ReportFigure(
+                f"sensitivity_{index}", self.t("analysis.tab.sensitivity"), image, label,
+                self.t("analysis.sensitivity.explanation") if index == 0 else "",
+            )
+
+    @staticmethod
+    def report_classification_targets(source):
+        """Recognize dimensionless class scores with exactly one 1 per record."""
+        outputs = source.get("outputs", ())
+        if len(outputs) < 2 or any(
+            mapping.get("data_type") == "binary" or str(mapping.get("unit") or "").strip()
+            for mapping in outputs
+        ):
+            return []
+        targets = []
+        for record in source["records"]:
+            values = [record[mapping["column_index"]] for mapping in outputs]
+            if values.count(1) != 1 or any(value not in (0, 1) for value in values):
+                return []
+            targets.append(outputs[values.index(1)]["neuron"].id)
+        return targets
+
+    def report_classification_rows(self, source, result):
+        """Count one decision per record, keeping training and test results separate."""
+        basis = next((item for item in self.sources if item["kind"] == "training"), source)
+        basis_targets = self.report_classification_targets(basis)
+        if len(set(basis_targets)) < 2:
+            return []
+
+        locale = QLocale(self.language.current_language)
+        summaries = []
+        for item in self.sources:
+            targets = basis_targets if item is basis else self.report_classification_targets(item)
+            if not targets:
+                continue
+            analysis = result if item is source else self.calculate(item)
+            predictions = defaultdict(dict)
+            for row in analysis["rows"]:
+                predictions[row["record"]][row["neuron_id"]] = row["actual"]
+
+            output_count = len(item["outputs"])
+            correct = 0
+            for record, target in enumerate(targets, 1):
+                scores = predictions[record]
+                if len(scores) != output_count or target not in scores:
+                    break
+                correct += all(scores[target] > score for neuron_id, score in scores.items() if neuron_id != target)
+            else:
+                total = len(targets)
+                summaries.append((item["label"], self.t(
+                    "analysis.report.classified",
+                    correct=locale.toString(correct),
+                    total=locale.toString(total),
+                    percent=locale.toString(100 * correct / total, "f", 1),
+                )))
+        return summaries
+
+    def report_output_notes(self, source, result):
+        outputs = source.get("outputs", ())
+        if len(outputs) == 1 and result["rows"]:
+            return
+        for mapping in outputs:
+            rows = [row for row in result["rows"] if row["neuron_id"] == mapping["neuron"].id]
+            summary, _ = self.report_output_summary(mapping, rows)
+            yield self.characteristic_axis_label(mapping), summary
+
+    def report_figure_pages(self, run, source, result, *, print_layout=False):
+        """Group related charts in pairs for the report formats."""
+        page = []
+        previous_group = None
+        self.report_export_phase("analysis.report.progress.figures", count=0)
+        figures = self.report_figures(run, source, result, print_layout=print_layout)
+        for count, figure in enumerate(figures, 1):
+            self.report_export_phase("analysis.report.progress.figures", count=count)
+            if figure.key in {"error_curve", "maximum_error_curve"}:
+                group = "training_figure" if print_layout else "training_error"
+            elif figure.key == "weight_trajectory" or figure.key.startswith("scatter_"):
+                group = "training_result"
+            else:
+                group = figure.key.rpartition("_")[0]
+            if page and (len(page) == 2 or group != previous_group):
+                yield page
+                page = []
+            page.append(figure)
+            previous_group = group
+        if page:
+            yield page
+
+    def report_initialization_lines(self, run, training_history):
+        parent_run_id = run.get("parent_run_id")
+        if parent_run_id is not None:
+            return [self.t("history.initialization.changed_parameters", run=parent_run_id)]
+
+        lines = []
+        start_state = run.get("initial_network_state")
+        run_id = run.get("run_id")
+        if start_state and isinstance(run_id, int):
+            for entry in training_history:
+                source_id = entry.get("run_id")
+                if isinstance(source_id, int) and source_id < run_id and entry.get("initial_network_state") == start_state:
+                    lines.append(self.t("history.initialization.repeated", run=source_id))
+                    run = entry
+                    break
+
+        if run.get("initialized") is False or run.get("parent_run_id") is not None:
+            return lines or [self.t("analysis.report.initialization_existing")]
+
+        weights_key = {
+            "auto": "training.initialization.auto_recommended",
+            "xavier": "training.initialization.xavier_all",
+            "he": "training.initialization.he_all",
+            "zero": "training.initialization.weights_zero",
+        }.get(run.get("weight_initialization"))
+        bias_key = {
+            "zero": "training.initialization.bias_zero",
+            "xavier": "training.initialization.xavier",
+        }.get(run.get("bias_initialization"))
+        for label_key, method_key in (
+            ("training.initialization.weights", weights_key),
+            ("training.initialization.bias", bias_key),
+        ):
+            method = self.t(method_key) if method_key else "–"
+            lines.append(f"{self.t(label_key)} {method}")
+        return lines
+
+    def report_history_rows(self, training_history, active_run_id):
+        history_rows = [[self.t(key).rstrip(":") for key, _ in self.REPORT_HISTORY_COLUMNS]]
+        for entry in reversed(training_history):
+            run_number = str(entry.get("run_id", "–"))
+            if entry.get("run_id") == active_run_id:
+                run_number += f" – {self.t('history.active')}"
+            history_rows.append([
+                run_number,
+                self.report_datetime(entry.get("timestamp")),
+                self.t("adam.solver." + entry.get("solver", "sgd")),
+                self.report_decimal(entry.get("learning_rate"), 6),
+                self.report_decimal(entry.get("momentum", 0.0), 2),
+                self.report_integer(entry.get("completed_epochs")),
+                self.report_decimal(entry.get("end_error"), 6),
+                self.report_decimal(entry.get("maximum_absolute_error"), 6),
+                f"{self.report_decimal(entry.get('elapsed_seconds'), 1)} s",
+            ])
+        return history_rows
+
+    REPORT_TRAINING_COLUMNS = (
+        ("analysis.report.training_column", 23),
+        ("data.column_properties.name", 28),
+        ("data.column_properties.unit", 10),
+        ("data.column_properties.data_type", 12),
+        ("forward.column.scaling", 27),
+    )
+
+    def report_training_data(self):
+        document = self.report_context.get("training_document")
+        if document is None:
+            return None
+
+        locale = QLocale(self.language.current_language)
+        count = f"{self.t('training.data.records')} {locale.toString(len(document.get('records', ())))}"
+        rows = [[self.t(key).rstrip(":") for key, _ in self.REPORT_TRAINING_COLUMNS]]
+        for index, column in enumerate(document.get("columns", ()), 1):
+            binary = column.get("data_type") == "binary"
+            calibration = TrainingDataIO.normalize_calibration(column.get("calibration"))
+            mode = "none" if binary else calibration["mode"]
+            scaling = self.t(f"data.calibration.{mode}")
+            if mode in ("minmax_0_1", "minmax_minus1_1"):
+                scaling += "\n" + self.t(
+                    "analysis.report.training_raw_range",
+                    minimum=locale.toString(calibration["source_min"], "g", 8),
+                    maximum=locale.toString(calibration["source_max"], "g", 8),
+                )
+            mapping = [str(index)]
+            neuron_id = column.get("mapped_neuron_id")
+            if neuron_id is not None:
+                mapping.append(f"N{neuron_id}")
+            mapping.append(self.t(f"analysis.report.training_{column['role']}"))
+            rows.append([
+                " · ".join(mapping),
+                column.get("name") or "–",
+                column.get("unit") or "–",
+                self.t("data.type.binary" if binary else "data.type.analog"),
+                scaling,
+            ])
+        return count, rows
+
+    def report_operations_per_epoch(self):
+        document = self.report_context.get("training_document") or {}
+        records = document.get("records")
+        if not records:
+            return "–"
+        operations = estimate_training_operations(
+            int(self.report_context.get("connections", 0)), len(records)
+        )
+        return self.t(
+            "analysis.report.operations_estimate",
+            operations=QLocale(self.language.current_language).toString(operations),
+        )
+
+    def report_title(self):
+        project_name = self.report_context.get("project_name") or self.t("common.unknown")
+        return self.t("analysis.report.heading", project=project_name)
+
+    def build_report_markup(self, *, inline_images=False, pdf_width=None):
+        """Erstellt den Berichtstext und formatiert Tabellen und Rahmen für das Zielformat."""
+        source = self.current_source() or {}
+        result = (self.current_result or self.calculate(source)) if source else {"rows": []}
+        run = self.report_context.get("training_run") or {}
+        context = self.report_context
+        training_history = [
+            entry for entry in context.get("training_history", [])
+            if isinstance(entry, dict)
+        ]
+        active_run_id = context.get("active_training_run_id", run.get("run_id"))
+        images = {}
+        pdf_table = '<table width="100%" cellspacing="0" cellpadding="{padding}">'
+        pdf_grid = pdf_frame_marker("grid") + pdf_table
+        table_tag = pdf_grid.format(padding=5) if pdf_width else "<table>"
+        facts_table = '<table class="report-facts">' if inline_images else table_tag
+        first_cell = '<td width="29%">' if pdf_width else "<td>"
+        number_cell = '<td class="report-number">' if inline_images else "<td>"
+        scroll_open = '<div class="table-scroll" tabindex="0">' if inline_images else ""
+        scroll_close = "</div>" if inline_images else ""
+        section_open = "<div class='section'>"
+        pdf_gap = '<p style="margin:0;font-size:5pt">&nbsp;</p>'
+        if pdf_width:
+            section_open += (
+                pdf_gap + '<table width="100%" cellspacing="0" cellpadding="0"><tr>'
+                '<td bgcolor="#d7e2ec"><p style="margin:0;font-size:1px">&nbsp;</p></td></tr></table>'
+                + pdf_gap
+            )
+
+        def pdf_cell(content, *, width="100%"):
+            return f'<td width="{width}" valign="top">{content}</td>'
+
+        def pdf_card(content, *, keep_together=False, keep_with_next=False):
+            return (
+                pdf_frame_marker("card", keep_together=keep_together, keep_with_next=keep_with_next)
+                + '<table width="100%" cellspacing="0" cellpadding="8"><tr>'
+                + pdf_cell(content) + "</tr></table>" + pdf_gap
+            )
+
+        def pdf_pair(left, right, *, keep_together=False):
+            padding = 6 if keep_together else 8
+            return (
+                pdf_frame_marker("pair", keep_together=keep_together)
+                + f'<table width="100%" cellspacing="0" cellpadding="{padding}"><tr>'
+                + pdf_cell(left, width="49%")
+                + '<td width="2%" style="padding:0"></td>'
+                + pdf_cell(right, width="49%") + "</tr></table>" + pdf_gap
+            )
+
+        def pdf_image(url, image, width, label):
+            images[url] = image
+            return (
+                f'<p align="center"><img src="{url}" width="{width}" '
+                f'alt="{escape(label)}"></p>'
+            )
+
+        def image_markup(url, image, frame, width, label):
+            if inline_images:
+                png = b64encode(self.image_png_bytes(image)).decode("ascii")
+                return (
+                    f'<img src="data:image/png;base64,{png}" '
+                    f'width="{image.width()}" height="{image.height()}" alt="{escape(label)}">'
+                )
+            if pdf_width:
+                image_content = pdf_image(url, image, min(width, pdf_width - 20), label)
+                return pdf_card(
+                    image_content + f'<p class="pdf-caption">{escape(label)}</p>', keep_together=True,
+                )
+            images[url] = image
+            return (
+                f'<div class="{frame}">'
+                f'<img src="{url}" width="{width}" alt="{escape(label)}" /></div>'
+            )
+
+        if inline_images:
+            project_name = context.get("project_name") or self.t("common.unknown")
+            header = (
+                f'<header><p class="eyebrow">{escape(self.t("analysis.report.web_label"))}</p>'
+                f"<h1>{escape(str(project_name))}</h1></header>"
+            )
+            overview_start = '<div class="report-meta">' + facts_table
+        elif pdf_width:
+            project_name = context.get("project_name") or self.t("common.unknown")
+            overview_start = (
+                f'<p class="pdf-eyebrow" align="center">{escape(self.t("analysis.report.web_label").upper())}</p>'
+                f'<h1 align="center">{escape(str(project_name))}</h1>'
+                + pdf_frame_marker("meta") + pdf_table.format(padding=5)
+            )
+        else:
+            overview_start = f"<h1 style='text-align:center'>{escape(self.report_title())}</h1>{table_tag}"
+        html = [
+            overview_start,
+            f"<tr>{first_cell}{escape(self.t('analysis.report.data_origin'))}</td><td>{escape(str(context.get('training_data_origin') or self.t('data.origin.unspecified')))}</td></tr>",
+            f"<tr><td>{escape(self.t('analysis.report.created'))}</td><td>{escape(self.report_datetime(datetime.now(), include_seconds=False))}</td></tr>",
+        ]
+        if run:
+            html.append(
+                f"<tr><td>{escape(self.t('analysis.report.active_run'))}</td>"
+                f"<td>{escape(self.t('analysis.report.run', run=run.get('run_id', '–')))}</td></tr>"
+            )
+        html.append("</table></div>" if inline_images else "</table>")
+        description = str(context.get("project_description") or "").strip()
+        if inline_images:
+            if description:
+                html.append(author_html_export.project_description_html(
+                    description, self.t("project_description.title")
+                ))
+            overview = html
+            html = []
+        elif pdf_width:
+            html.append(pdf_gap)
+            if description:
+                intro, inputs, outputs = report_description_parts(description)
+                heading = f"<h2>{escape(self.t('project_description.title'))}</h2>"
+                html.append(pdf_card(heading + intro))
+                if inputs and outputs:
+                    html.append(pdf_pair(inputs, outputs))
+            overview = html
+            html = []
+        elif description:
+            html.extend([
+                f"<h2>{escape(self.t('project_description.title'))}</h2>",
+                f"<div>{description}</div>",
+            ])
+        self.report_export_phase("analysis.report.progress.tables")
+        training_data = self.report_training_data()
+        if training_data is not None:
+            count, (headers, *rows) = training_data
+            columns_table = (
+                '<table class="training-data-table">' if inline_images
+                else pdf_grid.format(padding=4) if pdf_width else "<table>"
+            )
+            html.extend([
+                f"{section_open}<h2>{escape(self.t('training.data.group'))}</h2>",
+                f"<p>{escape(count)}</p>",
+                scroll_open + columns_table + "<thead><tr>",
+                *(f'<th width="{width}%">{escape(label)}</th>'
+                  for label, (_, width) in zip(headers, self.REPORT_TRAINING_COLUMNS)),
+                "</tr></thead><tbody>",
+            ])
+            for row in rows:
+                cells = ("<br>".join(escape(line) for line in value.splitlines()) for value in row)
+                html.append("<tr>" + "".join(f"<td>{cell}</td>" for cell in cells) + "</tr>")
+            html.append("</tbody></table>" + scroll_close + "</div>")
+
+        self.report_export_phase("analysis.report.progress.network")
+        network_image = self.report_network_image(
+            image_width=2100 if pdf_width else 1400,
+            transparent_background=inline_images or bool(pdf_width),
+        )
+        network_title = escape(self.t("analysis.report.network"))
+        network_markup = [
+            f"<h2>{network_title}</h2>",
+            facts_table,
+            f"<tr><td width='29%'>{escape(self.t('project_overview.structure'))}</td><td>{escape(str(context.get('structure','–')))}</td></tr>",
+            f"<tr><td>{escape(self.t('project_overview.neurons'))}</td>{number_cell}{int(context.get('neurons',0))}</td></tr>",
+            f"<tr><td>{escape(self.t('project_overview.connections'))}</td>{number_cell}{int(context.get('connections',0))}</td></tr>",
+            f"<tr><td>{escape(self.t('analysis.report.operations_per_epoch'))}</td>{number_cell}{escape(self.report_operations_per_epoch())}</td></tr>",
+            "</table>",
+        ]
+        network_figure = ""
+        if network_image is not None:
+            network_figure = image_markup(
+                "report:network", network_image, "network-frame", 680,
+                self.t("analysis.report.network"),
+            )
+        if inline_images:
+            if network_figure:
+                network_figure = (
+                    f'<figure class="report-figure network-figure">{network_figure}'
+                    f"<figcaption>{network_title}</figcaption></figure>"
+                )
+            html = [
+                header, *overview, '<div class="section">',
+                *network_markup, network_figure, "</div>", *html,
+            ]
+        elif pdf_width:
+            html = [*overview, section_open, *network_markup, network_figure, "</div>", *html]
+        else:
+            html.extend([section_open, *network_markup, network_figure, "</div>"])
+        if training_history or run:
+            html.append(
+                f"{section_open}<h2 style='text-align:center'>{escape(self.t('analysis.report.training'))}</h2>"
+            )
+        if training_history:
+            header, *history_rows = self.report_history_rows(training_history, active_run_id)
+            history_table = (
+                '<table class="history-table">' if inline_images
+                else pdf_grid.format(padding=4) if pdf_width else "<table>"
+            )
+            cell_style = "" if pdf_width or inline_images else "style='padding:3px;border:1px solid #b7c1cc'"
+            font_size = "8.5pt" if pdf_width else "7pt"
+
+            def history_cell(value):
+                value = escape(value)
+                return value if inline_images else f'<span style="font-size:{font_size}">{value}</span>'
+
+            html.extend([
+                f"<h3 style='text-align:center'>{escape(self.t('analysis.report.training_runs'))}</h3>",
+                scroll_open + history_table + "<thead><tr>",
+                *(f'<th width="{width}%" {cell_style}>{history_cell(title)}</th>'
+                  for title, (_, width) in zip(header, self.REPORT_HISTORY_COLUMNS)),
+                "</tr></thead><tbody>",
+            ])
+            for row in history_rows:
+                html.extend([
+                    "<tr>",
+                    *(f'<td {cell_style}>{history_cell(value)}</td>' for value in row),
+                    "</tr>",
+                ])
+            html.append("</tbody></table>" + scroll_close)
+        if run:
+            initialization = "<br>".join(
+                escape(line) for line in self.report_initialization_lines(run, training_history)
+            )
+            html.extend([
+                "<div style='page-break-inside:avoid'>",
+                f"<h3 style='text-align:center'>{escape(self.t('analysis.report.active_run_details'))}</h3>",
+                facts_table,
+                f"<tr>{first_cell}{escape(self.t('analysis.source.label'))}</td><td>{escape(str(source.get('label') or '–'))}</td></tr>",
+                f"<tr><td>{escape(self.t('analysis.report.data_file'))}</td><td>{escape(str(source.get('file_path') or '–'))}</td></tr>",
+                f"<tr><td>{escape(self.t('analysis.report.date'))}</td><td>{escape(self.report_datetime(run.get('timestamp')))}</td></tr>",
+                f"<tr><td>{escape(self.t('analysis.report.epochs'))}</td>{number_cell}{self.report_integer(run.get('completed_epochs'))}</td></tr>",
+                f"<tr><td>{escape(self.t('analysis.report.duration'))}</td>{number_cell}{self.report_decimal(run.get('elapsed_seconds'), 1)} s</td></tr>",
+                f"<tr><td>{escape(self.t('training.parameters.learning_rate'))}</td>{number_cell}{self.report_decimal(run.get('learning_rate'), 6)}</td></tr>",
+                f"<tr><td>{escape(self.t('training.parameters.momentum'))}</td>{number_cell}{self.report_decimal(run.get('momentum', 0.0), 2)}</td></tr>",
+                f"<tr><td>{escape(self.t('analysis.report.error_limit'))}</td>{number_cell}{self.report_decimal(run.get('error_limit'), 6)}</td></tr>",
+                f"<tr><td>{escape(self.t('analysis.report.requested_epochs'))}</td>{number_cell}{self.report_integer(run.get('requested_epochs'))}</td></tr>",
+                f"<tr><td>{escape(self.t('analysis.report.initialization'))}</td><td>{initialization}</td></tr>",
+                f"<tr><td>{escape(self.t('analysis.report.mode'))}</td><td>{escape(self.t('analysis.report.fast_mode' if run.get('fast_mode') else 'analysis.report.normal_mode'))}</td></tr>",
+                f"<tr><td>{escape(self.t('project_overview.mean_error'))}</td>{number_cell}{self.report_decimal(run.get('end_error'), 6)}</td></tr>",
+                f"<tr><td>{escape(self.t('training.result.maximum_error'))}</td>{number_cell}{self.report_decimal(run.get('maximum_absolute_error'), 6)}</td></tr>",
+                "</table></div>",
+            ])
+        if training_history or run:
+            html.append("</div>")
+
+        for figures in self.report_figure_pages(
+            run, source, result, print_layout=bool(pdf_width),
+        ):
+            if inline_images:
+                layout = " report-pair" if len(figures) == 2 else ""
+                html.append(f'<div class="section figure-page{layout}">')
+                for figure in figures:
+                    label = " · ".join(filter(None, (figure.title, figure.subtitle)))
+                    title, subtitle = figure.headings
+                    html.extend([
+                        '<figure class="report-figure">',
+                        f"<h2>{escape(title)}</h2>",
+                    ])
+                    if subtitle:
+                        html.append(f"<h3>{escape(subtitle)}</h3>")
+                    html.append(image_markup(
+                        f"report:{figure.key}", figure.image, "chart-frame", 660, label,
+                    ))
+                    if figure.caption:
+                        html.append(f"<figcaption>{escape(figure.caption)}</figcaption>")
+                    html.append("</figure>")
+                html.append("</div>")
+                continue
+            html.append("<div class='section figure-page'>")
+            if pdf_width:
+                pair = len(figures) == 2
+                panels = []
+                for figure in figures:
+                    label = " · ".join(filter(None, (figure.title, figure.subtitle)))
+                    if figure.key == "sensitivity_0" and figure.caption:
+                        html.append(pdf_card(
+                            f'<p>{escape(figure.caption)}</p>', keep_with_next=True,
+                        ))
+                    if pair:
+                        width = int(pdf_width * .49) - 16
+                    else:
+                        aspect_ratio = figure.image.width() / figure.image.height()
+                        width = min(pdf_width - 20, round(7.6 * 96 * aspect_ratio))
+                    title = figure.title
+                    if pair and figure.key in {"error_curve", "maximum_error_curve"}:
+                        metric = "mse" if figure.key == "error_curve" else "maximum"
+                        title = self.t(f"training.metric.{metric}")
+                    panel = f"<h3>{escape(title)}</h3>"
+                    if figure.subtitle:
+                        panel += f"<p><strong>{escape(figure.subtitle)}</strong></p>"
+                    panel += pdf_image(f"report:{figure.key}", figure.image, width, label)
+                    if figure.caption and figure.key != "sensitivity_0":
+                        panel += f'<p class="pdf-caption">{escape(figure.caption)}</p>'
+                    panels.append(panel)
+                if pair:
+                    html.append(pdf_pair(*panels, keep_together=True))
+                else:
+                    html.extend(pdf_card(panel, keep_together=True) for panel in panels)
+            else:
+                for figure in figures:
+                    html.append(f'<div class="report-figure" style="--figure-width:{figure.width_inches:.3f}in">')
+                    html.append(f"<h2 style='text-align:center'>{escape(figure.title)}</h2>")
+                    if figure.subtitle:
+                        html.append(f"<h3 style='text-align:center'>{escape(figure.subtitle)}</h3>")
+                    if figure.caption:
+                        html.append(f"<p style='text-align:center'>{escape(figure.caption)}</p>")
+                    label = " · ".join(filter(None, (figure.title, figure.subtitle)))
+                    html.append(image_markup(f"report:{figure.key}", figure.image, "chart-frame", 660, label))
+                    html.append("</div>")
+            html.append("</div>")
+
+        classification = self.report_classification_rows(source, result) if inline_images or pdf_width else []
+        output_notes = classification or list(self.report_output_notes(source, result))
+        if output_notes:
+            title_key = "analysis.report.classification" if classification else "analysis.report.output_results"
+            notes = [f"<h2>{escape(self.t(title_key))}</h2>"]
+            note_alignment = "" if pdf_width else " style='text-align:center'"
+            for label, summary in output_notes:
+                notes.append(f"<h3>{escape(label)}</h3>")
+                notes.append(
+                    f'<p class="classification-score"><strong>{escape(summary)}</strong></p>'
+                    if classification else f"<p{note_alignment}>{escape(summary)}</p>"
+                )
+            if classification:
+                notes.append(f'<p class="note">{escape(self.t("analysis.report.classification_rule"))}</p>')
+            notes_markup = "".join(notes)
+            if pdf_width:
+                notes_markup = pdf_card(notes_markup)
+            elif inline_images:
+                notes_markup = f'<div class="report-result">{notes_markup}</div>'
+            html.extend([section_open, notes_markup, "</div>"])
+        if result["rows"]:
+            deviations_table = (
+                '<table class="deviation-table">' if inline_images
+                else pdf_grid.format(padding=2) if pdf_width else table_tag
+            )
+            html.extend([
+                f"{section_open}<h2>{escape(self.t('analysis.deviations.group'))}</h2>",
+                scroll_open + deviations_table + "<thead><tr>",
+                f"<th>{escape(self.t('analysis.column.record'))}</th>",
+                f"<th>{escape(self.t('analysis.column.output'))}</th>",
+                f"<th>{escape(self.t('analysis.column.target'))}</th>",
+                f"<th>{escape(self.t('analysis.column.actual'))}</th>",
+                f"<th>{escape(self.t('analysis.column.deviation'))}</th></tr></thead><tbody>",
+            ])
+            for row in result["rows"][:20]:
+                target, actual, deviation = self.report_deviation_values(row)
+                html.append(
+                    "<tr>" + "".join(
+                        f"<td>{escape(str(value))}</td>" for value in (
+                            row["record"], row["output"], target, actual, deviation,
+                        )
+                    ) + "</tr>"
+                )
+            html.append("</tbody></table>" + scroll_close)
+            if any(str(row.get("unit") or "").strip() == "%" for row in result["rows"][:20]):
+                html.append(f"<p>{escape(self.t('analysis.report.percentage_note'))}</p>")
+            html.append("</div>")
+        return "\n".join(html), images
+
     def export_pdf_report(self, file_path=None):
         """Erstellt einen kompakten PDF-Bericht des aktiven Trainingsstands."""
-        source = self.current_source()
-        if not source:
-            return
         if not file_path:
             file_path, _ = QFileDialog.getSaveFileName(
                 self,
@@ -2563,240 +3531,82 @@ class ResultAnalysisDialog(QDialog):
         if not file_path.lower().endswith(".pdf"):
             file_path += ".pdf"
 
-        result = self.current_result or self.calculate(source)
-        run = self.report_context.get("training_run") or {}
-        context = self.report_context
-        training_history = [
-            entry for entry in context.get("training_history", [])
-            if isinstance(entry, dict)
-        ]
-        active_run_id = context.get("active_training_run_id", run.get("run_id"))
-        document = QTextDocument()
-        resources = []
-        html = [
-            "<style>body{font-family:sans-serif;font-size:10pt;color:#18212b;}"
-            "h1{color:#17375e;}h2{color:#17375e;border-bottom:1px solid #9fb3c8;page-break-after:avoid;}"
-            ".section{page-break-before:always;}"
-            "table{border-collapse:collapse;width:100%;margin:6px 0 14px 0;page-break-inside:auto;}"
-            "th{background:#17375e;color:white;}td,th{border:1px solid #b7c1cc;padding:5px 5px 5px 7px;vertical-align:middle;}"
-            "tr{page-break-inside:avoid;}thead{display:table-header-group;}"
-            "img{display:block;width:100%;margin:8px 0 0 0;}"
-            ".network-frame{border:1px solid #000;padding:6px;text-align:center;}"
-            ".chart-frame{border:1px solid #000;padding:3px;text-align:center;}"
-            ".network-frame img{margin:auto;max-width:98%;}"
-            ".chart-frame img{margin:auto;max-width:99%;}"
-            ".note{background:#eef4f8;border:1px solid #b9cbd8;padding:7px;}</style>",
-            f"<h1>{escape(self.t('analysis.report.heading'))}</h1><table>",
-            f"<tr><td>{escape(self.t('analysis.report.project').rstrip(':'))}</td><td>{escape(str(context.get('project_name') or '–'))}</td></tr>",
-            f"<tr><td>{escape(self.t('training.data.origin').rstrip(':'))}</td><td>{escape(str(context.get('training_data_origin') or self.t('data.origin.unspecified')))}</td></tr>",
-            f"<tr><td>{escape(self.t('analysis.report.created'))}</td><td>{escape(self.report_datetime(datetime.now(), include_seconds=False))}</td></tr>",
-            f"<tr><td>{escape(self.t('analysis.report.active_run'))}</td><td>{escape(self.t('analysis.report.run', run=run.get('run_id', '–')))}</td></tr></table>",
-        ]
-        description = str(context.get("project_description") or "").strip()
-        if description:
-            html.extend([
-                f"<h2>{escape(self.t('project_description.title'))}</h2>",
-                f"<div>{description}</div>",
-            ])
-        network_image = self.report_network_image()
-        html.extend([
-            f"<div class='section'><h2>{escape(self.t('analysis.report.network'))}</h2>",
-            "<table>",
-            f"<tr><td>{escape(self.t('project_overview.structure'))}</td><td>{escape(str(context.get('structure','–')))}</td></tr>",
-            f"<tr><td>{escape(self.t('project_overview.neurons'))}</td><td>{int(context.get('neurons',0))}</td></tr>",
-            f"<tr><td>{escape(self.t('project_overview.connections'))}</td><td>{int(context.get('connections',0))}</td></tr>",
-            "</table>",
-        ])
-        if network_image is not None:
-            network_url = QUrl("report:network")
-            document.addResource(
-                QTextDocument.ResourceType.ImageResource,
-                network_url,
-                network_image,
-            )
-            resources.append(network_image)
-            html.append('<div class="network-frame"><img src="report:network" width="680" /></div>')
-        html.extend([
-            "</div>",
-            f"<div class='section'><h2 style='text-align:center'>{escape(self.t('analysis.report.training'))}</h2>",
-        ])
-        if training_history:
-            html.extend([
-                f"<h3 style='text-align:center'>{escape(self.t('analysis.report.training_runs'))}</h3>",
-                "<table><thead><tr>",
-                f"<th>{escape(self.t('history.column.run'))}</th>",
-                f"<th>{escape(self.t('history.column.time'))}</th>",
-                f"<th>{escape(self.t('history.column.learning_rate'))}</th>",
-                f"<th>{escape(self.t('history.column.momentum'))}</th>",
-                f"<th>{escape(self.t('history.column.epochs'))}</th>",
-                f"<th>{escape(self.t('history.column.end_error'))}</th>",
-                f"<th>{escape(self.t('history.column.maximum_error'))}</th>",
-                f"<th>{escape(self.t('history.column.duration'))}</th>",
-                "</tr></thead><tbody>",
-            ])
-            for entry in reversed(training_history):
-                run_number = str(entry.get("run_id", "–"))
-                if entry.get("run_id") == active_run_id:
-                    run_number += f" – {self.t('history.active')}"
-                html.extend([
-                    "<tr>",
-                    f"<td>{escape(run_number)}</td>",
-                    f"<td>{escape(self.report_datetime(entry.get('timestamp')))}</td>",
-                    f"<td>{self.report_decimal(entry.get('learning_rate'), 6)}</td>",
-                    f"<td>{self.report_decimal(entry.get('momentum', 0.0), 2)}</td>",
-                    f"<td>{self.report_integer(entry.get('completed_epochs'))}</td>",
-                    f"<td>{self.report_decimal(entry.get('end_error'), 6)}</td>",
-                    f"<td>{self.report_decimal(entry.get('maximum_absolute_error'), 6)}</td>",
-                    f"<td>{self.report_decimal(entry.get('elapsed_seconds'), 1)} s</td>",
-                    "</tr>",
-                ])
-            html.extend(["</tbody></table>"])
-        html.extend([
-            "<div style='page-break-inside:avoid'>",
-            f"<h3 style='text-align:center'>{escape(self.t('analysis.report.active_run_details'))}</h3>",
-            "<table>",
-            f"<tr><td>{escape(self.t('analysis.source.label'))}</td><td>{escape(str(source.get('label') or '–'))}</td></tr>",
-            f"<tr><td>{escape(self.t('analysis.report.data_file'))}</td><td>{escape(str(source.get('file_path') or '–'))}</td></tr>",
-            f"<tr><td>{escape(self.t('analysis.report.date'))}</td><td>{escape(self.report_datetime(run.get('timestamp')))}</td></tr>",
-            f"<tr><td>{escape(self.t('analysis.report.epochs'))}</td><td>{self.report_integer(run.get('completed_epochs'))}</td></tr>",
-            f"<tr><td>{escape(self.t('analysis.report.duration'))}</td><td>{self.report_decimal(run.get('elapsed_seconds'), 1)} s</td></tr>",
-            f"<tr><td>{escape(self.t('training.parameters.learning_rate'))}</td><td>{self.report_decimal(run.get('learning_rate'), 6)}</td></tr>",
-            f"<tr><td>{escape(self.t('training.parameters.momentum'))}</td><td>{self.report_decimal(run.get('momentum', 0.0), 2)}</td></tr>",
-            f"<tr><td>{escape(self.t('analysis.report.error_limit'))}</td><td>{self.report_decimal(run.get('error_limit'), 6)}</td></tr>",
-            f"<tr><td>{escape(self.t('analysis.report.requested_epochs'))}</td><td>{self.report_integer(run.get('requested_epochs'))}</td></tr>",
-            f"<tr><td>{escape(self.t('analysis.report.initialization'))}</td><td>{escape(str(run.get('weight_initialization','–')))} / {escape(str(run.get('bias_initialization','–')))}</td></tr>",
-            f"<tr><td>{escape(self.t('analysis.report.mode'))}</td><td>{escape(self.t('analysis.report.fast_mode' if run.get('fast_mode') else 'analysis.report.normal_mode'))}</td></tr>",
-            f"<tr><td>{escape(self.t('project_overview.mean_error'))}</td><td>{self.report_decimal(run.get('end_error'), 6)}</td></tr>",
-            "</table></div>",
-        ])
-        curve = run.get("curve_points", []) if isinstance(run, dict) else []
-        if curve:
-            logarithmic = self.report_curve_is_logarithmic(curve)
-            scale_text = self.t(
-                "analysis.report.scale_logarithmic" if logarithmic
-                else "analysis.report.scale_linear"
-            )
-            image = self.report_chart_image(
-                curve,
-                axis_label=self.t("history.chart.epoch"),
-                logarithmic=logarithmic,
-            )
-            url = QUrl("report:error_curve")
-            document.addResource(QTextDocument.ResourceType.ImageResource, url, image)
-            resources.append(image)
-            html.extend([
-                "<div style='page-break-inside:avoid'>",
-                f"<h2 style='text-align:center'>{escape(self.t('analysis.report.active_curve'))}</h2>",
-                f"<p style='text-align:center'>{escape(self.t('analysis.report.run', run=run.get('run_id', '–')))} · {escape(self.report_datetime(run.get('timestamp')))} · "
-                f"{escape(self.t('analysis.report.epoch_count', epochs=self.report_integer(run.get('completed_epochs'))))} · {scale_text}</p>",
-                '<div class="chart-frame"><img src="report:error_curve" width="660" /></div>',
-                "</div>",
-            ])
-        html.append("</div>")
+        return self.run_report_export(file_path, self.write_pdf_report)
 
-        html.append(
-            f"<div class='section'><h2 style='text-align:center'>{escape(self.t('analysis.report.output_results'))}</h2>"
+    def write_pdf_report(self, file_path):
+        layout_dpi = 96
+        page_layout = QPageLayout(
+            QPageSize(QPageSize.PageSizeId.A4), QPageLayout.Orientation.Portrait,
+            QMarginsF(16, 16, 16, 16), QPageLayout.Unit.Millimeter,
         )
-        for index, mapping in enumerate(source["outputs"]):
-            rows = [row for row in result["rows"] if row["neuron_id"] == mapping["neuron"].id]
-            key = self.tolerance_key(mapping)
-            if key not in self.tolerances:
-                raw_values = [row["target"] for row in rows]
-                raw_range = max(raw_values) - min(raw_values) if raw_values else 0.0
-                self.tolerances[key] = (
-                    0.0
-                    if mapping.get("data_type") == "binary"
-                    else 5.0
-                    if mapping.get("unit") == "%"
-                    else max(raw_range * 0.05, 0.0)
-                )
-            tolerance = float(self.tolerances[key])
-            outside = sum(row["raw_absolute"] > tolerance for row in rows)
-            if index and index % 3 == 0:
-                html.append("</div><div class='section'>")
-            html.append(
-                f"<h3 style='text-align:center'>{escape(self.report_output_title(mapping))}</h3>"
-            )
-            if mapping.get("data_type") == "binary":
-                correct = sum(not row["binary_error"] for row in rows)
-                summary = self.t(
-                    "analysis.tolerance.binary_summary",
-                    correct=correct,
-                    total=len(rows),
-                    incorrect=len(rows) - correct,
-                )
-            else:
-                summary = self.t(
-                    "analysis.report.tolerance_result",
-                    inside=len(rows) - outside,
-                    total=len(rows),
-                    tolerance=self.display_number(tolerance),
-                    unit=str(mapping.get("unit") or ""),
-                )
-            html.append(f"<p style='text-align:center'>{escape(summary)}</p>")
-            image = self.report_chart_image(
-                [(row["target"], row["actual"]) for row in rows],
-                scatter=True,
-                tolerance=tolerance,
-                axis_label=self.t("analysis.plot.target_axis"),
-                binary=mapping.get("data_type") == "binary",
-                image_width=1400,
-                image_height=450,
-            )
-            url = QUrl(f"report:scatter_{index}")
-            document.addResource(QTextDocument.ResourceType.ImageResource, url, image)
-            resources.append(image)
-            html.append(
-                f'<div class="chart-frame"><img src="report:scatter_{index}" width="660" /></div>'
-            )
+        page = page_layout.paintRectPixels(layout_dpi)
+        markup, images = self.build_report_markup(pdf_width=page.width())
+        self._operation_progress.save(
+            lambda: self.write_pdf_file(file_path, page_layout, layout_dpi, markup, images)
+        )
 
-        html.extend([
-            "</div>",
-            f"<div class='section'><h2>{escape(self.t('analysis.deviations.group'))}</h2>",
-            "<table><thead><tr>",
-            f"<th>{escape(self.t('analysis.column.record'))}</th>",
-            f"<th>{escape(self.t('analysis.column.output'))}</th>",
-            f"<th>{escape(self.t('analysis.column.target'))}</th>",
-            f"<th>{escape(self.t('analysis.column.actual'))}</th>",
-            f"<th>{escape(self.t('analysis.column.deviation'))}</th></tr></thead><tbody>",
-        ])
-        for row in result["rows"][:20]:
-            target, actual, deviation = self.report_deviation_values(row)
-            html.append(
-                "<tr>" + "".join(
-                    f"<td>{escape(str(value))}</td>" for value in (
-                        row["record"], row["output"], target, actual, deviation,
-                    )
-                ) + "</tr>"
-            )
-        html.append("</tbody></table>")
-        if any(str(row.get("unit") or "").strip() == "%" for row in result["rows"][:20]):
-            html.append(f"<p>{escape(self.t('analysis.report.percentage_note'))}</p>")
-        html.append("</div>")
-        document.setHtml("".join(html))
+    @classmethod
+    def write_pdf_file(cls, file_path, page_layout, layout_dpi, markup, images):
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
         printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
         printer.setOutputFileName(file_path)
-        printer.setPageMargins(
-            QMarginsF(14.0, 14.0, 14.0, 14.0),
-            QPageLayout.Unit.Millimeter,
-        )
-        document.setPageSize(
-            printer.pageLayout().paintRect(QPageLayout.Unit.Point).size()
-        )
+        printer.setPageLayout(page_layout)
+        printer.setFontEmbeddingEnabled(True)
+        printer.setResolution(300)
+
+        # Lay out text at a fixed DPI and paint directly to preserve fonts and images.
+        page = page_layout.paintRectPixels(layout_dpi)
+        layout_device = QImage(1, 1, QImage.Format.Format_RGB32)
+        layout_device.setDotsPerMeterX(round(layout_dpi / 0.0254))
+        layout_device.setDotsPerMeterY(round(layout_dpi / 0.0254))
+        document = QTextDocument()
+        document.documentLayout().setPaintDevice(layout_device)
+        document.setDefaultFont(QFont("Segoe UI", 10))
+        document.setDocumentMargin(0)
+        for url, image in images.items():
+            document.addResource(QTextDocument.ResourceType.ImageResource, QUrl(url), image)
+        document.setHtml(f"<style>{cls.PDF_REPORT_CSS}</style>{markup}")
+        document.setPageSize(page.size())
+        frames_by_page = prepare_pdf_frames(document, page.width(), page.height())
+
+        painter = QPainter()
+        if not painter.begin(printer):
+            raise OSError(file_path)
         try:
-            document.print_(printer)
-        except (OSError, RuntimeError) as error:
-            QMessageBox.warning(self, self.t("analysis.report.error_title"), str(error))
+            painter.setRenderHint(QPainter.RenderHint.LosslessImageRendering)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            scale = printer.resolution() / layout_dpi
+            for index, frames in enumerate(frames_by_page):
+                if index and not printer.newPage():
+                    raise OSError(file_path)
+                top = index * page.height()
+                painter.save()
+                painter.scale(scale, scale)
+                painter.translate(0, -top)
+                draw_pdf_frames(painter, frames, background=True)
+                document.drawContents(painter, QRectF(0, top, page.width(), page.height()))
+                draw_pdf_frames(painter, frames, background=False)
+                painter.restore()
+        finally:
+            painter.end()
+
+    def export_html_report(self, file_path):
+        """Speichert einen eigenständigen HTML-Bericht mit eingebetteten Grafiken."""
+        if author_html_export is None:
             return False
-        self.offer_open_report(file_path)
-        return True
+        return self.run_report_export(file_path, self.write_html_report)
+
+    def write_html_report(self, file_path):
+        if author_html_export is None:
+            return
+        markup, _ = self.build_report_markup(inline_images=True)
+        document = author_html_export.project_report_html(
+            self.language.current_language, self.report_title(), markup
+        )
+        self._operation_progress.save(lambda: author_html_export.write_html_file(file_path, document))
 
     def export_word_report(self, file_path=None):
         """Erstellt einen bearbeitbaren Word-Bericht im DOCX-Format."""
-        source = self.current_source()
-        if not source:
-            return
         if not file_path:
             file_path, _ = QFileDialog.getSaveFileName(
                 self,
@@ -2808,8 +3618,11 @@ class ResultAnalysisDialog(QDialog):
             return
         if not file_path.lower().endswith(".docx"):
             file_path += ".docx"
+        return self.run_report_export(file_path, self.write_word_report)
 
-        result = self.current_result or self.calculate(source)
+    def write_word_report(self, file_path):
+        source = self.current_source() or {}
+        result = (self.current_result or self.calculate(source)) if source else {"rows": []}
         run = self.report_context.get("training_run") or {}
         context = self.report_context
         training_history = [
@@ -2817,210 +3630,167 @@ class ResultAnalysisDialog(QDialog):
             if isinstance(entry, dict)
         ]
         active_run_id = context.get("active_training_run_id", run.get("run_id"))
-        report_title = self.t("analysis.report.heading")
+        report_title = self.report_title()
         report = DocxReport(report_title)
-        report.heading(report_title, 1)
-        report.table([
-            [self.t("analysis.report.project").rstrip(":"), context.get("project_name") or "–"],
-            [self.t("training.data.origin").rstrip(":"), context.get("training_data_origin") or self.t("data.origin.unspecified")],
+        report.paragraph(self.t("analysis.report.web_label").upper(), style="ReportLabel",
+                         centered=True, keep_next=True)
+        report.paragraph(context.get("project_name") or self.t("common.unknown"),
+                         style="Title", centered=True, keep_next=True)
+        header_rows = [
+            [self.t("analysis.report.data_origin"), context.get("training_data_origin") or self.t("data.origin.unspecified")],
             [self.t("analysis.report.created"), self.report_datetime(datetime.now(), include_seconds=False)],
-            [self.t("analysis.report.active_run"), self.t("analysis.report.run", run=run.get("run_id", "–"))],
-        ], widths=[2, 5], keep_together=True)
+        ]
+        if run:
+            header_rows.append([
+                self.t("analysis.report.active_run"),
+                self.t("analysis.report.run", run=run.get("run_id", "–")),
+            ])
+        report.table(header_rows, widths=[2, 5], keep_together=True, shaded=True)
         description = str(context.get("project_description") or "").strip()
         if description:
-            report.heading(self.t("project_description.title"), 2)
-            report.formatted_html(description)
+            intro, inputs, outputs = report_description_parts(description)
 
-        report.page_break()
+            def write_description():
+                report.heading(self.t("project_description.title"), 2)
+                report.formatted_html(intro)
+
+            report.panels(write_description)
+            if inputs and outputs:
+                report.panels(
+                    lambda: report.formatted_html(inputs),
+                    lambda: report.formatted_html(outputs),
+                )
+
+        self.report_export_phase("analysis.report.progress.tables")
+        training_data = self.report_training_data()
+        if training_data is not None:
+            count, rows = training_data
+            report.heading(self.t("training.data.group"), 1)
+            report.paragraph(count, keep_next=True)
+            report.table(
+                rows, widths=[width for _, width in self.REPORT_TRAINING_COLUMNS],
+                header=True,
+            )
+
         report.heading(self.t("analysis.report.network"), 1)
         report.table([
             [self.t("project_overview.structure"), context.get("structure", "–")],
             [self.t("project_overview.neurons"), context.get("neurons", 0)],
             [self.t("project_overview.connections"), context.get("connections", 0)],
+            [self.t("analysis.report.operations_per_epoch"), self.report_operations_per_epoch()],
         ], widths=[2, 5])
-        network_image = self.report_network_image()
+        self.report_export_phase("analysis.report.progress.network")
+        network_image = self.report_network_image(transparent_background=True)
         if network_image is not None:
-            report.image(
-                self.image_png_bytes(network_image),
-                network_image.width(),
-                network_image.height(),
-                width_inches=6.75,
-                framed=True,
-                frame_padding_twips=70,
-            )
+            def write_network():
+                report.image(
+                    self.image_png_bytes(network_image), network_image.width(), network_image.height(),
+                    width_inches=min(report.panel_image_width(), 7.6 * network_image.width() / network_image.height()),
+                    alt_text=self.t("analysis.report.network"),
+                )
 
-        report.page_break()
-        report.heading(self.t("analysis.report.training"), 1, centered=True)
+            report.panels(write_network, keep_together=True)
+
+        if training_history or run:
+            report.heading(self.t("analysis.report.training"))
         if training_history:
             report.heading(
-                self.t("analysis.report.training_runs"), 2, centered=True
+                self.t("analysis.report.training_runs"), 2
             )
-            history_rows = [[
-                self.t("history.column.run"),
-                self.t("history.column.time"),
-                self.t("history.column.learning_rate"),
-                self.t("history.column.momentum"),
-                self.t("history.column.epochs"),
-                self.t("history.column.end_error"),
-                self.t("history.column.maximum_error"),
-                self.t("history.column.duration"),
-            ]]
-            for entry in reversed(training_history):
-                run_number = str(entry.get("run_id", "–"))
-                if entry.get("run_id") == active_run_id:
-                    run_number += f" – {self.t('history.active')}"
-                history_rows.append([
-                    run_number,
-                    self.report_datetime(entry.get("timestamp")),
-                    self.report_decimal(entry.get("learning_rate"), 6),
-                    self.report_decimal(entry.get("momentum", 0.0), 2),
-                    self.report_integer(entry.get("completed_epochs")),
-                    self.report_decimal(entry.get("end_error"), 6),
-                    self.report_decimal(entry.get("maximum_absolute_error"), 6),
-                    f"{self.report_decimal(entry.get('elapsed_seconds'), 1)} s",
-                ])
             report.table(
-                history_rows,
-                widths=[0.7, 1.5, 0.9, 0.8, 0.8, 0.9, 1.0, 0.8],
+                self.report_history_rows(training_history, active_run_id),
+                widths=[width for _, width in self.REPORT_HISTORY_COLUMNS],
                 header=True,
+                font_points=8.5,
             )
-            report.spacer(8)
-        report.heading(
-            self.t("analysis.report.active_run_details"), 2, centered=True
-        )
-        report.table([
-            [self.t("analysis.source.label"), source.get("label") or "–"],
-            [self.t("analysis.report.data_file"), source.get("file_path") or "–"],
-            [self.t("analysis.report.date"), self.report_datetime(run.get("timestamp"))],
-            [self.t("analysis.report.epochs"), self.report_integer(run.get("completed_epochs"))],
-            [self.t("analysis.report.duration"), f"{self.report_decimal(run.get('elapsed_seconds'), 1)} s"],
-            [self.t("training.parameters.learning_rate"), self.report_decimal(run.get("learning_rate"), 6)],
-            [self.t("training.parameters.momentum"), self.report_decimal(run.get("momentum", 0.0), 2)],
-            [self.t("analysis.report.error_limit"), self.report_decimal(run.get("error_limit"), 6)],
-            [self.t("analysis.report.requested_epochs"), self.report_integer(run.get("requested_epochs"))],
-            [self.t("analysis.report.initialization"),
-             f"{run.get('weight_initialization', '–')} / {run.get('bias_initialization', '–')}"],
-            [self.t("analysis.report.mode"),
-             self.t("analysis.report.fast_mode" if run.get("fast_mode") else "analysis.report.normal_mode")],
-            [self.t("project_overview.mean_error"), self.report_decimal(run.get("end_error"), 6)],
-        ], widths=[2, 5], keep_together=True)
-        report.spacer(10)
+        if run:
+            report.heading(
+                self.t("analysis.report.active_run_details"), 2
+            )
+            report.table([
+                [self.t("analysis.source.label"), source.get("label") or "–"],
+                [self.t("analysis.report.data_file"), source.get("file_path") or "–"],
+                [self.t("analysis.report.date"), self.report_datetime(run.get("timestamp"))],
+                [self.t("analysis.report.epochs"), self.report_integer(run.get("completed_epochs"))],
+                [self.t("analysis.report.duration"), f"{self.report_decimal(run.get('elapsed_seconds'), 1)} s"],
+                [self.t("training.parameters.learning_rate"), self.report_decimal(run.get("learning_rate"), 6)],
+                [self.t("training.parameters.momentum"), self.report_decimal(run.get("momentum", 0.0), 2)],
+                [self.t("analysis.report.error_limit"), self.report_decimal(run.get("error_limit"), 6)],
+                [self.t("analysis.report.requested_epochs"), self.report_integer(run.get("requested_epochs"))],
+                [self.t("analysis.report.initialization"),
+                 "\n".join(self.report_initialization_lines(run, training_history))],
+                [self.t("analysis.report.mode"),
+                 self.t("analysis.report.fast_mode" if run.get("fast_mode") else "analysis.report.normal_mode")],
+                [self.t("project_overview.mean_error"), self.report_decimal(run.get("end_error"), 6)],
+                [self.t("training.result.maximum_error"), self.report_decimal(run.get("maximum_absolute_error"), 6)],
+            ], widths=[2, 5], keep_together=True)
 
-        curve = run.get("curve_points", []) if isinstance(run, dict) else []
-        if curve:
-            logarithmic = self.report_curve_is_logarithmic(curve)
-            scale_text = self.t(
-                "analysis.report.scale_logarithmic" if logarithmic
-                else "analysis.report.scale_linear"
+        def write_figure(figure, column_count):
+            title, subtitle = figure.headings
+            report.heading(title, 2)
+            if subtitle:
+                report.paragraph(subtitle, bold=True, keep_next=True)
+            image = figure.image
+            width_inches = min(
+                report.panel_image_width(column_count),
+                7.6 * image.width() / image.height(),
             )
-            report.heading(self.t("analysis.report.active_curve"), 2, centered=True)
-            report.paragraph(
-                f"{self.t('analysis.report.run', run=run.get('run_id', '–'))} · "
-                f"{self.report_datetime(run.get('timestamp'))} · "
-                f"{self.t('analysis.report.epoch_count', epochs=self.report_integer(run.get('completed_epochs')))} · {scale_text}",
-                centered=True,
-                keep_next=True,
-            )
-            curve_image = self.report_chart_image(
-                curve,
-                axis_label=self.t("history.chart.epoch"),
-                logarithmic=logarithmic,
-            )
+            # Keep the six-point corner radius consistent at both column widths.
+            corner_radius = 6 * image.width() / (72 * width_inches)
             report.image(
-                self.image_png_bytes(curve_image),
-                curve_image.width(),
-                curve_image.height(),
-                width_inches=6.75,
-                framed=True,
-                frame_padding_twips=60,
+                self.image_png_bytes(image, corner_radius=corner_radius),
+                image.width(), image.height(),
+                width_inches=width_inches,
+                alt_text=" · ".join(filter(None, (figure.title, figure.subtitle))),
+            )
+            if figure.caption and figure.key != "sensitivity_0":
+                report.paragraph(figure.caption, style="ReportCaption")
+
+        for figures in self.report_figure_pages(run, source, result, print_layout=True):
+            first = figures[0]
+            if first.key == "sensitivity_0" and first.caption:
+                report.panels(
+                    lambda: report.paragraph(first.caption, keep_next=True),
+                    keep_together=True, keep_with_next=True,
+                )
+            report.panels(
+                *(lambda figure=figure: write_figure(figure, len(figures)) for figure in figures),
+                keep_together=True,
             )
 
-        for output_index, mapping in enumerate(source["outputs"]):
-            rows = [
-                row for row in result["rows"]
-                if row["neuron_id"] == mapping["neuron"].id
-            ]
-            key = self.tolerance_key(mapping)
-            if key not in self.tolerances:
-                raw_values = [row["target"] for row in rows]
-                raw_range = max(raw_values) - min(raw_values) if raw_values else 0.0
-                self.tolerances[key] = (
-                    0.0
-                    if mapping.get("data_type") == "binary"
-                    else 5.0
-                    if mapping.get("unit") == "%"
-                    else max(raw_range * 0.05, 0.0)
-                )
-            tolerance = float(self.tolerances.get(key, 0.0))
-            outside = sum(row["raw_absolute"] > tolerance for row in rows)
-            if output_index % 3 == 0:
-                report.page_break()
-                report.heading(
-                    self.t("analysis.report.output_results"), 1, centered=True
-                )
-            report.heading(self.report_output_title(mapping), 2, centered=True)
-            if not rows:
-                report.paragraph(self.t("analysis.report.no_output_data"))
-                continue
-            if mapping.get("data_type") == "binary":
-                correct = sum(not row["binary_error"] for row in rows)
-                summary = self.t(
-                    "analysis.tolerance.binary_summary",
-                    correct=correct,
-                    total=len(rows),
-                    incorrect=len(rows) - correct,
-                )
-            else:
-                summary = self.t(
-                    "analysis.report.tolerance_result",
-                    inside=len(rows) - outside,
-                    total=len(rows),
-                    tolerance=self.display_number(tolerance),
-                    unit=str(mapping.get("unit") or ""),
-                )
-            report.paragraph(summary, centered=True, keep_next=True)
-            chart = self.report_chart_image(
-                [(row["target"], row["actual"]) for row in rows],
-                scatter=True,
-                tolerance=tolerance,
-                axis_label=self.t("analysis.plot.target_axis"),
-                binary=mapping.get("data_type") == "binary",
-                image_width=1400,
-                image_height=450,
-            )
-            report.image(
-                self.image_png_bytes(chart),
-                chart.width(),
-                chart.height(),
-                width_inches=6.75,
-                framed=True,
-                frame_padding_twips=60,
-            )
+        classification = self.report_classification_rows(source, result)
+        output_notes = classification or list(self.report_output_notes(source, result))
+        if output_notes:
+            title_key = "analysis.report.classification" if classification else "analysis.report.output_results"
+            report.heading(self.t(title_key))
 
-        report.page_break()
-        report.heading(self.t("analysis.deviations.group"), 1)
-        deviation_rows = [[
-            self.t("analysis.column.record"),
-            self.t("analysis.column.output"),
-            self.t("analysis.column.target"),
-            self.t("analysis.column.actual"),
-            self.t("analysis.column.deviation"),
-        ]]
-        for row in result["rows"][:20]:
-            target, actual, deviation = self.report_deviation_values(row)
-            deviation_rows.append([
-                row["record"], row["output"], target, actual, deviation,
-            ])
-        report.table(deviation_rows, widths=[1, 2, 1.2, 1.2, 1.4], header=True)
-        if any(str(row.get("unit") or "").strip() == "%" for row in result["rows"][:20]):
-            report.paragraph(self.t("analysis.report.percentage_note"))
-        try:
-            report.save(file_path)
-        except (OSError, RuntimeError, ValueError) as error:
-            QMessageBox.warning(self, self.t("analysis.report.error_title"), str(error))
-            return False
-        self.offer_open_report(file_path)
-        return True
+            def write_output_notes():
+                for title, summary in output_notes:
+                    report.paragraph(title, bold=True, keep_next=True)
+                    report.paragraph(summary)
+                if classification:
+                    report.paragraph(self.t("analysis.report.classification_rule"), style="ReportCaption")
+
+            report.panels(write_output_notes)
+
+        if result["rows"]:
+            report.heading(self.t("analysis.deviations.group"), 1)
+            deviation_rows = [[
+                self.t("analysis.column.record"),
+                self.t("analysis.column.output"),
+                self.t("analysis.column.target"),
+                self.t("analysis.column.actual"),
+                self.t("analysis.column.deviation"),
+            ]]
+            for row in result["rows"][:20]:
+                target, actual, deviation = self.report_deviation_values(row)
+                deviation_rows.append([
+                    row["record"], row["output"], target, actual, deviation,
+                ])
+            report.table(deviation_rows, widths=[1, 2, 1.2, 1.2, 1.4], header=True)
+            if any(str(row.get("unit") or "").strip() == "%" for row in result["rows"][:20]):
+                report.paragraph(self.t("analysis.report.percentage_note"))
+        self._operation_progress.save(lambda: report.save(file_path))
 
     @staticmethod
     def table_item(value, numeric=False):

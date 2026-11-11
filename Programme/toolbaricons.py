@@ -150,6 +150,10 @@ class ToolbarIcons:
             <path d="M18 4H7l5 8-5 8h11"/>
             <path d="M4 6h3M4 12h5M4 18h3" class="accent"/>
         """,
+        "training_protocol": """
+            <path d="M5 3h10l4 4v14H5z"/><path d="M15 3v5h4"/>
+            <path d="M8 11h8M8 15h8M8 18h5" class="accent"/>
+        """,
         "history": """
             <path d="M4 19V5M4 19h17"/>
             <path d="M7 16l4-5 3 2 6-7" class="accent"/>

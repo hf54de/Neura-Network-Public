@@ -498,7 +498,7 @@ class AutomaticScalingPreviewTests(unittest.TestCase):
         doc["columns"][0]["calibration"] = dict(mode="standard", source_min=0., source_max=120., mean=60., stddev=12.)
         return TrainingDataDialog(net, doc, language_manager=language(code))
 
-    def execute_preview(self, editor, code, accept, selections=None, bounds=None):
+    def execute_preview(self, editor, code, accept, selections=None, bounds=None, steps=None):
         from trainingdatadialog import AutomaticScalingPreviewDialog
         from PySide6.QtCore import QTimer
         from PySide6.QtWidgets import QDialogButtonBox
@@ -512,7 +512,7 @@ class AutomaticScalingPreviewTests(unittest.TestCase):
                 self.assertIsInstance(preview, AutomaticScalingPreviewDialog)
                 self.assertEqual(editor.document, before)
                 self.assertEqual(editor._edit_history, history)
-                self.assertEqual(preview.table.columnCount(), 5)
+                self.assertEqual(preview.table.columnCount(), 6)
                 self.assertEqual(preview.table.item(0, 0).text(), "Position")
                 self.assertEqual(preview.table.item(0, 1).text(), "Input")
                 self.assertEqual(preview.table.item(0, 2).text(), "0")
@@ -529,6 +529,11 @@ class AutomaticScalingPreviewTests(unittest.TestCase):
                     self.assertEqual(combo.count(), 4)
                     combo.setCurrentIndex(combo.findData(mode))
                     self.assertEqual(combo.currentData(), mode)
+                self.assertEqual(set(preview.step_spins), {0})
+                self.assertEqual(preview.selected_steps(), {0: 120.})
+                self.assertEqual(preview.table.item(1, 5).text(), "—")
+                for row, step in (steps or {}).items():
+                    preview.step_spins[row].setValue(step)
                 for row, limits in (bounds or {}).items():
                     for column, value in zip((2, 3), limits):
                         preview.table.item(row, column).setText(str(value))
@@ -558,7 +563,7 @@ class AutomaticScalingPreviewTests(unittest.TestCase):
                 before = deepcopy(editor.document)
                 modified, index = editor.modified, editor._edit_history_index
                 history = deepcopy(editor._edit_history)
-                self.execute_preview(editor, code, False, {0: "none", 1: "standard"}, {0: ("bad", "0")})
+                self.execute_preview(editor, code, False, {0: "none", 1: "standard"}, {0: ("bad", "0")}, steps={0:.1})
                 self.assertEqual(editor.document, before)
                 self.assertEqual(editor.modified, modified)
                 self.assertEqual(editor._edit_history_index, index)
@@ -582,6 +587,23 @@ class AutomaticScalingPreviewTests(unittest.TestCase):
                 self.assertEqual(editor.document["records"], records)
                 self.assertTrue(editor.modified)
                 self.assertFalse(editor.automatic_scaling_status_label.isHidden())
+            finally:
+                self.dispose(editor)
+
+    def test_step_suggestion_override_clear_and_unchanged_calibration(self):
+        for code in ("de", "en"):
+            editor = self.make_dialog(code)
+            try:
+                self.execute_preview(editor, code, True, steps={0: .1})
+                self.assertEqual(editor.document["columns"][0]["input_step"], .1)
+                self.assertNotIn("input_step", editor.document["columns"][1])
+                editor.modified = False
+                self.execute_preview(editor, code, True, steps={0: .5})
+                self.assertTrue(editor.modified)
+                self.assertEqual(editor.document["columns"][0]["input_step"], .5)
+                self.execute_preview(editor, code, True, steps={0: 0})
+                self.assertNotIn("input_step", editor.document["columns"][0])
+                self.assertEqual(editor.document["records"], [[0., .5], [120., 4.5]])
             finally:
                 self.dispose(editor)
 
@@ -665,7 +687,7 @@ class AutomaticScalingPreviewTests(unittest.TestCase):
             try:
                 self.assertTrue(short.table.item(0, 2).flags() & Qt.ItemFlag.ItemIsEditable)
                 self.assertFalse(short.table.item(0, 0).flags() & Qt.ItemFlag.ItemIsEditable)
-                self.assertLess(short.width(), 600)
+                self.assertLess(short.width(), 700)
                 self.assertGreater(long.width(), short.width())
                 self.assertLessEqual(long.width(), long.screen().availableGeometry().width()-40)
                 self.assertEqual(long.table.item(0, 0).toolTip(), name)

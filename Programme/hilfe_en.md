@@ -351,6 +351,8 @@ Use **Network → Arrange** to rearrange an existing network without changing we
 
 Open the table with **Training Data → Edit Training Data**. Each row is a record; each column belongs to an input or an output/target.
 
+In the author edition, **Save as HTML** exports the displayed table with all rows as a self-contained `.htm` file. Open it in a browser or embed it in a web page using an iframe.
+
 At the upper right, **Training data origin** identifies how the values were obtained: empirical measurement data, formula-generated data, simulation data, mixed data, or not specified. New and older files initially use **Not specified**. The selection is stored in the `.nndata` file and shown in the Training window and training reports.
 
 Data can be:
@@ -443,6 +445,8 @@ For supported networks, the slider changes the input value. The blue network cha
 Targets are linearly interpolated between neighboring matching analog target points. These targets and deviations from them are explicitly labeled as estimates. No extrapolation is performed outside the available target points. Binary values and conflicting targets at interpolation boundaries are not interpolated. If no target is available, no error segment is shown.
 
 # 22. Exploring the Network
+
+In the author edition, **Save as HTML** exports the Explore view as a self-contained web page. Changing an input or slider recalculates the outputs in the browser. The file can be embedded in an iframe.
 
 The experiment window changes external input values in their original units and immediately performs a forward calculation.
 
@@ -556,7 +560,7 @@ Relative references inside a structured project folder make the complete project
 
 **Check Network…** displays structure, data assignment, and any findings in a modal check window. A recheck button is unnecessary there because the project cannot change while the window is open. After editing the project, open the check again from the Network menu.
 
-The project report can be exported as a Word or PDF document. Language and file format follow the selected settings or save dialog.
+The project report can be exported as a Word or PDF document. The author edition also offers HTML. Language and file format follow the selected settings or save dialog.
 
 # 29. Example Projects and Project Assistant
 

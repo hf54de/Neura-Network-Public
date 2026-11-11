@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QComboBox,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -73,6 +74,8 @@ class TrainingHistoryChart(ChartColors, QWidget):
         self.language = language_manager or LanguageManager()
         self.t = self.language.text
         self.runs = []
+        self.all_runs = []
+        self.attach_continuations = True
         self.error_metric = "mse"
         self.scale_mode = "linear"
         self.view_bounds = None
@@ -84,9 +87,42 @@ class TrainingHistoryChart(ChartColors, QWidget):
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
 
-    def set_runs(self, runs):
+    def set_runs(self, runs, history=None):
         self.runs = list(runs)
+        self.all_runs = list(history) if history is not None else self.runs
         self.reset_view()
+
+    def prepared_runs(self):
+        """Offset linked runs for display only; preserve original epoch/error data."""
+        key = metric_curve_key(self.error_metric)
+        by_id = {r["run_id"]:r for r in self.all_runs}
+        selected = {r["run_id"] for r in self.runs}
+        def offset(run):
+            total = 0
+            seen = {run["run_id"]}
+            parent = run.get("parent_run_id")
+            while parent in by_id:
+                if parent in seen:return 0
+                seen.add(parent)
+                ancestor = by_id[parent]
+                total += max(0,int(ancestor.get("completed_epochs",0)))
+                parent = ancestor.get("parent_run_id")
+            return total
+        result = []
+        for run in self.runs:
+            points = run.get(key)
+            if not isinstance(points,list) or not points:
+                continue
+            points = list(points)
+            if self.attach_continuations:
+                shift = offset(run)
+                points = [(epoch+shift,value) for epoch,value in points]
+                parent = by_id.get(run.get("parent_run_id"))
+                if parent and parent["run_id"] in selected and parent.get(key):
+                    boundary = shift,parent[key][-1][1]
+                    if points[0][0] > shift:points.insert(0,boundary)
+            result.append(dict(run,curve_points=points))
+        return result
 
     def set_scale_mode(self, scale_mode):
         if scale_mode not in {"linear", "logarithmic"}:
@@ -262,12 +298,7 @@ class TrainingHistoryChart(ChartColors, QWidget):
         if plot_rect.width() <= 20.0 or plot_rect.height() <= 20.0:
             return
 
-        valid_runs = [
-            dict(run, curve_points=run.get(metric_curve_key(self.error_metric), []))
-            for run in self.runs
-            if isinstance(run.get(metric_curve_key(self.error_metric)), list)
-            and run[metric_curve_key(self.error_metric)]
-        ]
+        valid_runs = self.prepared_runs()
 
         painter.setPen(self.chart_color(38, 52, 66))
         painter.drawText(
@@ -593,7 +624,7 @@ class TrainingHistoryDialog(QDialog):
         self.table.itemSelectionChanged.connect(
             self.update_chart_selection
         )
-        main_layout.addWidget(self.table, 1)
+        main_layout.addWidget(self.table, 0)
 
         chart_controls = QHBoxLayout()
         self.metric_combo = QComboBox()
@@ -611,6 +642,9 @@ class TrainingHistoryDialog(QDialog):
         chart_controls.addWidget(self.scale_combo)
         self.full_range_button = QPushButton(self.t("history.full_range"))
         chart_controls.addWidget(self.full_range_button)
+        self.attach_continuations = QCheckBox(self.t("history.attach_continuations"))
+        self.attach_continuations.setChecked(True)
+        chart_controls.addWidget(self.attach_continuations)
         chart_controls.addStretch(1)
         self.info_button = QPushButton("i")
         self.info_button.setFixedSize(26, 24)
@@ -622,6 +656,7 @@ class TrainingHistoryDialog(QDialog):
         main_layout.addLayout(chart_controls)
 
         self.chart = TrainingHistoryChart(language_manager=self.language)
+        self.attach_continuations.toggled.connect(self.update_continuation_display)
         self.metric_combo.currentIndexChanged.connect(self.update_chart_metric)
         self.scale_combo.currentIndexChanged.connect(
             self.update_chart_scale
@@ -795,6 +830,14 @@ class TrainingHistoryDialog(QDialog):
 
                 self.table.setItem(row, column, item)
 
+        # Keep the list compact; additional window height belongs to the chart.
+        visible_rows = min(6, max(1, self.table.rowCount()))
+        row_height = sum(self.table.rowHeight(row) for row in range(min(visible_rows, self.table.rowCount())))
+        if not self.table.rowCount():
+            row_height = self.table.verticalHeader().defaultSectionSize()
+        self.table.setFixedHeight(
+            self.table.horizontalHeader().height() + row_height
+            + 2*self.table.frameWidth() + self.table.horizontalScrollBar().sizeHint().height())
         has_entries = bool(self.training_history)
         self.export_button.setEnabled(has_entries)
         self.delete_button.setEnabled(has_entries)
@@ -852,6 +895,20 @@ class TrainingHistoryDialog(QDialog):
             for index in self.table.selectionModel().selectedRows()
         }
 
+    @staticmethod
+    def compatible_weight_trajectories(runs):
+        def signature(run):
+            trace = run.get("weight_trajectory")
+            state = run.get("network_state") or run.get("initial_network_state")
+            if not trace or not trace.get("points") or not state:
+                return None
+            pair = tuple((c["id"],c["source"],c["target"]) for c in trace["connections"])
+            nodes = tuple(sorted((n["id"],n.get("activation")) for n in state["neurons"]))
+            edges = tuple(sorted((c["id"],c["source"],c["target"]) for c in state["connections"]))
+            return pair,nodes,edges
+        first = signature(runs[0])
+        return first is not None and first == signature(runs[1])
+
     def update_chart_selection(self):
         selected_ids = self.selected_run_ids()
         selected_runs = [
@@ -864,6 +921,7 @@ class TrainingHistoryDialog(QDialog):
         self.characteristic_view.setVisible(characteristic)
         self.chart.setVisible(not trajectory and not characteristic)
         self.weight_trajectory_plot.setVisible(trajectory)
+        self.attach_continuations.setVisible(not characteristic)
         self.scale_label.setVisible(not trajectory and not characteristic)
         self.scale_combo.setVisible(not trajectory and not characteristic)
         self.full_range_button.setVisible(True)
@@ -874,10 +932,23 @@ class TrainingHistoryDialog(QDialog):
                 run = selected_runs[0]
                 self.weight_trajectory_plot.set_trajectory(run.get("weight_trajectory"), self.t("trajectory.run",
                     run=run["run_id"], solver=self.t("adam.solver." + run.get("solver", "sgd"))))
+            elif len(selected_runs) == 2:
+                if self.compatible_weight_trajectories(selected_runs):
+                    ordered = list(selected_runs)
+                    joined = False
+                    if self.attach_continuations.isChecked():
+                        if ordered[0].get("parent_run_id") == ordered[1]["run_id"]:
+                            ordered.reverse()
+                        joined = ordered[1].get("parent_run_id") == ordered[0]["run_id"]
+                    self.weight_trajectory_plot.set_comparison([
+                        (self.t("trajectory.run",run=r["run_id"],solver=self.t("adam.solver."+r.get("solver","sgd"))),
+                         r["weight_trajectory"]) for r in ordered], joined=joined)
+                else:
+                    self.weight_trajectory_plot.set_trajectory(None,message=self.t("trajectory.incompatible"))
             else:
-                self.weight_trajectory_plot.set_trajectory(None, message=self.t("trajectory.select_one"))
+                self.weight_trajectory_plot.set_trajectory(None, message=self.t("trajectory.select_two"))
         else:
-            self.chart.set_runs(selected_runs)
+            self.chart.set_runs(selected_runs, self.training_history)
         by_id = {entry["run_id"]: entry for entry in self.training_history}
         for row in range(self.table.rowCount()):
             item = self.table.item(row, 0)
@@ -898,6 +969,12 @@ class TrainingHistoryDialog(QDialog):
             len(selected_ids) == 1
             and next(iter(selected_ids), None) in self.restorable_run_ids
         )
+
+    def update_continuation_display(self, checked):
+        self.chart.attach_continuations = checked
+        self.chart.reset_view()
+        if self.metric_combo.currentData() == "trajectory":
+            self.update_chart_selection()
 
     def update_chart_metric(self, index=None):
         metric = self.metric_combo.currentData() or "mse"

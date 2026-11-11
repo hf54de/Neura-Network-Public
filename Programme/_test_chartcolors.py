@@ -29,6 +29,34 @@ class ChartColorTests(unittest.TestCase):
                 self.assertGreaterEqual(contrast(plot.chart_color(color),QColor(bg)),4.45)
         plot.deleteLater();application.deleteLater()
 
+    def test_analysis_characteristic_uses_chart_background(self):
+        from resultanalysisdialog import ResultAnalysisDialog
+        from _test_review_fixes import network
+        from PySide6.QtCore import QEvent
+        dialog = ResultAnalysisDialog(network("de"), [], language_manager=language("de"))
+        try:
+            plot = dialog.characteristic_plot
+            plot.resize(640, 400)
+            plot.set_data([(0., 0.), (1., 1.)], [(0., 0.), (1., 1.)])
+            for bg in ("#303030", "#fff2cc", "#ffffff"):
+                set_chart_background(bg)
+                self.assertTrue(plot.chart_colors_enabled)
+                self.assertEqual(plot.chart_color("#ffffff"), QColor(bg))
+                for color in ("#1676b8", "#e05829", "#f4c430", "#243746"):
+                    if bg != "#ffffff":
+                        self.assertGreaterEqual(contrast(plot.chart_color(color), QColor(bg)), 4.45)
+                image = plot.grab().toImage()
+                rect = plot.plot_rect()
+                samples = [image.pixelColor(int(rect.left()+rect.width()*x/20),
+                                            int(rect.top()+rect.height()*y/20))
+                           for x in range(1, 20) for y in range(1, 20)]
+                self.assertGreater(sum(color == QColor(bg) for color in samples), len(samples)//2)
+        finally:
+            APP.processEvents()
+            dialog.deleteLater()
+            APP.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+            APP.processEvents()
+
     def test_settings_reset_save_profile(self):
         defaults=Settings.default_ui_settings();project=ProjectIO.default_display_settings()
         dialog=SettingsDialog(project,project,defaults,defaults,language('de'),initial_page='colors')

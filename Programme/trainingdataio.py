@@ -827,6 +827,13 @@ class TrainingDataIO:
                 )
             )
 
+        step = column.get("input_step")
+        if step is not None and (isinstance(step, bool) or not isinstance(step, (int, float))
+                                 or not math.isfinite(step) or step <= 0):
+            raise ValueError(cls.translated(translator, "data.validation.input_step",
+                                           "Spalte {column} enthält eine ungültige Schrittweite.",
+                                           column=column_index))
+
         calibration = column.get(
             "calibration"
         )

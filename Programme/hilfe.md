@@ -1959,6 +1959,8 @@ Der Debugger eignet sich besonders zur Fehlersuche bei Netzen, die nicht lernen.
 
 # 23. Netzwerk erproben
 
+In der Autorenfassung exportiert **Speichern als HTML** die Erproben-Ansicht als eigenständige Webseite. Die Eingaben und Regler berechnen die Ausgaben im Browser neu. Die Datei lässt sich in einem Iframe einbinden.
+
 Der Menüpunkt befindet sich unter:
 
 **Netzwerk → Netzwerk erproben...**
@@ -2406,8 +2408,11 @@ Im Trainingsdateneditor stehen zur Verfügung:
 - Öffnen
 - Speichern
 - Speichern unter
+- Speichern als HTML (Autorenfassung)
 
 Die Trainingsdatendatei wird mit dem Projekt verknüpft.
+
+In der Autorenfassung exportiert **Speichern als HTML** alle angezeigten Zeilen als eigenständige `.htm`-Datei für den Browser oder einen Iframe.
 
 Bei Projekten mit eigener Ordnerstruktur startet der Trainingsdateneditor
 automatisch im Unterordner `trainingsdaten`. Der Testdateneditor verwendet

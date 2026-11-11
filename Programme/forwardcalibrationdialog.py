@@ -7,6 +7,7 @@
 # -------------------------------------------------------------------------------------------------
 import copy
 import math
+from pathlib import Path
 from threading import Event
 
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
@@ -32,6 +33,7 @@ from PySide6.QtWidgets import (
     QWidget
 )
 
+from buildfeatures import author_html_export
 from trainingdataio import TrainingDataIO
 from applicationcurve import CurvePlot, sample_slice
 from graphicalexperimentdialog import (
@@ -79,7 +81,10 @@ def create_range_labels(minimum, maximum, font):
     return minimum_label, separator_label, maximum_label
 
 
-class CompactDoubleSpinBox(QDoubleSpinBox):
+from inputsteps import SteppedInputMixin, configure_editor, configure_slider, slider_value, sync_slider
+
+
+class CompactDoubleSpinBox(SteppedInputMixin, QDoubleSpinBox):
     """Dezimalfeld ohne überflüssige Endnullen."""
 
     def __init__(self, parent=None):
@@ -92,7 +97,8 @@ class CompactDoubleSpinBox(QDoubleSpinBox):
 
         if decimal_point in text:
             integer, fraction = text.split(decimal_point, 1)
-            fraction = fraction[:2].rstrip("0")
+            digits = max(2, self._input_grid.decimals) if getattr(self, "_input_grid", None) else 2
+            fraction = fraction[:digits].rstrip("0")
             text = (
                 integer + decimal_point + fraction
                 if fraction
@@ -104,6 +110,13 @@ class CompactDoubleSpinBox(QDoubleSpinBox):
 
 from binarystatecolors import state_palette
 from binaryuncertainty import normalize_limits, is_uncertain, warning_style, warning_text
+
+def binary_presentation_colors(colors, active):
+    return state_palette(colors, active, (
+        "#31834a" if active else "#8c969f",
+        "#dff3e4" if active else "#eef1f3",
+        "#185f30" if active else "#46515a",
+    ))
 
 
 class BinaryToggleButton(QPushButton):
@@ -132,11 +145,7 @@ class BinaryToggleButton(QPushButton):
             "QPushButton { padding: 2px 10px; border-radius: 5px; "
             "border: 1px solid %s; background: %s; color: %s; "
             "font-weight: 600; } QPushButton:hover { border-color: #4f788f; }"
-            % state_palette(self.color_settings, checked, (
-                "#31834a" if checked else "#8c969f",
-                "#dff3e4" if checked else "#eef1f3",
-                "#185f30" if checked else "#46515a"
-            ))
+            % binary_presentation_colors(self.color_settings, checked)
         )
 
     def numeric_value(self):
@@ -169,11 +178,7 @@ class BinaryStateLabel(QLabel):
             "QLabel { padding: 1px 6px; border-radius: 4px; "
             "border: 1px solid %s; background: %s; color: %s; "
             "font-weight: 600; }"
-            % state_palette(self.color_settings, state, (
-                "#31834a" if state else "#8c969f",
-                "#dff3e4" if state else "#eef1f3",
-                "#185f30" if state else "#46515a"
-            ))
+            % binary_presentation_colors(self.color_settings, state)
         )
         self.setToolTip(tooltip if uncertain else "")
         if uncertain:
@@ -318,6 +323,7 @@ class ForwardCalibrationDialog(QDialog):
         language_manager=None,
         color_settings=None,
         uncertainty_settings=None,
+        project_file_path=None,
     ):
         super().__init__(parent)
 
@@ -329,6 +335,7 @@ class ForwardCalibrationDialog(QDialog):
         self.output_columns = output_columns
         self.records = list(records or [])
         self.file_path = file_path
+        self.project_file_path = Path(project_file_path) if project_file_path else None
         self.input_array = input_array if isinstance(input_array, dict) else None
         self.training_document = (
             copy.deepcopy(training_document)
@@ -485,6 +492,7 @@ class ForwardCalibrationDialog(QDialog):
                 input_widget.setSingleStep(
                     self.training_step(mapping["column_index"])
                 )
+                minimum, maximum = configure_editor(input_widget, mapping, minimum, maximum)
                 input_widget.setFont(self.fixed_font)
                 if unit:
                     input_widget.setSuffix(f" {unit}")
@@ -494,6 +502,7 @@ class ForwardCalibrationDialog(QDialog):
                 slider_steps = 1000 if maximum > minimum else 0
                 slider.setRange(0, slider_steps)
                 slider.setEnabled(slider_steps > 0)
+                configure_slider(slider, getattr(input_widget, "_input_grid", None))
                 raw_display_widget = input_widget
                 slider_display_widget = slider
 
@@ -807,6 +816,11 @@ class ForwardCalibrationDialog(QDialog):
         self.bottom_layout.addWidget(self.binary_view_button)
         self.bottom_layout.addWidget(self.array_view_button)
         self.bottom_layout.addWidget(self.graphical_experiment_button)
+        if author_html_export is not None:
+            self.save_html_button = QPushButton(self.language.text("data.editor.save_html"))
+            self.save_html_button.setAutoDefault(False)
+            self.save_html_button.clicked.connect(self.save_as_html)
+            self.bottom_layout.addWidget(self.save_html_button)
         self.characteristic_button = QPushButton(self.language.text("training.metric.characteristic"))
         self.characteristic_button.setCheckable(True)
         self.characteristic_button.setAutoDefault(False)
@@ -836,6 +850,122 @@ class ForwardCalibrationDialog(QDialog):
         self.update_input_previews()
         self.calculate()
         self.schedule_fit_window()
+
+    def save_as_html(self):
+        if author_html_export is None:
+            return
+        text = self.language.text
+        try:
+            directory = ""
+            name = ""
+            if self.project_file_path:
+                directory = self.project_file_path.resolve().parent / "exporte"
+                directory.mkdir(exist_ok=True)
+                name = self.project_file_path.stem
+            elif self.file_path:
+                source = Path(self.file_path)
+                directory = source.resolve().parent
+                name = source.stem
+
+            suffix = text("forward.html.file_suffix")
+            filename = f"{name}_{suffix}.htm" if name else f"{suffix}.htm"
+            file_path = author_html_export.choose_html_path(
+                self, text("data.editor.save_html"), directory,
+                text("forward.html.filter"), filename,
+            )
+            if file_path:
+                author_html_export.write_html_file(file_path, self.as_html())
+        except (OSError, ValueError) as error:
+            QMessageBox.critical(self, text("data.message.save_error_title"), str(error))
+
+    def as_html(self):
+        if author_html_export is None:
+            return None
+        validation = self.network.validate_network()
+        if not validation["valid"]:
+            raise ValueError("\n".join(validation["errors"]))
+
+        slots, nodes = author_html_export.network_snapshot(self.network)
+        text = self.language.text
+        input_columns = ("neuron", "raw_value", "internal_x", "scaling", "allowed_range", "slider")
+        output_columns = ("neuron", "raw_result", "internal_y", "scaling", "allowed_range", "display")
+
+        def column_data(mapping, minimum, maximum):
+            neuron = mapping["neuron"]
+            calibration = TrainingDataIO.normalize_calibration(mapping["calibration"])
+            return {
+                "name": neuron.name,
+                "slot": slots[neuron.id],
+                "unit": str(mapping.get("unit", "")).strip(),
+                "calibration": calibration,
+                "scaling": self.format_calibration(calibration),
+                "minimum": minimum,
+                "maximum": maximum,
+                "minimumText": format_range_value(minimum),
+                "maximumText": format_range_value(maximum),
+            }
+
+        inputs = []
+        for row in self.input_widgets:
+            entry = column_data(row["mapping"], row["minimum"], row["maximum"])
+            widget = row["input_widget"]
+            entry.update(binary=row["is_binary"], value=self.input_value(row))
+            if not row["is_binary"]:
+                entry.update(step=widget.singleStep(),
+                             grid=author_html_export.web_input_grid(getattr(widget, "_input_grid", None)))
+            inputs.append(entry)
+
+        outputs = []
+        for row in self.output_widgets:
+            bar = row["output_bar"]
+            entry = column_data(row["mapping"], bar.raw_minimum, bar.raw_maximum)
+            entry["binary"] = row["is_binary"] and not self.experimental_binary_mode
+            outputs.append(entry)
+
+        german = self.language.current_language == "de"
+        model = {
+            "nodes": nodes,
+            "inputs": inputs,
+            "outputs": outputs,
+            "inputHeaders": [text(f"forward.column.{column}") for column in input_columns],
+            "outputHeaders": [text(f"forward.column.{column}") for column in output_columns],
+            "binaryColors": {
+                "on": binary_presentation_colors(self.color_settings, True),
+                "off": binary_presentation_colors(self.color_settings, False),
+            },
+            "uncertainty": self.uncertainty_settings,
+            "uncertainStyle": warning_style(self.color_settings),
+            "text": {
+                "on": text("binary.on"),
+                "off": text("binary.off"),
+                "uncertain": text("forward.html.uncertain"),
+                "increase": text("forward.html.increase"),
+                "decrease": text("forward.html.decrease"),
+                "uncertaintyHint": warning_text(self.uncertainty_settings, german),
+                "invalid": text("forward.value.invalid"),
+                "within": text("forward.output.within_range"),
+                "outside": text("forward.output.outside_range"),
+                "completed": text("forward.status.completed_unchanged"),
+                "error": text("forward.html.calculation_error"),
+            },
+        }
+        if self.array_buttons:
+            binary_slots = {
+                row["mapping"]["column_index"]: slots[row["mapping"]["neuron"].id]
+                for row in self.input_widgets if row["is_binary"]
+            }
+            cells = [binary_slots.get(index) for index in self.input_array["column_indices"]]
+            if any(slot is not None for slot in cells):
+                model["inputArray"] = {
+                    "columns": max(1, int(self.input_array["columns"])),
+                    "cells": cells,
+                    "title": text("forward.array.group"),
+                    "showArray": text("forward.button.show_array"),
+                    "showList": text("forward.button.show_list"),
+                    "onColor": self.color_settings.get("binary_array_on", "#242424"),
+                    "offColor": self.color_settings.get("binary_array_off", "#ffffff"),
+                }
+        return author_html_export.render_forward_html(self.language, model)
 
     def characteristic_available(self):
         if (len(self.input_columns) != 1 or len(self.network.get_input_neurons()) != 1
@@ -892,7 +1022,9 @@ class ForwardCalibrationDialog(QDialog):
                     continue
             plot.set_targets(targets)
             actual = TrainingDataIO.unscale_value(y["neuron"].output_value, y["calibration"], self.language.text)
-            plot.configure_input_slider(bounds, raw[x["neuron"].id], enabled=True)
+            editor = next(data["input_widget"] for data in self.input_widgets if data["mapping"] is x)
+            plot.configure_input_slider(bounds, raw[x["neuron"].id], enabled=True,
+                                        grid=getattr(editor, "_input_grid", None))
             plot.set_point((raw[x["neuron"].id], actual))
             plot.note = ""
             plot.update()
@@ -1605,12 +1737,7 @@ class ForwardCalibrationDialog(QDialog):
         maximum = widget_data["maximum"]
         if slider is None or maximum <= minimum:
             return
-        position = round(
-            (float(value) - minimum) / (maximum - minimum) * slider.maximum()
-        )
-        slider.blockSignals(True)
-        slider.setValue(max(slider.minimum(), min(slider.maximum(), position)))
-        slider.blockSignals(False)
+        sync_slider(slider, value, minimum, maximum)
 
     def slider_value_changed(self, widget_data, position):
         """Übernimmt eine Reglerbewegung sofort in die Vorwärtsrechnung."""
@@ -1620,9 +1747,7 @@ class ForwardCalibrationDialog(QDialog):
         maximum = widget_data["maximum"]
         if slider.maximum() <= 0:
             return
-        value = minimum + (
-            position / slider.maximum()
-        ) * (maximum - minimum)
+        value = slider_value(slider, position, minimum, maximum)
         target_widget = (
             widget_data["experimental_widget"]
             if widget_data["is_binary"]

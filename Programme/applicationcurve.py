@@ -76,6 +76,9 @@ def sample_slice(forward, specification, inputs, output, raw_values, x_id,
     return (points, point) if point is not None else None
 
 
+from inputsteps import configure_slider, slider_value, sync_slider
+
+
 class CurvePlot(QWidget):
     """Cache axes and curve; moving the working point only repaints its small area."""
     input_value_requested = Signal(float)
@@ -122,22 +125,25 @@ class CurvePlot(QWidget):
         self.input_slider.setGeometry(8, 50, max(1, self.width()-16), 22)
         self.input_slider.valueChanged.connect(self.input_slider_changed)
 
-    def configure_input_slider(self, bounds, value=None, enabled=False):
+    def configure_input_slider(self, bounds, value=None, enabled=False, grid=None):
         self.input_bounds = bounds
+        blocked = self.input_slider.blockSignals(True)
+        self.input_slider.setRange(0, 10000)
+        configure_slider(self.input_slider, grid)
+        self.input_slider.blockSignals(blocked)
         self.input_slider.setEnabled(bool(enabled and bounds and bounds[1] > bounds[0]))
         if bounds is None or value is None or bounds[1] <= bounds[0]:
             return
         low, high = bounds
-        position = round(max(0., min(1., (value-low)/(high-low))) * 10000)
-        blocked = self.input_slider.blockSignals(True)
-        self.input_slider.setValue(position)
-        self.input_slider.blockSignals(blocked)
+        sync_slider(self.input_slider, value, low, high)
         self.input_slider.setToolTip(f"{self.x_label}: {value:.6g}")
 
     def input_slider_changed(self, position):
         if self.input_slider.isEnabled() and self.input_bounds is not None:
             low, high = self.input_bounds
-            self.input_value_requested.emit(low + (high-low)*position/10000.)
+            value = slider_value(self.input_slider, position, low, high)
+            sync_slider(self.input_slider, value, low, high)
+            self.input_value_requested.emit(value)
 
     def target_visibility_changed(self):
         self._background_key = None
@@ -665,7 +671,7 @@ class CurveController(QObject):
                 continue
             editor = item[0]["editor"]
             plot.configure_input_slider((editor.minimum(), editor.maximum()), editor.value(),
-                                        enabled=not self.host.edit_mode)
+                                        enabled=not self.host.edit_mode, grid=getattr(editor, "_input_grid", None))
 
     def apply_points(self, values):
         outputs = {m["neuron"].id: m for m in self.host.output_columns}

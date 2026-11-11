@@ -1,4 +1,4 @@
-"""Editable project training protocol, independent of deletable training history."""
+"""Structured project training protocol, independent of deletable training history."""
 import json
 import os
 import re
@@ -39,50 +39,177 @@ def write_text_atomic(path, text):
 
 
 class TrainingProtocol:
+    """Structured, append-only facts; only entire blocks may be removed by the user."""
     def __init__(self, language, path=None):
         self.language = language
         self.path = Path(path) if path else None
-        self.pending = ""
+        self.document = None
         self.baseline = None
+        self.dirty = False
 
-    def text(self):
-        existing = self.path.read_text(encoding="utf-8") if self.path and self.path.exists() else ""
-        return existing + self.pending
+    def ensure_loaded(self):
+        if self.document is not None:
+            return
+        data = {"version": 1, "last_run_id": 0, "blocks": []}
+        if self.path and self.path.exists():
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+            if (not isinstance(data,dict) or data.get("version") != 1
+                    or not isinstance(data.get("blocks"),list)
+                    or not isinstance(data.get("last_run_id"),int)):
+                raise ValueError(self.language.text("protocol.table.invalid"))
+            ids = set()
+            for block in data["blocks"]:
+                if (not isinstance(block,dict) or not isinstance(block.get("id"),str)
+                        or block["id"] in ids or not isinstance(block.get("events"),list)
+                        or not isinstance(block.get("title"),str)
+                        or not isinstance(block.get("created"),str)
+                        or (block.get("parameters") is not None and not isinstance(block["parameters"],dict))
+                        or not isinstance(block.get("rows",[]),list)
+                        or any(not isinstance(row,list) or len(row)!=2 for row in block.get("rows",[]))
+                        or (block.get("result") is not None and not isinstance(block["result"],dict))
+                        or any(not isinstance(e,dict) or not isinstance(e.get("time"),str)
+                               or not isinstance(e.get("title"),str) or not isinstance(e.get("rows",[]),list)
+                               or any(not isinstance(row,list) or len(row)!=2 for row in e.get("rows",[]))
+                               for e in block["events"])):
+                    raise ValueError(self.language.text("protocol.table.invalid"))
+                ids.add(block["id"])
+        self.document = data
+        # Earlier table versions emitted a separate note immediately before a run.
+        # Move only an adjacent note with the same timestamp; preserve ambiguous data.
+        blocks = data["blocks"]
+        retained = []
+        for index,block in enumerate(blocks):
+            following = blocks[index+1] if index+1<len(blocks) else None
+            if (block.get("run_id") is None
+                    and block["title"] in ("Trainingsparameter ge\u00e4ndert","Training parameters changed")
+                    and following and following.get("run_id") is not None
+                    and following.get("parameters") and block["created"] == following["created"]
+                    and not block.get("events") and not block.get("result")):
+                following["events"].insert(0,{"time":block["created"],"kind":"parameters",
+                    "title":block["title"],"rows":block.get("rows",[])})
+                self.dirty = True
+            else:
+                retained.append(block)
+        data["blocks"] = retained
+        for block in retained:
+            events = block["events"]
+            cleaned = [e for e in events if e.get("kind") not in ("started","resumed","result","parameters")]
+            if cleaned != events:
+                block["events"] = cleaned
+                self.dirty = True
+
+    @property
+    def blocks(self):
+        self.ensure_loaded()
+        return self.document["blocks"]
+
+    @staticmethod
+    def stamp():
+        return datetime.now().isoformat(timespec="seconds")
+
+    def new_block(self, title, run_id=None):
+        from uuid import uuid4
+        block = {"id": str(uuid4()), "run_id": run_id, "title": title,
+                 "created": self.stamp(), "parameters": None, "rows": [],
+                 "result": None, "events": [], "deleted": False}
+        self.blocks.append(block)
+        if run_id is not None:
+            self.document["last_run_id"] = max(self.document["last_run_id"],run_id)
+        self.dirty = True
+        return block
+
+    @staticmethod
+    def rows(lines):
+        return [list(line.split(":",1)) if ":" in line else [str(line),""] for line in lines]
 
     def add(self, title, lines, flush=True, highlighted=False):
-        stamp = datetime.now().strftime("%d.%m.%Y · %H:%M:%S")
-        body = "\n".join(lines)
-        separator = ("=" if highlighted else "-") * 56
-        self.pending += (separator + "\n" if highlighted else "")
-        heading = f"{stamp}\n{title}\n" if highlighted else f"{stamp} — {title}\n"
-        self.pending += heading + (body + "\n" if body else "") + separator + "\n\n"
-        if flush:
-            self.flush()
+        block = self.new_block(title)
+        block["rows"] = self.rows(lines)
+        if flush:self.flush()
+
+    def run_event(self, run_id, kind, title, lines=(), parameters=None, result=None):
+        from copy import deepcopy
+        block = next((b for b in self.blocks if b.get("run_id")==run_id),None)
+        if block is None:
+            block = self.new_block(self.language.text("history.chart.run",run=run_id),run_id)
+        if parameters is not None and block["parameters"] is None:
+            block["parameters"] = deepcopy(parameters)
+            block["rows"] = self.rows(lines)
+        event = {"time":self.stamp(),"kind":kind,"title":title,
+                 "rows":self.rows(lines) if parameters is None else []}
+        if kind not in ("started","resumed","result"):
+            block["events"].append(event)
+        if kind=="deleted":block["deleted"]=True
+        if result is not None:block["result"]=deepcopy(result)
+        self.dirty=True
+        self.flush()
 
     def flush(self, path=None):
-        target = Path(path) if path else self.path
-        if target is None:
-            return
+        self.ensure_loaded()
+        target=Path(path) if path else self.path
+        if target is None:return
         if target != self.path and self.path and not self.path.exists() and target.exists():
-            self.path = target  # The project folder was renamed.
-        if target != self.path:
-            content = self.text()
-            if target.exists() and target.read_text(encoding="utf-8") != content:
+            self.path = target  # The project directory was renamed.
+        content=json.dumps(self.document,ensure_ascii=False,indent=2,allow_nan=False)+"\n"
+        if target != self.path and target.exists():
+            # A renamed project directory may already contain this same journal.
+            if target.read_text(encoding="utf-8") != content:
                 raise OSError(self.language.text("protocol.destination_exists"))
-            write_text_atomic(target, content)
-        elif self.pending:
-            write_text_atomic(target, self.text())
-        self.path = target
-        self.pending = ""
+        if self.dirty or target != self.path or not target.exists():
+            write_text_atomic(target,content)
+        self.path=target
+        self.dirty=False
 
-    def replace(self, original, edited):
-        if self.text() != original:
-            raise OSError(self.language.text("protocol.changed"))
-        if self.path:
-            write_text_atomic(self.path, edited)
-            self.pending = ""
-        else:
-            self.pending = edited
+    def reconstruct_runs(self, history):
+        from copy import deepcopy
+        self.ensure_loaded()
+        old,old_dirty=deepcopy(self.document),self.dirty
+        existing={b.get("run_id") for b in self.blocks}
+        count=0
+        try:
+            for run in history:
+                run_id=run.get("run_id")
+                if type(run_id) is not int or run_id<1 or run_id in existing:continue
+                block=self.new_block(self.language.text("history.chart.run",run=run_id),run_id)
+                block["reconstructed"]=True
+                block["created"]=str(run.get("timestamp") or "")
+                keys=("solver","weight_initialization","bias_initialization","learning_rate","momentum",
+                      "error_limit","maximum_epochs","training_target_mode","training_section_epochs")
+                parameters={key:deepcopy(run[key]) for key in keys if key in run}
+                if "initialized" in run:parameters["initialize_network"]=bool(run["initialized"])
+                if "training_target_mode" not in parameters and run.get("stop_at_error_limit"):
+                    parameters["training_target_mode"]="limit"
+                block["parameters"]=parameters or None
+                if run.get("parent_run_id") is not None:
+                    block["rows"]=[[self.language.text("protocol.parent_run_suffix",run=run["parent_run_id"]),""]]
+                if "requested_epochs" in run:
+                    block["rows"].append([self.language.text("protocol.rebuild.requested"),str(run["requested_epochs"])])
+                result={"status":str(run.get("status_text") or self.language.text("protocol.rebuild.unknown"))}
+                for source,target in (("completed_epochs","epochs"),("elapsed_seconds","elapsed_seconds"),
+                                      ("end_error","mse"),("maximum_absolute_error","maximum_error")):
+                    if source in run:result[target]=run[source]
+                block["result"]=result
+                existing.add(run_id);count+=1
+            if count:self.flush()
+        except (OSError,ValueError,TypeError):
+            self.document,self.dirty=old,old_dirty
+            raise
+        return count
+
+    def delete_block(self, block_id):
+        from copy import deepcopy
+        self.ensure_loaded()
+        old=self.document
+        old_dirty=self.dirty
+        candidate=deepcopy(old)
+        candidate["blocks"]=[b for b in candidate["blocks"] if b["id"]!=block_id]
+        self.document=candidate
+        self.dirty=True
+        try:self.flush()
+        except (OSError,ValueError):
+            self.document=old
+            self.dirty=old_dirty
+            raise
 
     def format_value(self, value):
         if value is None:
@@ -101,6 +228,8 @@ class TrainingProtocol:
         if old is None:
             return  # Keep an internal comparison state without writing a baseline.
         for section, values in state.items():
+            if section == "parameters":
+                continue  # A run documents its actual starting parameters directly.
             before = old.get(section, {})
             changes = []
             for key in sorted(before.keys() | values.keys()):
@@ -159,19 +288,15 @@ class TrainingProtocolMixin:
         return {"structure": structure, "activations": activations, "data": data, "parameters": settings}
 
     def initialize_training_protocol(self):
-        path = Path(self.current_project_path).parent / "trainingsprotokoll.txt" if self.current_project_path else None
-        self.training_protocol = TrainingProtocol(self.language, path)
+        path = Path(self.current_project_path).parent / "trainingsprotokoll.json" if self.current_project_path else None
+        self.training_protocol = TrainingProtocol(self.language,path)
         self._protocol_runs = list(self.training_history)
         try:
-            content = self.training_protocol.text()
-            numbers = [int(n) for n in re.findall(r"(?:Lauf|Run) (\d+)", content)]
-            self.last_training_run_id = max(getattr(self, "last_training_run_id", 0), *numbers, 0)
-            state = self.protocol_state()
-            if content:
-                self.training_protocol.baseline = state
-            else:
-                self.training_protocol.observe(state)
-        except (OSError, UnicodeError) as error:
+            self.training_protocol.ensure_loaded()
+            self.last_training_run_id = max(getattr(self,"last_training_run_id",0),
+                self.training_protocol.document["last_run_id"])
+            self.training_protocol.baseline = self.protocol_state()
+        except (OSError,UnicodeError,ValueError) as error:
             self.protocol_error(error)
 
     def protocol_error(self, error):
@@ -188,18 +313,42 @@ class TrainingProtocolMixin:
             return
         try:
             self.protocol_deleted_runs(getattr(self, "_protocol_runs", []), self.training_history)
+            self.protocol_target_changes(journal)
             journal.observe(self.protocol_state())
             journal.flush()
             self._protocol_error_shown = False
-        except (OSError, UnicodeError) as error:
+        except (OSError, UnicodeError, ValueError) as error:
             self.protocol_error(error)
+
+    def protocol_target_changes(self, journal):
+        dialog = getattr(self,"training_dialog",None)
+        run_id = getattr(dialog,"current_run_id",None) if dialog is not None else getattr(self,"active_training_run_id",None)
+        block = next((b for b in journal.blocks if b.get("run_id")==run_id),None)
+        if block is None or not block.get("parameters") or block.get("deleted"):
+            return
+        keys = ("training_target_mode","training_section_epochs","maximum_epochs","error_limit")
+        previous = block.get("target_state",block["parameters"])
+        current = {key:self.training_settings.get(key) for key in keys}
+        changes = []
+        t=self.language.text
+        for key in keys:
+            if previous.get(key) == current[key]:continue
+            def display(value, state):
+                if key == "training_target_mode":
+                    return t("training.view.target_"+str(value),epochs=state.get("training_section_epochs"))
+                return journal.format_value(value)
+            changes.append(t("protocol.param."+key)+": "+display(previous.get(key),previous)
+                           +" \u2192 "+display(current[key],current))
+        if changes:
+            block["target_state"]=current
+            journal.run_event(run_id,"target",t("protocol.table.target_changed"),changes)
 
     def protocol_add(self, title, lines, highlighted=False):
         if getattr(self, "training_protocol", None) is None:
             self.initialize_training_protocol()
         try:
             self.training_protocol.add(title, lines, highlighted=highlighted)
-        except (OSError, UnicodeError) as error:
+        except (OSError, UnicodeError, ValueError) as error:
             self.protocol_error(error)
 
     def reserve_training_run_id(self):
@@ -213,36 +362,17 @@ class TrainingProtocolMixin:
     def protocol_training_started(self, dialog, continuation):
         self.training_settings = dialog.get_training_settings()
         self.protocol_checkpoint()
-        if not continuation:
-            t = self.language.text
-            settings = self.training_settings
-            fmt = self.training_protocol.format_value
-            weights = settings.get("weight_initialization", "auto")
-            weights = t("training.initialization.auto_short") if weights == "auto" else {
-                "xavier": "Xavier/Glorot", "he": "He", "zero": "0"}.get(weights, weights)
-            bias = {"xavier": "Xavier/Glorot", "zero": "0"}.get(
-                settings.get("bias_initialization"), settings.get("bias_initialization"))
-            target = settings.get("training_target_mode", "one")
-            lines = [
-                t("training.initialization.weights") + " " + weights,
-                t("training.initialization.bias") + " " + str(bias),
-                t("protocol.run_reinitialize") + ": " + fmt(dialog.current_run_initialized),
-                t("protocol.param.learning_rate") + ": " + fmt(settings.get("learning_rate")),
-                t("protocol.param.momentum") + ": " + fmt(settings.get("momentum")),
-                t("protocol.param.error_limit") + ": " + fmt(settings.get("error_limit")),
-                t("protocol.param.maximum_epochs") + ": " + fmt(settings.get("maximum_epochs")),
-                t("training.view.target_" + target, epochs=settings.get("training_section_epochs")),
-            ]
-            solver = settings.get("solver", "sgd")
-            if solver == "adam":
-                lines = [line for line in lines if not line.startswith(t("protocol.param.momentum") + ":")]
-            lines = ([t("adam.solver.label") + " " + t("adam.solver." + solver)]
-                     + dialog.workload_label.text().splitlines() + lines)
-            title = t("protocol.new_run", run=dialog.current_run_id)
-            parent_run = getattr(dialog, "current_run_parent_id", None)
-            if parent_run is not None:
-                lines.insert(0, t("protocol.parent_run_suffix", run=parent_run))
-            self.protocol_add(title, lines, highlighted=True)
+        t = self.language.text
+        parent_run = getattr(dialog,"current_run_parent_id",None)
+        parameters = dict(self.training_settings,initialize_network=bool(dialog.current_run_initialized))
+        lines = ([t("protocol.parent_run_suffix",run=parent_run)] if parent_run is not None else [])
+        lines += dialog.workload_label.text().splitlines()
+        try:
+            self.training_protocol.run_event(dialog.current_run_id,
+                "resumed" if continuation else "started",
+                t("protocol.table.resumed") if continuation else t("protocol.new_run",run=dialog.current_run_id),
+                lines,parameters=parameters)
+        except (OSError,UnicodeError,ValueError) as error:self.protocol_error(error)
 
     def protocol_training_result(self, entry):
         if getattr(self, "training_protocol", None) is None:
@@ -266,30 +396,10 @@ class TrainingProtocolMixin:
                         "MSE: " + fmt(entry["end_error"]),
                         t("protocol.result_maximum") + ": " + fmt(entry["maximum_absolute_error"])]
         try:
-            original = journal.text()
-            # Support both the old single-line heading and the current layout.
-            pattern = (r"(?m)^.*(?:NEUER TRAININGSLAUF|NEW TRAINING RUN|"
-                       r"TRAININGSERGEBNIS|TRAINING RESULT).* · (?:Lauf|Run) "
-                       + str(entry["run_id"]) + r"(?:[^\d].*)?$")
-            headings = list(re.finditer(pattern, original))
-            if not headings:
-                self.protocol_add(t("protocol.result_run", run=entry["run_id"]), result_lines, highlighted=True)
-                return
-            heading = headings[-1]
-            closing = re.search(r"(?m)^={56}\s*$", original[heading.end():])
-            if closing is None:
-                return  # Preserve a manually restructured section.
-            end = heading.end() + closing.start()
-            body = original[heading.end():end]
-            labels = ("Ergebnis:", "Result:", "Epochen:", "Epochs:", "MSE:",
-                      "Zeit seit Start:", "Time since start:", "Elapsed time:",
-                      "Zeit / Epoche:", "Time / epoch:",
-                      "Maximaler Fehler:", "Maximum error:")
-            lines = [line for line in body.splitlines() if not line.startswith(labels + (t("training.result.elapsed"),))]
-            body = "\n".join(lines).rstrip() + "\n" + "\n".join(result_lines) + "\n"
-            journal.replace(original, original[:heading.end()] + body + original[end:])
-        except (OSError, UnicodeError) as error:
-            self.protocol_error(error)
+            result = {"status":status,"epochs":epochs,"elapsed_seconds":elapsed,
+                      "mse":float(entry["end_error"]),"maximum_error":float(entry["maximum_absolute_error"])}
+            journal.run_event(entry["run_id"],"result",status,result_lines,result=result)
+        except (OSError,UnicodeError,ValueError) as error:self.protocol_error(error)
 
     def protocol_run_loaded(self, run_id):
         if getattr(self, "training_protocol", None) is None:
@@ -297,62 +407,31 @@ class TrainingProtocolMixin:
         # Restoring stored parameters is one load event, not a manual edit.
         if self.training_protocol.baseline is not None:
             self.training_protocol.baseline["parameters"] = self.protocol_state()["parameters"]
-        self.protocol_add(self.language.text("protocol.loaded", run=run_id), [])
+        block=next((b for b in self.training_protocol.blocks if b.get("run_id")==run_id),None)
+        if block is not None:
+            block["target_state"]={key:self.training_settings.get(key) for key in
+                ("training_target_mode","training_section_epochs","maximum_epochs","error_limit")}
+        try:self.training_protocol.run_event(run_id,"loaded",self.language.text("protocol.loaded",run=run_id))
+        except (OSError,UnicodeError,ValueError) as error:self.protocol_error(error)
 
     def protocol_deleted_runs(self, before, after):
         self._protocol_runs = list(after)
         remaining = {r.get("run_id") for r in after}
         for run in before:
             if run.get("run_id") not in remaining:
-                self.protocol_add(self.language.text("protocol.deleted", run=run["run_id"]),
-                                  [])
+                if getattr(self,"training_protocol",None) is None:self.initialize_training_protocol()
+                try:self.training_protocol.run_event(run["run_id"],"deleted",self.language.text("protocol.deleted",run=run["run_id"]))
+                except (OSError,UnicodeError,ValueError) as error:self.protocol_error(error)
 
-    def open_training_protocol(self):
-        if getattr(self, "training_protocol", None) is None:
-            self.initialize_training_protocol()
+    def open_training_protocol(self, *, training_dialog=None):
+        if getattr(self,"training_protocol",None) is None:self.initialize_training_protocol()
         self.protocol_checkpoint()
-        t = self.language.text
         try:
-            original = self.training_protocol.text()
-        except (OSError, UnicodeError) as error:
-            self.protocol_error(error)
-            return
-        dialog = QDialog(self)
-        dialog.setWindowTitle(t("protocol.title"))
-        layout = QVBoxLayout(dialog)
-        editor = QPlainTextEdit(original, dialog)
-        editor.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
-        editor.moveCursor(QTextCursor.MoveOperation.End)
-        layout.addWidget(editor)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.button(QDialogButtonBox.StandardButton.Save).setText(t("common.save"))
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(t("common.cancel"))
-        layout.addWidget(buttons)
-        dialog.ensurePolished()
-        editor.ensurePolished()
-        metrics = editor.fontMetrics()
-        # Legacy entries can contain long single-line headings. They should
-        # wrap instead of keeping the compact protocol window unnecessarily wide.
-        compact_width = metrics.horizontalAdvance("=" * 56)
-        text_width = min(compact_width,
-                         max((metrics.horizontalAdvance(line) for line in original.splitlines()),
-                             default=compact_width))
-        margins = layout.contentsMargins()
-        editor_chrome = (2 * editor.frameWidth() + 2 * editor.document().documentMargin()
-                         + editor.verticalScrollBar().sizeHint().width() + 2)
-        width = max(text_width + editor_chrome, buttons.sizeHint().width())
-        width += margins.left() + margins.right()
-        available = self.screen().availableGeometry()
-        dialog.resize(min(int(width), available.width() - 40), min(650, available.height() - 80))
-        def save():
-            try:
-                self.training_protocol.replace(original, editor.toPlainText())
-                self.project_modified = True
-                self.update_window_title()
-                dialog.accept()
-            except (OSError, UnicodeError) as error:
-                QMessageBox.warning(dialog, t("protocol.title"), str(error))
-        buttons.accepted.connect(save)
-        buttons.rejected.connect(dialog.reject)
-        dialog.exec()
-        dialog.deleteLater()
+            self.training_protocol.flush()
+            if self.current_project_path:
+                (Path(self.current_project_path).parent / "trainingsprotokoll.txt").unlink(missing_ok=True)
+            from protocoltable import ProtocolTableDialog
+            dialog=ProtocolTableDialog(self.training_protocol,self.language,self,training_dialog)
+            dialog.exec()
+            dialog.deleteLater()
+        except (OSError,UnicodeError,ValueError) as error:self.protocol_error(error)

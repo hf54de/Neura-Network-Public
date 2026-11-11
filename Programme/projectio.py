@@ -306,6 +306,7 @@ class ProjectIO:
 
         return {
             "show_connections": True,
+            "bundle_connections": False,
             "show_weights": True,
             "binary_uncertainty": {"lower": 0.3, "upper": 0.7},
             "visualize_weights": True,
@@ -520,12 +521,14 @@ class ProjectIO:
         )
 
     @classmethod
-    def load_project(cls, file_path, translator=None):
+    def load_project(cls, file_path, translator=None, progress=None):
         """
         Liest eine Projektdatei ein und gibt
         die geprüften Projektdaten zurück.
         """
 
+        if progress:
+            progress("project.loading.read")
         path = Path(file_path)
 
         with path.open(
@@ -536,6 +539,8 @@ class ProjectIO:
                 project_file
             )
 
+        if progress:
+            progress("project.loading.validate")
         cls._prepare_project_data(
             project_data
         )
@@ -1461,7 +1466,7 @@ class ProjectIO:
 
         required_fields = {
             "show_connections",
-            "show_weights",
+            "bundle_connections",            "show_weights",
             "visualize_weights",
             "show_neuron_values",
             "show_activation_charts",

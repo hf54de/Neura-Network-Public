@@ -90,7 +90,6 @@ class SettingsDialog(QDialog):
     preview_changed = Signal(object, object)
 
     DISPLAY_FIELDS = (
-        ("show_connections", "settings.display.show_connections"),
         ("show_weights", "settings.display.show_weights"),
         ("show_neuron_values", "settings.display.show_neuron_values"),
         (
@@ -292,6 +291,8 @@ class SettingsDialog(QDialog):
             QMessageBox.warning(self, self.profile_text("Profil konnte nicht geladen werden", "Could not load profile"), str(error))
             return
         self.loading = True
+        mode = "hidden" if not data["display"]["show_connections"] else ("bundled" if data["display"].get("bundle_connections") else "all")
+        self.connection_mode.setCurrentIndex(self.connection_mode.findData(mode))
         for key, checkbox in self.display_checks.items():
             checkbox.setChecked(data["display"][key])
         self.uncertainty_lower.setValue(data["display"]["binary_uncertainty"]["lower"])
@@ -365,6 +366,16 @@ class SettingsDialog(QDialog):
         )
         group_layout = QVBoxLayout(group)
 
+        connection_row = QHBoxLayout()
+        connection_row.addWidget(QLabel(self.language_manager.text("settings.connections.mode")))
+        self.connection_mode = QComboBox()
+        for mode in ("all", "hidden", "bundled"):
+            self.connection_mode.addItem(self.language_manager.text("settings.connections."+mode),mode)
+        mode = "hidden" if not settings["show_connections"] else ("bundled" if settings.get("bundle_connections") else "all")
+        self.connection_mode.setCurrentIndex(self.connection_mode.findData(mode))
+        self.connection_mode.currentIndexChanged.connect(self.emit_preview)
+        connection_row.addWidget(self.connection_mode,1)
+        group_layout.addLayout(connection_row)
         for key, text_key in self.DISPLAY_FIELDS:
             checkbox = QCheckBox(
                 self.language_manager.text(text_key)
@@ -374,6 +385,12 @@ class SettingsDialog(QDialog):
             self.display_checks[key] = checkbox
             group_layout.addWidget(checkbox)
 
+        def update_connection_controls():
+            individual = self.connection_mode.currentData() == "all"
+            for key in ("show_weights", "visualize_weights"):
+                self.display_checks[key].setEnabled(individual)
+        self.connection_mode.currentIndexChanged.connect(update_connection_controls)
+        update_connection_controls()
         layout.addWidget(group)
 
         interface_group = QGroupBox(
@@ -767,6 +784,8 @@ class SettingsDialog(QDialog):
         settings = dict(self.base_project_settings)
         settings["binary_uncertainty"] = {"lower": self.uncertainty_lower.value(), "upper": self.uncertainty_upper.value()}
 
+        settings["show_connections"] = self.connection_mode.currentData() != "hidden"
+        settings["bundle_connections"] = self.connection_mode.currentData() == "bundled"
         for key, checkbox in self.display_checks.items():
             settings[key] = checkbox.isChecked()
 
@@ -835,6 +854,8 @@ class SettingsDialog(QDialog):
         self.loading = True
 
         if page_index == 0:
+            mode = "hidden" if not self.project_defaults["show_connections"] else ("bundled" if self.project_defaults.get("bundle_connections") else "all")
+            self.connection_mode.setCurrentIndex(self.connection_mode.findData(mode))
             for key, checkbox in self.display_checks.items():
                 checkbox.setChecked(bool(self.project_defaults[key]))
             self.property_dock_visible.setChecked(

@@ -1333,12 +1333,14 @@ class FeatureImportancePlot(QWidget):
         self.language = language_manager or LanguageManager()
         self.t = self.language.text
         self.values = []
+        self.maximum = None
         self.compact = False
         self.setMinimumHeight(300)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
-    def set_values(self, values):
+    def set_values(self, values, *, maximum=None):
         self.values = list(values)
+        self.maximum = maximum
         if self.values:
             longest_name = max(
                 self.fontMetrics().horizontalAdvance(str(name))
@@ -1367,7 +1369,9 @@ class FeatureImportancePlot(QWidget):
         bottom = 20.0
         row_height = 36.0 if self.compact else max(28.0, min(46.0, (self.height() - top - bottom) / len(self.values)))
         chart_width = max(100.0, self.width() - left - 76.0)
-        maximum = 100.0 if self.compact else (max((value for _name, value in self.values), default=1.0) or 1.0)
+        maximum = 100.0 if self.compact else self.maximum
+        if maximum is None:
+            maximum = max(value for _name, value in self.values) or 1.0
         if self.compact:
             painter.setPen(QColor("#5b6570"))
             painter.drawText(QRectF(left, self.height() - 20, chart_width, 20),

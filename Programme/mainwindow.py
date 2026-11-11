@@ -91,6 +91,7 @@ from projectimagedialog import ProjectImageDialog
 from projectoverviewdialog import ProjectCheckDialog, ProjectOverviewDialog
 from resultanalysisdialog import ResultAnalysisDialog
 from projectsavedialog import ProjectSaveDialog
+from projectloadprogress import ProjectLoadProgress
 from settings import Settings
 from chartcolors import set_chart_background
 from settingsdialog import SettingsDialog
@@ -716,6 +717,9 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
             self.open_training_history
         )
 
+        self.action_training_protocol = netzwerk_menu.addAction(text("protocol.button"))
+        self.action_training_protocol.triggered.connect(lambda _checked=False: self.open_training_protocol())
+
         # Menü Trainingsdaten
         training_menu = menubar.addMenu(
             text("menu.training_data")
@@ -875,6 +879,7 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
         self.update_undo_redo_actions()
 
         # Auf Änderungen der Zeichenfläche reagieren
+        self.scene.connection_display_requested.connect(self.change_connection_display)
         self.scene.object_selected.connect(
             self.object_selected
         )
@@ -2124,6 +2129,13 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
 
         self._pending_loaded_project_fit = None
         self.view.fit_all()
+        self.restore_loading_viewport()
+
+    def restore_loading_viewport(self):
+        visible = getattr(self, "_loading_viewport_visibility", None)
+        if visible is not None:
+            self._loading_viewport_visibility = None
+            self.view.viewport().setVisible(visible)
 
     def show_all_project_objects(self):
         """Hebt Darstellungsfilter auf und passt das gesamte Projekt ein."""
@@ -2258,6 +2270,12 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
                 "history",
                 text("toolbar.history"),
                 text("tooltip.history")
+            ),
+            (
+                self.action_training_protocol,
+                "training_protocol",
+                text("toolbar.protocol"),
+                text("protocol.title")
             )
         )
         data_entries = (
@@ -2589,6 +2607,14 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
         ):
             self.set_project_modified(True)
 
+    def change_connection_display(self, mode):
+        if mode not in {"all", "hidden", "bundled"}:
+            return
+        settings = deepcopy(self.display_settings)
+        settings["show_connections"] = mode != "hidden"
+        settings["bundle_connections"] = mode == "bundled"
+        self.apply_display_settings(settings, mark_as_modified=True)
+
     def apply_display_settings(
         self,
         display_settings,
@@ -2615,8 +2641,8 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
         self.scene.set_weight_labels_visible(
             self.display_settings["show_weights"]
         )
-        self.scene.set_connections_visible(
-            self.display_settings["show_connections"]
+        self.scene.set_connection_display_mode(
+            self.display_settings["show_connections"], self.display_settings.get("bundle_connections", False)
         )
         self.scene.set_weight_visualization_enabled(
             self.display_settings["visualize_weights"]
@@ -5557,11 +5583,12 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
             )
         )
 
+        self.display_settings["bundle_connections"] = False
         self.display_settings["show_connections"] = bool(
             settings["show_connections"]
         )
-        self.scene.set_connections_visible(
-            self.display_settings["show_connections"]
+        self.scene.set_connection_display_mode(
+            self.display_settings["show_connections"], self.display_settings.get("bundle_connections", False)
         )
 
         self._history_timer.stop()
@@ -6767,6 +6794,7 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
                     language_manager=self.language,
                     color_settings=self.display_settings.get("colors", {}),
                     uncertainty_settings=self.display_settings.get("binary_uncertainty"),
+                    project_file_path=self.current_project_path,
                 )
                 dialog.calculation_updated.connect(
                     lambda: self.show_neuron_properties(
@@ -7426,7 +7454,7 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
         )
 
     def update_result_analysis_action_state(self):
-        """Aktualisiert die gemeinsame Freigabe und den Berichtsexport."""
+        """Aktualisiert die Freigabe der Ergebnisanalyse."""
 
         if not hasattr(self, "action_result_analysis"):
             return
@@ -7436,18 +7464,6 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
             self.action_result_analysis.setToolTip(
                 self.language.text("tooltip.result_analysis")
             )
-        if hasattr(self, "action_export_word_report"):
-            report_enabled = (
-                enabled and self.active_training_history_entry() is not None
-            )
-            self.action_export_word_report.setEnabled(report_enabled)
-            self.action_export_word_report.setToolTip(
-                self.language.text(
-                    "tooltip.word_report"
-                    if report_enabled
-                    else "tooltip.disabled.training_run_required"
-                )
-            )
         self.update_project_workflow()
 
     def open_result_analysis(self):
@@ -7456,46 +7472,47 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
         self.open_test_analysis_window(initial_tab=0)
 
     def export_training_report(self, word_format=None):
-        """Exportiert den aktiven Trainingslauf direkt aus dem Dateimenü."""
+        """Exportiert das geöffnete Projekt und verfügbare Ergebnisse."""
+        if not self.current_project_path or self.training_observation_mode:
+            return
 
         training_run = self.active_training_history_entry()
-        if training_run is None or not self.training_data_manager.has_document:
-            QMessageBox.information(
-                self,
-                self.language.text("analysis.report.title"),
-                self.language.text("analysis.report.no_active_run"),
-            )
-            return
-
-        try:
-            records, inputs, outputs = NetworkTestDialog.prepare_document(
-                self.scene.network,
-                self.training_data_manager.document,
-                data_label=self.language.text("test.data.training"),
-                translator=self.language.text,
-            )
-        except (TypeError, ValueError) as error:
-            QMessageBox.warning(
-                self,
-                self.language.text("analysis.report.error_title"),
-                str(error),
-            )
-            return
+        training_document = self.training_data_manager.document
+        sources = []
+        if self.scene.network.validate_network(translator=self.language.text)["valid"]:
+            for kind, manager, document in (
+                ("training", self.training_data_manager, training_document),
+                ("test", self.test_data_manager, self.test_data_manager.document),
+            ):
+                if document is None:
+                    continue
+                label = self.language.text(f"test.data.{kind}")
+                try:
+                    records, inputs, outputs = NetworkTestDialog.prepare_document(
+                        self.scene.network, document, data_label=label,
+                        translator=self.language.text,
+                    )
+                except (TypeError, ValueError):
+                    continue
+                sources.append({
+                    "kind": kind,
+                    "label": label,
+                    "records": records,
+                    "inputs": inputs,
+                    "outputs": outputs,
+                    "file_path": manager.file_path,
+                })
+                if word_format is True:
+                    break
 
         overview = self.project_overview_values()
         dialog = ResultAnalysisDialog(
             self.scene.network,
-            [{
-                "kind": "training",
-                "label": self.language.text("test.data.training"),
-                "records": records,
-                "inputs": inputs,
-                "outputs": outputs,
-                "file_path": self.training_data_manager.file_path,
-            }],
+            sources,
             parent=self,
             language_manager=self.language,
             initial_source_kind="training",
+            report_only=True,
             tolerances=self.analysis_tolerances,
             report_context={
                 "project_name": (
@@ -7504,12 +7521,10 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
                     else self.language.text("common.unknown")
                 ),
                 "project_description": self.project_description,
+                "training_document": training_document,
                 "training_data_origin": self.language.text(
                     "data.origin.{}".format(
-                        self.training_data_manager.document.get(
-                            "data_origin",
-                            "unspecified",
-                        )
+                        (training_document or {}).get("data_origin", "unspecified")
                     )
                 ),
                 "structure": overview["structure"],
@@ -7518,6 +7533,7 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
                 "training_run": training_run,
                 "training_history": deepcopy(self.training_history),
                 "active_training_run_id": self.active_training_run_id,
+                "characteristic_provider": self.history_characteristic_source,
                 "scene": self.scene,
                 "export_dir": (
                     str(
@@ -7541,7 +7557,7 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
         dialog.deleteLater()
 
     def export_word_training_report(self, checked=False):
-        """Öffnet die gemeinsame Auswahl für PDF- oder DOCX-Berichte."""
+        """Öffnet die Auswahl des Formats für den Projektbericht."""
         self.export_training_report()
 
     def open_test_analysis_window(self, initial_tab=1, initial_source_kind=None):
@@ -7619,12 +7635,14 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
                     else self.language.text("common.unknown")
                 ),
                 "project_description": self.project_description,
+                "training_document": self.training_data_manager.document,
                 "structure": overview["structure"],
                 "neurons": overview["neurons"],
                 "connections": overview["connections"],
                 "training_run": self.active_training_history_entry(),
                 "training_history": deepcopy(self.training_history),
                 "active_training_run_id": self.active_training_run_id,
+                "characteristic_provider": self.history_characteristic_source,
                 "scene": self.scene,
                 "export_dir": (
                     str(Path(self.current_project_path).resolve().parent / "exporte")
@@ -7713,6 +7731,7 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
             ),
             language_manager=self.language,
             color_settings=self.display_settings.get("colors", {}),
+            project_file_path=self.current_project_path,
         )
 
         if adjust_structure:
@@ -7979,6 +7998,7 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
             self.action_export_word_report,
             self.action_mathematics_mode,
             self.action_training_history,
+            self.action_training_protocol,
             self.action_training_data,
             self.action_edit_test_data,
             self.action_remove_test_data,
@@ -9474,6 +9494,15 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
                 not self.training_observation_mode and self.project_deletion_directory() is not None)
             self.action_delete_project.setToolTip(self.language.text("dialog.delete_project.requirements"))
 
+        if hasattr(self, "action_export_word_report"):
+            self.action_export_word_report.setEnabled(
+                bool(self.current_project_path) and not self.training_observation_mode
+            )
+            self.action_export_word_report.setToolTip(self.language.text(
+                "tooltip.word_report" if self.current_project_path
+                else "tooltip.disabled.project_required"
+            ))
+
         if self.current_project_path:
             self._no_active_project = False
             project_name = str(
@@ -10616,11 +10645,14 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
 
         file_path = str(file_path)
 
+        with ProjectLoadProgress(self, self.language) as progress:
+            result = self._load_project_contents(file_path, automatic_start, progress)
+            progress.loaded = bool(result)
+            return result
+
+    def _load_project_contents(self, file_path, automatic_start, progress):
         try:
-            project_data = ProjectIO.load_project(
-                file_path,
-                translator=self.language.text
-            )
+            project_data = progress.read(file_path)
 
         except (
             OSError,
@@ -10648,6 +10680,7 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
             []
         )
 
+        progress.phase("project.loading.data")
         training_data_result = (
             self.prepare_project_training_data(
                 file_path,
@@ -10668,6 +10701,7 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
         if test_data_result["cancelled"]:
             return False
 
+        progress.phase("project.loading.network")
         self.reset_project()
 
         self.plc_export_options = ProjectIO.normalize_plc_export_options(project_data.get("plc_export_options"))
@@ -10679,8 +10713,11 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
         neurons_by_id = {}
         highest_neuron_id = 0
 
+        progress.begin(len(project_data["neurons"]) + len(project_data["comments"]) + len(project_data["connections"]))
+
         # Zuerst alle Neuronen erzeugen
         for neuron_data in project_data["neurons"]:
+            progress.advance()
             neuron = self.scene.add_neuron(
                 neuron_data["id"],
                 neuron_data["x"],
@@ -10722,6 +10759,7 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
         highest_comment_id = 0
 
         for comment_data in project_data["comments"]:
+            progress.advance()
             comment = self.scene.add_comment(
                 comment_data["id"],
                 comment_data["x"],
@@ -10742,6 +10780,7 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
         highest_connection_id = 0
 
         for connection_data in project_data["connections"]:
+            progress.advance()
             source_neuron = neurons_by_id[
                 connection_data["source"]
             ]
@@ -10763,6 +10802,7 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
                 connection.id
             )
 
+        progress.phase("project.loading.view")
         self.scene.next_id = (
             highest_neuron_id + 1
         )
@@ -11161,6 +11201,11 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
             )
             return False
 
+        self.current_project_path = str(new_file)
+        if self.training_protocol is not None:
+            # Die Datenmanager können beim Pfadwechsel sofort das Protokoll speichern.
+            self.training_protocol.path = new_directory / "trainingsprotokoll.json"
+
         for manager in (self.training_data_manager, self.test_data_manager):
             manager_path = manager.file_path
             if not manager_path:
@@ -11197,7 +11242,6 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
             self.remove_project_from_history(str(old_file))
         except OSError:
             pass
-        self.current_project_path = str(new_file)
         if not self.write_project_file(self.current_project_path):
             return False
         self.remember_project_directory(self.current_project_path)
@@ -11365,7 +11409,7 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
             if getattr(self, "training_protocol", None) is None:
                 self.initialize_training_protocol()
             self.protocol_checkpoint()
-            self.training_protocol.flush(Path(file_path).parent / "trainingsprotokoll.txt")
+            self.training_protocol.flush(Path(file_path).parent / "trainingsprotokoll.json")
             ProjectIO.save_project(
                 file_path,
                 self.scene,

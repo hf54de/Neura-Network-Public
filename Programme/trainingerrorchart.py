@@ -14,7 +14,7 @@ from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from language import LanguageManager
-from numberformat import linear_axis_ticks, linear_axis_label
+from numberformat import linear_axis_ticks, linear_axis_label, logarithmic_axis_exponents
 from trainingcomparison import (
     clipped_curve, comparison_color, normalized_curve, metric_curve_key, metric_chart_title,
 )
@@ -400,23 +400,9 @@ class TrainingErrorChart(ChartColors, QWidget):
         )
 
         if logarithmic_scale:
-            exponent_step = max(
-                1,
-                math.ceil(logarithmic_span / 5)
+            tick_exponents = logarithmic_axis_exponents(
+                logarithmic_minimum, logarithmic_maximum
             )
-            tick_exponents = list(
-                range(
-                    logarithmic_minimum,
-                    logarithmic_maximum + 1,
-                    exponent_step
-                )
-            )
-
-            if tick_exponents[-1] != logarithmic_maximum:
-                tick_exponents.append(
-                    logarithmic_maximum
-                )
-
             y_ticks = [
                 (
                     (
