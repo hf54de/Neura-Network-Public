@@ -20,7 +20,7 @@ from graphicalexperimentdialog import show_yellow_information_dialog
 class FunctionBlockPreview(QWidget):
     """Zeigt Ein- und Ausgänge einer Deklaration als IEC-nahe FB-Skizze."""
 
-    def __init__(self, headers, rows, fb_name="FB_NeuronNetz", parent=None):
+    def __init__(self, headers, rows, fb_name="FB_NeuronNet", parent=None):
         super().__init__(parent)
         self.headers = tuple(headers)
         self.rows = rows

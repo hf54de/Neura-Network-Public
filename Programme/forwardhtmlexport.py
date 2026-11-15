@@ -62,7 +62,7 @@ PAGE = Template(r'''<!doctype html>
 <title>$title</title>
 <style>
 * { box-sizing: border-box; }
-body { margin: 0; color: #171717; background: #f0f0f0; font: 12px "Segoe UI", sans-serif; }
+body { margin: 0; color: #171717; background: transparent; font: 12px "Segoe UI", sans-serif; }
 .viewport { max-height: 100vh; overflow: auto; }
 main { min-width: 722px; }
 .content { padding: 10px 12px 12px; }
@@ -70,7 +70,7 @@ fieldset { min-width: 0; margin: 0 4px 12px; padding: 9px 9px 11px; border: 1px 
 legend { padding: 0 2px; }
 .grid {
     display: grid;
-    grid-template-columns: 102px 135px 111px 81px 101px minmax(140px, 1fr);
+    grid-template-columns: 102px var(--raw-column, 135px) 111px 81px 101px minmax(140px, 1fr);
     row-gap: 7px;
     grid-template-rows: 16px;
     grid-auto-rows: minmax(22px, auto);
@@ -79,6 +79,9 @@ legend { padding: 0 2px; }
 #outputs { row-gap: 6px; grid-auto-rows: minmax(20px, auto); }
 .heading, .name, .value, .scaling { padding-right: 7px; }
 .heading { white-space: nowrap; }
+#input-list { min-inline-size: min-content; }
+#inputs { --raw-column: max-content; }
+#inputs > :nth-child(2) { min-width: 135px; }
 .name { overflow: hidden; white-space: nowrap; }
 .value, .range, input[type=number] { font: 11px "Courier New", monospace; }
 .value, .scaling { overflow-wrap: anywhere; }
@@ -86,12 +89,12 @@ legend { padding: 0 2px; }
 .range span { overflow-wrap: anywhere; }
 .range span:nth-child(2), .no-slider { text-align: center; }
 .number {
-    display: flex; align-items: center; min-width: 0; width: calc(100% - 8px);
+    display: flex; align-items: center; margin-right: 8px;
     height: 21px; background: #f9f9f9; border: 1px solid #dedede;
     border-bottom-color: #878787; border-radius: 4px;
 }
 .number:focus-within { outline: 1px solid #707070; }
-.number input { width: 100%; min-width: 0; border: 0; padding: 0 4px; background: transparent; outline: none; }
+.number input { flex: 1 1 0; width: 0; min-width: 68px; border: 0; padding: 0 4px; background: transparent; outline: none; }
 .number input { appearance: textfield; }
 .number input::-webkit-inner-spin-button,
 .number input::-webkit-outer-spin-button { appearance: none; }
@@ -105,7 +108,7 @@ legend { padding: 0 2px; }
     transform: translateY(1px) rotate(-45deg);
 }
 .spin.down::before { transform: translateY(-2px) rotate(135deg); }
-.unit { margin-right: 4px; font: 11px "Courier New", monospace; overflow-wrap: anywhere; }
+.unit { flex: none; margin-right: 4px; font: 11px "Courier New", monospace; white-space: nowrap; }
 input[type=range] { appearance: none; width: 100%; height: 18px; margin: 0; background: transparent; }
 input[type=range]::-webkit-slider-runnable-track { height: 4px; background: #878787; }
 input[type=range]::-webkit-slider-thumb {
@@ -142,7 +145,31 @@ span.binary { min-height: 18px; }
 }
 .array-cell[aria-pressed="true"] { background: var(--array-on); }
 .array-cell:hover { border: 2px solid #4f788f; }
+.characteristic-controls, .characteristic-key { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
+.characteristic-controls select { max-width: 100%; font: inherit; }
+.characteristic-value { margin: 7px 0 3px; padding: 4px; background: #edf4f9; }
+input[type=range].characteristic-slider {
+    --thumb-width: 16px;
+    margin-left: calc(var(--slider-start, 8px) - var(--thumb-width) / 2);
+    width: calc(var(--slider-span, 100% - 16px) + var(--thumb-width));
+}
+input[type=range].characteristic-slider::-webkit-slider-thumb {
+    box-sizing: border-box; width: var(--thumb-width);
+}
+input[type=range].characteristic-slider::-moz-range-thumb {
+    box-sizing: border-box; width: var(--thumb-width);
+}
+.characteristic-plot { position: relative; }
+.characteristic-plot canvas { display: block; width: 100%; height: 190px; }
+.characteristic-point { position: absolute; width: 10px; height: 10px; border: 1px solid #9c3a19;
+    border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+.characteristic-caption { text-align: center; margin: 0 0 5px; }
+.characteristic-key span { display: inline-flex; align-items: center; gap: 5px; }
+.characteristic-key span[hidden] { display: none; }
+.characteristic-key i { width: 8px; height: 8px; border-radius: 50%; }
+.characteristic-key i.line { width: 13px; height: 2px; border-radius: 0; }
 #status { margin: 3px 0 0; line-height: 1.45; }
+#status:empty { display: none; }
 </style>
 </head>
 <body>
@@ -265,20 +292,20 @@ function gridIndex(grid, value) {
     return index > grid.count ? grid.count : index;
 }
 
-function sliderPosition(entry, grid, value) {
+function sliderPosition(entry, grid, value, positions) {
     if (grid) {
         return grid.count === 0n ? 0 : Number(roundRatio(gridIndex(grid, value) * BigInt(grid.positions), grid.count));
     }
     if (entry.minimum === entry.maximum) return 0;
-    return Math.round((value - entry.minimum) / (entry.maximum - entry.minimum) * 1000);
+    return Math.round((value - entry.minimum) / (entry.maximum - entry.minimum) * positions);
 }
 
-function sliderValue(entry, grid, position) {
+function sliderValue(entry, grid, position, positions) {
     if (grid) {
         const index = grid.positions ? roundRatio(BigInt(position) * grid.count, BigInt(grid.positions)) : 0n;
         return gridValue(grid, index);
     }
-    return entry.minimum + position / 1000 * (entry.maximum - entry.minimum);
+    return entry.minimum + position / positions * (entry.maximum - entry.minimum);
 }
 
 function setBinary(node, active, uncertain) {
@@ -299,6 +326,7 @@ function createInput(grid, entry) {
     let readValue;
     let setChecked;
     let sliderCell;
+    let addSlider;
     if (entry.binary) {
         const button = element("button", "binary");
         button.type = "button";
@@ -333,22 +361,33 @@ function createInput(grid, entry) {
         if (entry.unit) valueCell.append(element("span", "unit", entry.unit));
 
         const stepGrid = prepareGrid(entry.grid);
-        const slider = element("input");
-        slider.type = "range";
-        slider.min = 0;
-        slider.max = stepGrid ? stepGrid.positions : 1000;
-        slider.step = 1;
-        slider.disabled = entry.maximum <= entry.minimum;
-        slider.setAttribute("aria-label", entry.name + " – " + model.inputHeaders[5]);
-        slider.value = sliderPosition(entry, stepGrid, entry.value);
-        sliderCell = slider;
-
+        const sliders = [];
         let value = entry.value;
+        addSlider = (label, fallbackPositions) => {
+            const positions = stepGrid ? stepGrid.positions : fallbackPositions;
+            const slider = element("input");
+            slider.type = "range";
+            slider.min = 0;
+            slider.max = positions;
+            slider.step = 1;
+            slider.disabled = entry.maximum <= entry.minimum;
+            slider.setAttribute("aria-label", label);
+            slider.value = sliderPosition(entry, stepGrid, value, positions);
+            slider.addEventListener("input", () => {
+                update(sliderValue(entry, stepGrid, slider.valueAsNumber, positions), true);
+            });
+            sliders.push({ slider, positions });
+            return slider;
+        };
+        sliderCell = addSlider(entry.name + " – " + model.inputHeaders[5], 1000);
+
         function update(candidate, commit) {
             if (Number.isFinite(candidate)) {
                 const bounded = clamp(candidate, entry.minimum, entry.maximum);
                 value = stepGrid ? gridValue(stepGrid, gridIndex(stepGrid, bounded)) : Number(bounded.toFixed(10));
-                slider.value = sliderPosition(entry, stepGrid, value);
+                for (const { slider, positions } of sliders) {
+                    slider.value = sliderPosition(entry, stepGrid, value, positions);
+                }
                 calculate();
             }
             if (commit) number.value = value;
@@ -377,12 +416,11 @@ function createInput(grid, entry) {
         number.addEventListener("input", () => update(number.valueAsNumber, false));
         number.addEventListener("change", () => update(number.valueAsNumber, true));
         number.addEventListener("blur", () => { number.value = value; });
-        slider.addEventListener("input", () => update(sliderValue(entry, stepGrid, slider.valueAsNumber), true));
         readValue = () => value;
     }
     grid.append(nameLabel(entry.name), valueCell, internal, element("div", "scaling", entry.scaling),
         rangeLabel(entry), sliderCell);
-    return { entry, internal, readValue, setChecked };
+    return { entry, internal, readValue, setChecked, addSlider };
 }
 
 function createOutput(grid, entry) {
@@ -489,11 +527,173 @@ function createArrayView(definition) {
     });
 }
 
+function createCharacteristic(definition, input) {
+    const group = element("fieldset");
+    group.id = "characteristic";
+    const controls = element("div", "characteristic-controls");
+    const outputLabel = element("label", "", definition.outputLabel + " ");
+    const outputSelect = element("select");
+    definition.curves.forEach((curve, index) => {
+        const option = element("option", "", curve.name);
+        option.value = index;
+        outputSelect.append(option);
+    });
+    outputSelect.selectedIndex = Math.max(0, definition.curves.findIndex(
+        curve => curve.output === definition.selectedOutput
+    ));
+    outputLabel.append(outputSelect);
+    const targetsLabel = element("label");
+    const showTargets = element("input");
+    showTargets.type = "checkbox";
+    showTargets.checked = true;
+    targetsLabel.append(showTargets, " " + definition.trainingPoints);
+    controls.append(outputLabel, targetsLabel);
+
+    const value = element("div", "characteristic-value");
+    const slider = input.addSlider(definition.inputLabel + " – " + input.entry.name, 10000);
+    slider.classList.add("characteristic-slider");
+    const stepGrid = prepareGrid(input.entry.grid);
+    const positions = Number(slider.max);
+    const sliderBounds = [0, positions].map(position => sliderValue(input.entry, stepGrid, position, positions));
+    const chart = element("div", "characteristic-plot");
+    const canvas = element("canvas");
+    canvas.setAttribute("role", "img");
+    const point = element("span", "characteristic-point");
+    point.setAttribute("aria-hidden", "true");
+    point.style.background = definition.colors.point;
+    chart.append(canvas, point);
+    const caption = element("div", "characteristic-caption");
+    const key = element("div", "characteristic-key");
+    function addKey(label, color, line = false) {
+        const item = element("span");
+        const symbol = element("i", line ? "line" : "");
+        symbol.style.background = color;
+        item.append(symbol, label);
+        key.append(item);
+        return item;
+    }
+    addKey(definition.title, definition.colors.curve, true);
+    addKey(definition.actual, definition.colors.point);
+    const targetsKey = addKey(definition.targets, "#f4c430");
+    group.append(element("legend", "", definition.title), controls, value, slider, chart, caption, key);
+    statusLine.before(group);
+
+    const context = canvas.getContext("2d");
+    const [xMin, xMax] = definition.xBounds;
+    const tickFormat = new Intl.NumberFormat(document.documentElement.lang, { maximumSignificantDigits: 6 });
+    let project = null;
+    let rawOutputs = null;
+    const selectedCurve = () => definition.curves[outputSelect.selectedIndex];
+
+    function updatePoint() {
+        const curve = selectedCurve();
+        if (!rawOutputs) {
+            value.textContent = "–";
+            point.hidden = true;
+            return;
+        }
+
+        const x = input.readValue();
+        const y = rawOutputs[curve.output];
+        value.textContent = definition.xAxis + " = " + tickFormat.format(x)
+            + " | " + definition.actual + ": " + tickFormat.format(y);
+        const [yMin, yMax] = curve.yBounds;
+        point.hidden = !project || x < xMin || x > xMax || y < yMin || y > yMax;
+        if (!point.hidden) {
+            const [px, py] = project(x, y);
+            point.style.left = px + "px";
+            point.style.top = py + "px";
+        }
+    }
+
+    function draw() {
+        const curve = selectedCurve();
+        const [yMin, yMax] = curve.yBounds;
+        const axis = definition.xAxis + " (X) · " + curve.axis + " (Y)";
+        caption.textContent = axis;
+        canvas.setAttribute("aria-label", definition.title + " – " + axis);
+        targetsKey.hidden = !showTargets.checked;
+        const width = canvas.clientWidth;
+        const height = canvas.clientHeight;
+        if (!context || width < 100 || height < 50) return;
+        const ratio = window.devicePixelRatio || 1;
+        canvas.width = Math.round(width * ratio);
+        canvas.height = Math.round(height * ratio);
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+        context.font = '11px "Segoe UI", sans-serif';
+        const left = Math.max(26, ...curve.yTicks.map(y => context.measureText(tickFormat.format(y)).width + 8));
+        const right = width - 34;
+        const top = 10;
+        const bottom = height - 23;
+        project = (x, y) => [
+            left + (x - xMin) / (xMax - xMin) * (right - left),
+            bottom - (y - yMin) / (yMax - yMin) * (bottom - top),
+        ];
+
+        const [sliderStart, sliderEnd] = sliderBounds.map(x => project(x, yMin)[0]);
+        slider.style.setProperty("--slider-start", sliderStart + "px");
+        slider.style.setProperty("--slider-span", sliderEnd - sliderStart + "px");
+
+        context.strokeStyle = definition.colors.grid;
+        context.fillStyle = definition.colors.axes;
+        context.beginPath();
+        context.textAlign = "center";
+        context.textBaseline = "top";
+        for (const x of definition.xTicks) {
+            const [px] = project(x, yMin);
+            context.moveTo(px, top);
+            context.lineTo(px, bottom);
+            context.fillText(tickFormat.format(x), px, bottom + 4);
+        }
+        context.textAlign = "right";
+        context.textBaseline = "middle";
+        for (const y of curve.yTicks) {
+            const [, py] = project(xMin, y);
+            context.moveTo(left, py);
+            context.lineTo(right, py);
+            context.fillText(tickFormat.format(y), left - 5, py);
+        }
+        context.stroke();
+        context.strokeStyle = definition.colors.axes;
+        context.strokeRect(left, top, right - left, bottom - top);
+
+        if (showTargets.checked) {
+            context.fillStyle = "#f4c430";
+            for (const target of curve.targets) {
+                const [px, py] = project(...target);
+                context.beginPath();
+                context.arc(px, py, 3, 0, 2 * Math.PI);
+                context.fill();
+            }
+        }
+        context.strokeStyle = definition.colors.curve;
+        context.lineWidth = 2;
+        context.beginPath();
+        context.moveTo(...project(...curve.points[0]));
+        for (const pair of curve.points.slice(1)) context.lineTo(...project(...pair));
+        context.stroke();
+        updatePoint();
+    }
+
+    outputSelect.addEventListener("change", draw);
+    showTargets.addEventListener("change", draw);
+    const resize = new ResizeObserver(draw);
+    resize.observe(chart);
+    draw();
+    return values => {
+        rawOutputs = values;
+        updatePoint();
+    };
+}
+
 const inputGrid = createGrid("inputs", model.inputHeaders);
 const outputGrid = createGrid("outputs", model.outputHeaders);
 const inputs = model.inputs.map(entry => createInput(inputGrid, entry));
 const outputs = model.outputs.map(entry => createOutput(outputGrid, entry));
 if (model.inputArray) createArrayView(model.inputArray);
+const updateCharacteristic = model.characteristic
+    ? createCharacteristic(model.characteristic, inputs[0])
+    : null;
 
 function showOutput(row, value, rawValue) {
     const { entry, raw, internal, indicator, fill } = row;
@@ -543,11 +743,13 @@ function calculate() {
             row.indicator.removeAttribute("title");
             if (row.entry.binary) row.indicator.textContent = "–";
         }
+        if (updateCharacteristic) updateCharacteristic(null);
         statusLine.textContent = text.error;
         return;
     }
     outputs.forEach((row, index) => showOutput(row, values[row.entry.slot], rawValues[index]));
-    statusLine.textContent = text.completed;
+    if (updateCharacteristic) updateCharacteristic(rawValues);
+    statusLine.textContent = "";
 }
 
 calculate();

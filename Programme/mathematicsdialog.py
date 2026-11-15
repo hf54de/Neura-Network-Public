@@ -355,7 +355,7 @@ class MathematicsDialog(QDialog):
         self.update_interface()
 
     @staticmethod
-    def clone_network(source_network):
+    def clone_network(source_network, *, copy_optimizer=True):
         """Build a detached calculation model without copying Qt objects."""
         clone = NeuralNetwork()
         neuron_attributes = (
@@ -383,10 +383,11 @@ class MathematicsDialog(QDialog):
             clone.add_connection(connection)
         clone.trainer.learning_rate = source_network.trainer.learning_rate
         clone.trainer.momentum = source_network.trainer.momentum
-        clone.restore_optimizer_state(source_network.get_optimizer_state())
-        clone.trainer.restore_momentum_state(
-            source_network.trainer.get_momentum_state()
-        )
+        if copy_optimizer:
+            clone.restore_optimizer_state(source_network.get_optimizer_state())
+            clone.trainer.restore_momentum_state(
+                source_network.trainer.get_momentum_state()
+            )
         return clone
 
     def update_window_title(self):

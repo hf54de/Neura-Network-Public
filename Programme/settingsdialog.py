@@ -282,7 +282,7 @@ class SettingsDialog(QDialog):
         return str(directory)
 
     def load_profile(self):
-        path, _ = QFileDialog.getOpenFileName(self, self.profile_text("Profil laden", "Load profile"), self.profile_directory(), "NeuronNetz (*.json)")
+        path, _ = QFileDialog.getOpenFileName(self, self.profile_text("Profil laden", "Load profile"), self.profile_directory(), "NeuronNet (*.json)")
         if not path:
             return
         try:
@@ -318,7 +318,7 @@ class SettingsDialog(QDialog):
 
     def save_profile(self):
         path, _ = QFileDialog.getSaveFileName(self, self.profile_text("Profil speichern", "Save profile"),
-            str(Path(self.profile_directory()) / ((self.profile_name or "Standard") + ".json")), "NeuronNetz (*.json)")
+            str(Path(self.profile_directory()) / ((self.profile_name or "Standard") + ".json")), "NeuronNet (*.json)")
         if not path:
             return
         if not Path(path).suffix:

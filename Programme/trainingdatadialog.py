@@ -4603,6 +4603,7 @@ class TrainingDataDialog(QDialog):
             )
             if file_path:
                 author_html_export.write_html_file(file_path, self.table_as_html())
+                author_html_export.offer_open_html(self, text, file_path)
         except OSError as error:
             QMessageBox.critical(self, text("data.message.save_error_title"), str(error))
 

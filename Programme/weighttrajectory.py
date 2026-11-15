@@ -86,11 +86,11 @@ def validate_trajectory(data, completed_epochs, initial_state=None):
 
 
 class WeightSelectionDialog(QDialog):
-    def __init__(self, network, language, pair=None, parent=None):
+    def __init__(self, network, language, pair=None, parent=None, *, help_key="trajectory.select_help"):
         super().__init__(parent)
         self.setWindowTitle(language.text("trajectory.select_title"))
         layout = QVBoxLayout(self)
-        note = QLabel(language.text("trajectory.select_help")); note.setWordWrap(True)
+        note = QLabel(language.text(help_key)); note.setWordWrap(True)
         layout.addWidget(note)
         form = QFormLayout(); layout.addLayout(form)
         self.x_combo, self.y_combo = QComboBox(), QComboBox()

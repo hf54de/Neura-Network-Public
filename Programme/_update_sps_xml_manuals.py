@@ -7,8 +7,8 @@ from docx.shared import Pt, RGBColor
 
 
 DOCS = Path(r"C:\Neuronales Netz\Dokumente")
-DE = DOCS / "NeuronNetz_Hilfe_DE_finale_Version.docx"
-EN = DOCS / "NeuronNetz_Help_EN_final_Version.docx"
+DE = DOCS / "NeuronNet_Hilfe_DE_finale_Version.docx"
+EN = DOCS / "NeuronNet_Help_EN_final_Version.docx"
 
 
 def paragraph_with_prefix(document, prefix):

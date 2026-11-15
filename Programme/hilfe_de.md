@@ -1,10 +1,10 @@
-# NeuronNetz – kompakte Hilfe
+# NeuronNet – kompakte Hilfe
 
 Diese integrierte Hilfe beantwortet die wichtigsten Fragen direkt im Programm. Das ausführliche bebilderte Handbuch kann über **Hilfe → Tutorials** als Word- oder PDF-Datei geöffnet werden.
 
-## Einordnung und besonderer Nutzen von NeuronNetz
+## Einordnung und besonderer Nutzen von NeuronNet
 
-NeuronNetz ist ein transparentes Entwicklungs- und Lernwerkzeug für kleine
+NeuronNet ist ein transparentes Entwicklungs- und Lernwerkzeug für kleine
 neuronale Netze in der Automatisierungstechnik. Das Tool verbindet die
 Bearbeitung der Trainingsdaten, den grafischen Aufbau des Netzes, das Training,
 die Prüfung der Ergebnisse, die Gestaltung einer Anwendungsansicht und den
@@ -20,7 +20,7 @@ Vergleichsläufe verfolgt werden.
 
 ### Ein durchgängiger Arbeitsablauf
 
-NeuronNetz begleitet ein Projekt von den Ausgangsdaten bis zur späteren
+NeuronNet begleitet ein Projekt von den Ausgangsdaten bis zur späteren
 Verwendung des trainierten Netzes:
 
 1. Trainingsdaten erstellen, importieren und beschreiben.
@@ -41,7 +41,7 @@ sichtbar und können gezielt geprüft werden.
 ### Sichtbarer und nachvollziehbarer Lernprozess
 
 Viele Werkzeuge behandeln ein trainiertes Modell hauptsächlich als fertige
-Datei. NeuronNetz legt den Schwerpunkt auf die einzelnen Schritte, die zu
+Datei. NeuronNet legt den Schwerpunkt auf die einzelnen Schritte, die zu
 diesem Modell führen.
 
 Der Anwender kann unter anderem untersuchen:
@@ -67,7 +67,7 @@ betrachten.
 ### Umfassendere Prüfung des trainierten Netzes
 
 Ein kleiner mittlerer Trainingsfehler allein reicht nicht aus, um die Qualität
-eines Netzes zu beurteilen. Deshalb stellt NeuronNetz mehrere ergänzende
+eines Netzes zu beurteilen. Deshalb stellt NeuronNet mehrere ergänzende
 Auswertungen bereit.
 
 Dazu gehören:
@@ -95,7 +95,7 @@ Beurteilung als die alleinige Betrachtung des Trainingsfehlers.
 ### Bedeutung der Trainingsdaten
 
 Die Aussagekraft eines neuronalen Netzes hängt wesentlich von seinen
-Trainingsdaten ab. Deshalb unterscheidet NeuronNetz die Herkunft der Daten:
+Trainingsdaten ab. Deshalb unterscheidet NeuronNet die Herkunft der Daten:
 
 - **Empirische Messdaten**
 - **Formelbasiert erzeugte Daten**
@@ -152,7 +152,7 @@ Für industrielle Anwendungen ist ein kontrollierter Ablauf sinnvoll:
 2. Fehlende Sollwerte werden durch Laborergebnisse, Qualitätsprüfungen oder
    bestätigte Anlagenzustände ergänzt.
 3. Die Daten werden außerhalb der SPS aufbereitet.
-4. NeuronNetz trainiert und prüft das Netzwerk.
+4. NeuronNet trainiert und prüft das Netzwerk.
 5. Der Anwender bewertet Trainings- und Testdaten, Fehlerverlauf und
    Einzelfehler.
 6. Das freigegebene Netz wird als versionierter SPS-Funktionsbaustein
@@ -167,7 +167,7 @@ bewusst freigegeben wurde. Der deterministische SPS-Zyklus wird nicht durch
 einen laufenden Trainingsvorgang belastet.
 
 Ein selbstständiges und unkontrolliertes Weiterlernen in der SPS ist nicht das
-Ziel von NeuronNetz. Änderungen am Modell sollen nachvollziehbar, vergleichbar
+Ziel von NeuronNet. Änderungen am Modell sollen nachvollziehbar, vergleichbar
 und bei Bedarf rückgängig zu machen sein.
 
 ### Einordnung gegenüber industriellen KI-Lösungen
@@ -178,9 +178,9 @@ Hardware und die Einbindung in größere Daten- und Automatisierungsstrukturen.
 Dafür werden je nach Hersteller besondere Laufzeitkomponenten, Edge-Geräte oder
 zusätzliche Lizenzen benötigt.
 
-NeuronNetz verfolgt einen überschaubaren und transparenten Ansatz:
+NeuronNet verfolgt einen überschaubaren und transparenten Ansatz:
 
-| NeuronNetz | Typische industrielle KI-Plattform |
+| NeuronNet | Typische industrielle KI-Plattform |
 |---|---|
 | Netzwerk kann grafisch aufgebaut werden | Modell wird häufig mit externen Werkzeugen erstellt |
 | Lernvorgang ist sichtbar und untersuchbar | Training bleibt meist außerhalb der Laufzeitumgebung |
@@ -192,7 +192,7 @@ NeuronNetz verfolgt einen überschaubaren und transparenten Ansatz:
 | Für kleine und verständliche Netze ausgelegt | Auch für große und komplexe Modelle geeignet |
 | Lern-, Analyse- und Engineeringwerkzeug | Industrielle Infrastruktur- und Ausführungsplattform |
 
-NeuronNetz ersetzt keine umfassende industrielle KI-Infrastruktur. Seine Stärke
+NeuronNet ersetzt keine umfassende industrielle KI-Infrastruktur. Seine Stärke
 liegt in der Verbindung von Verständlichkeit, Datenbearbeitung, sichtbarem
 Training, ausführlicher Analyse und nachvollziehbarem SPS-Code.
 
@@ -222,7 +222,7 @@ werden:
 - Wurde das exportierte Netz unter realistischen Bedingungen geprüft?
 - Sind die Anforderungen an Sicherheit, Dokumentation und Freigabe erfüllt?
 
-NeuronNetz unterstützt diese Beurteilung durch transparente Darstellung und
+NeuronNet unterstützt diese Beurteilung durch transparente Darstellung und
 verschiedene Prüfwerkzeuge. Die Verantwortung für Datenqualität, fachliche
 Plausibilität und den sicheren Einsatz des exportierten Netzes bleibt beim
 Anwender.
@@ -231,7 +231,7 @@ Anwender.
 
 # 1. Überblick
 
-**NeuronNetz** ist ein grafischer Editor zum Erstellen, Trainieren und Untersuchen kleiner neuronaler Netze. Neuronen, Verbindungen, Gewichte, Aktivierungsfunktionen und Rechenwerte bleiben sichtbar und können gezielt bearbeitet werden.
+**NeuronNet** ist ein grafischer Editor zum Erstellen, Trainieren und Untersuchen kleiner neuronaler Netze. Neuronen, Verbindungen, Gewichte, Aktivierungsfunktionen und Rechenwerte bleiben sichtbar und können gezielt bearbeitet werden.
 
 Ein typischer Ablauf ist:
 
@@ -564,7 +564,7 @@ Der Projektbericht kann als Word- oder PDF-Dokument exportiert werden. Die Autor
 
 Das Menü **Datei → Beispielprojekte** durchsucht den aktuell gewählten Projektordner nach entsprechend gekennzeichneten Projekten. Deutsche und englische Projektsammlungen können unabhängig von der Programmsprache gewählt werden.
 
-Der Projektassistent hilft beim Entwickeln eigener Ideen. Er erzeugt einen bearbeitbaren Prompt für eine externe KI mit Projektbeschreibung, Inputs, Outputs, Wertebereichen, Grundlagen, Netzvorschlag und tabulatorgetrennten Trainingsdaten. NeuronNetz sendet selbst keine Daten an einen externen Dienst.
+Der Projektassistent hilft beim Entwickeln eigener Ideen. Er erzeugt einen bearbeitbaren Prompt für eine externe KI mit Projektbeschreibung, Inputs, Outputs, Wertebereichen, Grundlagen, Netzvorschlag und tabulatorgetrennten Trainingsdaten. NeuronNet sendet selbst keine Daten an einen externen Dienst.
 
 # 30. Typische Probleme
 
@@ -619,7 +619,7 @@ Werden alle Läufe gelöscht, verschwinden Ergebnisanzeige und Kurve im geöffne
 
 # 34. SPS-Export
 
-Der experimentelle SPS-Export überträgt die Vorwärtsberechnung eines bereits trainierten Netzes in einen SPS-Funktionsbaustein. Das Training bleibt in NeuronNetz; der Export verändert keine Gewichte oder Bias-Werte.
+Der experimentelle SPS-Export überträgt die Vorwärtsberechnung eines bereits trainierten Netzes in einen SPS-Funktionsbaustein. Das Training bleibt in NeuronNet; der Export verändert keine Gewichte oder Bias-Werte.
 
 Aktivieren Sie das Menü mit **Einstellungen → Programmeinstellungen... → Experimentell → SPS-Export in der Menüleiste anzeigen**. Praktisch geprüft sind **Mitsubishi GX Works2** und **Mitsubishi GX Works3**. CODESYS, TwinCAT und Siemens SCL sind als **In Vorbereitung** sichtbar, aber deaktiviert.
 
@@ -630,9 +630,9 @@ Das Exportfenster enthält zwei schreibgeschützte Ausgabebereiche:
 1. Deklaration mit Ein- und Ausgängen, internen Variablen, Skalierungswerten, Gewichten und Bias-Werten.
 2. Eingerückter und farblich hervorgehobener Structured Text für die Vorwärtsberechnung.
 
-Oberhalb der Exportdaten zeigt NeuronNetz die Anzahl der Variablen, getrennt nach Ein-/Ausgängen, Skalierung, Gewichten `W`, Bias-Werten `B`, internen Neuronwerten `N` und Hilfswerten. Eine statische Aufwandsschätzung nennt Multiplikationen, Additionen, `EXP`-Aufrufe und eine Größenklasse. Sie ist keine garantierte Zykluszeit; diese hängt von SPS-Typ, CPU und Projekt ab.
+Oberhalb der Exportdaten zeigt NeuronNet die Anzahl der Variablen, getrennt nach Ein-/Ausgängen, Skalierung, Gewichten `W`, Bias-Werten `B`, internen Neuronwerten `N` und Hilfswerten. Eine statische Aufwandsschätzung nennt Multiplikationen, Additionen, `EXP`-Aufrufe und eine Größenklasse. Sie ist keine garantierte Zykluszeit; diese hängt von SPS-Typ, CPU und Projekt ab.
 
-Der Metadatenkopf enthält Exportdatum, NeuronNetz-Version, editierbare Modellversion, automatisch berechnete Modellkennung, Netzarchitektur, Aktivierungsfunktionen und Angaben zum Trainingslauf.
+Der Metadatenkopf enthält Exportdatum, NeuronNet-Version, editierbare Modellversion, automatisch berechnete Modellkennung, Netzarchitektur, Aktivierungsfunktionen und Angaben zum Trainingslauf.
 
 Der Menüpunkt **IEC 61131-10 XML** verwendet einen eigenen herstellerneutralen IEC-Generator. Er enthält weder Mitsubishi-Bezeichnungen noch GX-Works-spezifische Funktionsaufrufe. Der getrennte Menüpunkt **Mitsubishi GX Works3 – XML** verwendet denselben Aufbau mit Einzelvariablen und denselben GX-Works3-kompatiblen ST-Code, schreibt Variablenkommentare aber als allgemeinen Kommentar Nr. 1 in Mitsubishis `AddData/VariableComments`-Struktur. Damit bleibt der neutrale Export unverändert und die Herstellererweiterung klar abgegrenzt. Wie vollständig eine Entwicklungsumgebung den IEC-61131-10-Standard importiert, muss im jeweiligen Zielsystem praktisch geprüft werden.
 
@@ -640,15 +640,15 @@ Ein exportierter Baustein kann den Freigabeeingang `Enable` und den Statusausgan
 
 Im Bereich **Bausteineinstellungen** können diese Zusatzanschlüsse einzeln ausgewählt werden. Nicht sinnvolle abhängige Optionen werden automatisch deaktiviert. Ohne Fallback-Anschlüsse bleiben die letzten Ausgangswerte bei einer übersprungenen Berechnung erhalten. Ist Fallback gewählt, aber `Hold_Last_Output` nicht, werden die Ersatzwerte immer ausgegeben. Mit beiden Anschlüssen kann das Verhalten zur Laufzeit gewählt werden. Wird `Range_Tolerance_Percent` nicht als Eingang erzeugt, bleibt die Toleranz als interne Konstante von 10 % erhalten. Vorschau, Deklarationen, ST-, ASC- und XML-Code werden bei jeder Auswahl unmittelbar neu erzeugt.
 
-Deklarationen, Structured Text und XML sind im Exportfenster schreibgeschützt. Änderbar bleiben FB-Name, Modellversion und die Auswahl der Zusatzanschlüsse; daraus erzeugt NeuronNetz die Ausgabedaten neu. Falls individuelle Codeänderungen erforderlich sind, nehmen Sie diese nach dem Export in der SPS-Entwicklungsumgebung oder einem externen Editor vor. Die abschließende Prüfung, Übersetzung und Freigabe erfolgt stets im Compiler des jeweiligen SPS-Zielsystems.
+Deklarationen, Structured Text und XML sind im Exportfenster schreibgeschützt. Änderbar bleiben FB-Name, Modellversion und die Auswahl der Zusatzanschlüsse; daraus erzeugt NeuronNet die Ausgabedaten neu. Falls individuelle Codeänderungen erforderlich sind, nehmen Sie diese nach dem Export in der SPS-Entwicklungsumgebung oder einem externen Editor vor. Die abschließende Prüfung, Übersetzung und Freigabe erfolgt stets im Compiler des jeweiligen SPS-Zielsystems.
 
 Unter jedem Bereich steht eine eigene Kopiertaste. Legen Sie in der SPS-Umgebung zuerst einen leeren Funktionsbaustein an, übertragen Sie danach die Deklaration und anschließend den ST-Programmkörper. `REAL` wird als **FLOAT (Single Precision)** erkannt, `BOOL` als **Bit**.
 
-Alternativ speichert **Vollständige ASC-Datei speichern...** den gesamten Funktionsbaustein für GX Works2 oder GX Works3. **IEC 61131-10 XML...** öffnet den vollständigen, schreibgeschützten und herstellerneutral erzeugten XML-Code. Für den direkten Import in GX Works3 ist **Mitsubishi GX Works3 – XML...** vorgesehen. Mit **XML kopieren** wird das jeweilige Dokument vollständig in die Zwischenablage übernommen; **XML-Datei speichern...** speichert genau den sichtbaren Inhalt. Geringfügige Ergebnisabweichungen gegenüber NeuronNetz können durch die 32-Bit-Single-Precision-Rechnung der jeweiligen SPS entstehen.
+Alternativ speichert **Vollständige ASC-Datei speichern...** den gesamten Funktionsbaustein für GX Works2 oder GX Works3. **IEC 61131-10 XML...** öffnet den vollständigen, schreibgeschützten und herstellerneutral erzeugten XML-Code. Für den direkten Import in GX Works3 ist **Mitsubishi GX Works3 – XML...** vorgesehen. Mit **XML kopieren** wird das jeweilige Dokument vollständig in die Zwischenablage übernommen; **XML-Datei speichern...** speichert genau den sichtbaren Inhalt. Geringfügige Ergebnisabweichungen gegenüber NeuronNet können durch die 32-Bit-Single-Precision-Rechnung der jeweiligen SPS entstehen.
 
 ## Sicherheit und Verantwortung
 
-Der erzeugte SPS-Code dient als technische Unterstützung und muss vor dem produktiven Einsatz durch eine qualifizierte Fachkraft geprüft, getestet und für die konkrete Anlage freigegeben werden. Der Anwender ist für die korrekte Integration, Validierung, Risikobeurteilung und Einhaltung aller geltenden Sicherheitsvorschriften verantwortlich. Der Code ist nicht als Sicherheitsfunktion, Not-Aus-Funktion oder Ersatz für zertifizierte Schutzmaßnahmen vorgesehen. NeuronNetz übernimmt keine Verantwortung für Schäden, Betriebsunterbrechungen oder Fehlfunktionen, die aus der ungeprüften oder unsachgemäßen Verwendung des erzeugten Codes entstehen.
+Der erzeugte SPS-Code dient als technische Unterstützung und muss vor dem produktiven Einsatz durch eine qualifizierte Fachkraft geprüft, getestet und für die konkrete Anlage freigegeben werden. Der Anwender ist für die korrekte Integration, Validierung, Risikobeurteilung und Einhaltung aller geltenden Sicherheitsvorschriften verantwortlich. Der Code ist nicht als Sicherheitsfunktion, Not-Aus-Funktion oder Ersatz für zertifizierte Schutzmaßnahmen vorgesehen. NeuronNet übernimmt keine Verantwortung für Schäden, Betriebsunterbrechungen oder Fehlfunktionen, die aus der ungeprüften oder unsachgemäßen Verwendung des erzeugten Codes entstehen.
 
 Beim ersten SPS-Export erscheint dieser Verantwortungshinweis einmalig zur Bestätigung. Im Exportfenster bleibt eine Kurzfassung sichtbar; das Informationssymbol **(i)** öffnet jederzeit den vollständigen Text. Auch der erzeugte ST-Code enthält einen kompakten Sicherheitshinweis.
 
@@ -674,7 +674,7 @@ Aktivieren Sie im Local-Label-Editor vor dem Einfügen unbedingt **Show Details*
 Label Name | Data Type | Class | Initial Value | Constant | Comment
 ```
 
-**Initial Value** bleibt für `VAR_CONSTANT` leer. Gewichte, Bias und Skalierungswerte müssen unter **Constant**, die Beschreibungen unter **Comment** erscheinen. NeuronNetz stellt dafür eine Excel-ähnliche HTML-Tabelle und tabulatorgetrennten Text gleichzeitig in der Windows-Zwischenablage bereit.
+**Initial Value** bleibt für `VAR_CONSTANT` leer. Gewichte, Bias und Skalierungswerte müssen unter **Constant**, die Beschreibungen unter **Comment** erscheinen. NeuronNet stellt dafür eine Excel-ähnliche HTML-Tabelle und tabulatorgetrennten Text gleichzeitig in der Windows-Zwischenablage bereit.
 
 GX Works3 verwendet die IEC-Schreibweise mit Rückgabewert:
 
@@ -682,10 +682,10 @@ GX Works3 verwendet die IEC-Schreibweise mit Rückgabewert:
 EXP_Ergebnis := EXP(-1.0 * N_N_15_Sum);
 ```
 
-Prüfen Sie nach der Übertragung Konstanten, Eingangsskalierung, mindestens einen analogen Ausgang und vorhandene binäre Ausgänge. GX Works2 und GX Works3 wurden mit einem Feder-Masse-Netz praktisch getestet und lieferten bei gleichen Eingängen dieselben Ergebnisse wie NeuronNetz.
+Prüfen Sie nach der Übertragung Konstanten, Eingangsskalierung, mindestens einen analogen Ausgang und vorhandene binäre Ausgänge. GX Works2 und GX Works3 wurden mit einem Feder-Masse-Netz praktisch getestet und lieferten bei gleichen Eingängen dieselben Ergebnisse wie NeuronNet.
 
 # 35. Ausführliches Handbuch
 
 Diese Markdown-Datei ist eine kompakte Soforthilfe. Das vollständige bebilderte Handbuch erklärt sämtliche Fenster, Schaltflächen und ausführlichen Beispiele.
 
-Über **Hilfe → Tutorials** kann das deutsche oder englische Handbuch als Word- oder PDF-Datei ausgewählt und mit dem zugeordneten Windows-Programm geöffnet werden. NeuronNetz merkt sich den zuletzt gewählten Tutorialordner.
+Über **Hilfe → Tutorials** kann das deutsche oder englische Handbuch als Word- oder PDF-Datei ausgewählt und mit dem zugeordneten Windows-Programm geöffnet werden. NeuronNet merkt sich den zuletzt gewählten Tutorialordner.

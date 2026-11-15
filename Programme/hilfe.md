@@ -1,15 +1,15 @@
-# NeuronNetz – Hilfe und Bedienungsanleitung
+# NeuronNet – Hilfe und Bedienungsanleitung
 
 > **Hinweis zur Hilfedatei**  
 >  
-> Diese Datei ist die bearbeitbare Hilfedatei des Programms **NeuronNetz**.  
+> Diese Datei ist die bearbeitbare Hilfedatei des Programms **NeuronNet**.  
 > Sie kann mit Visual Studio Code, Notepad++, Windows Editor oder jedem anderen Texteditor geändert werden.
 
 ---
 
 # 1. Überblick
 
-**NeuronNetz** ist ein grafischer Editor zum Erstellen, Trainieren und Testen kleiner neuronaler Netzwerke.
+**NeuronNet** ist ein grafischer Editor zum Erstellen, Trainieren und Testen kleiner neuronaler Netzwerke.
 
 Mit dem Programm können Sie:
 
@@ -68,15 +68,15 @@ Die wichtigsten Menüs sind:
 - **Hilfe**
 
 **Hilfe → Tutorials** öffnet den normalen Windows-Dateidialog. Ohne einen
-persönlich gespeicherten Pfad verwendet NeuronNetz automatisch den sichtbaren
+persönlich gespeicherten Pfad verwendet NeuronNet automatisch den sichtbaren
 Ordner `Tutorials` neben der EXE. Im Quellbetrieb wird entsprechend eine Ebene
 oberhalb des Programmordners gesucht. Fehlt der Ordner, wird er angelegt. Ist
-der Programmort nicht beschreibbar, verwendet NeuronNetz als sicheren Ersatz
-`Dokumente\NeuronNetz\Tutorials`.
+der Programmort nicht beschreibbar, verwendet NeuronNet als sicheren Ersatz
+`Dokumente\NeuronNet\Tutorials`.
 
 Dort kann ein PDF-, Word-, HTML-, Markdown- oder Text-Tutorial ausgewählt und
 mit dem zugehörigen Windows-Programm geöffnet werden. Wird in einen anderen
-Ordner gewechselt und dort eine Datei geöffnet, merkt sich NeuronNetz diesen
+Ordner gewechselt und dort eine Datei geöffnet, merkt sich NeuronNet diesen
 persönlich gewählten Ordner für den nächsten Aufruf. Eigene oder bereits
 bearbeitete Dateien bleiben unverändert.
 
@@ -649,13 +649,13 @@ jedes Netzwerk seine eigene Darstellung und Farbpalette besitzen.
 Die Optionen für die **Programmoberfläche** auf der Seite
 **Darstellung** sowie die Seiten **Werkzeugleisten** und **Editor**
 werden benutzerbezogen unter
-`AppData\Roaming\NeuronNetz\settings.json` gespeichert und gelten für alle
+`AppData\Roaming\NeuronNet\settings.json` gespeichert und gelten für alle
 Projekte. Der Ordner wird beim ersten Speichern automatisch angelegt und muss
 bei einer weitergegebenen EXE nicht vorbereitet werden.
 
 Auf der Seite **Sprache** wird die Programmsprache ausgewählt. Verfügbare
 Sprachen werden aus `languages.json` gelesen. Die Auswahl wird ebenfalls in
-`settings.json` gespeichert. Nach einer Änderung fragt NeuronNetz, ob das
+`settings.json` gespeichert. Nach einer Änderung fragt NeuronNet, ob das
 Programm sofort neu gestartet werden soll. **Ja** speichert und startet nach
 der normalen Prüfung auf ungesicherte Projektänderungen neu. **Nein** speichert
 die Sprache für den nächsten Programmstart. **Abbrechen** verwirft nur die
@@ -865,7 +865,7 @@ Auf der Seite **Experimentell** können Funktionen eingeblendet werden, die
 bereits praktisch nutzbar sind, aber noch erweitert werden. Die Option
 **SPS-Export in der Menüleiste anzeigen** blendet das vollständige Menü
 **SPS-Export** unmittelbar ein oder aus. Die Auswahl ist projektunabhängig und
-wird dauerhaft in `AppData\Roaming\NeuronNetz\settings.json` gespeichert.
+wird dauerhaft in `AppData\Roaming\NeuronNet\settings.json` gespeichert.
 
 Derzeit sind die praktisch geprüften Zielsysteme **Mitsubishi GX Works2** und
 **Mitsubishi GX Works3** verfügbar. CODESYS, TwinCAT und Siemens SCL werden im
@@ -999,7 +999,7 @@ Die gesamte Änderung ist ein gemeinsamer Rückgängig-Schritt. **Abbrechen** od
 **Übernehmen** ohne geänderte Werte verändert das Projekt nicht.
 
 Beim manuellen Löschen oder Ändern des Typs eines Eingangs- oder
-Ausgangsneurons warnt NeuronNetz, dass vorhandene Trainings- und Testdaten
+Ausgangsneurons warnt NeuronNet, dass vorhandene Trainings- und Testdaten
 möglicherweise nicht mehr passen. Reines Verschieben oder optische Änderungen
 lösen keine Warnung aus.
 
@@ -1040,7 +1040,7 @@ in diesem Fall die betroffenen Neuronen und verändert keine Positionen.
 
 Über **Trainingsdaten → Assistent für eigene Projekte...** oder das Symbol
 **Projektassistent** lässt sich ein bearbeitbarer Prompt für eine externe KI
-vorbereiten. NeuronNetz stellt dabei selbst keine Verbindung zu einer KI her
+vorbereiten. NeuronNet stellt dabei selbst keine Verbindung zu einer KI her
 und überträgt keine Daten.
 
 Sieben projektunabhängige Auswahlfelder grenzen Ausgangslage, Interesse,
@@ -1056,7 +1056,7 @@ Erfassungsplan an. Direkt lieferbare Trainingsdaten sollen ohne Überschriften
 und Nummerierung mit echten Tabulatoren zwischen den Spalten ausgegeben
 werden. Analoge Werte werden dabei ausdrücklich als unskalierte Rohwerte in
 ihren natürlichen Einheiten angefordert; die Skalierung erfolgt später in
-NeuronNetz. **Prompt kopieren** übernimmt den fertigen Text in die
+NeuronNet. **Prompt kopieren** übernimmt den fertigen Text in die
 Zwischenablage.
 
 Die zuletzt verwendeten sieben Auswahlen werden als Programmeinstellung,
@@ -1067,7 +1067,7 @@ Darstellung** kann der Assistent einschließlich Menüeintrag und Symbol
 ausgeblendet werden.
 
 KI-Vorschläge und erzeugte Daten müssen fachlich geprüft werden. Simulierte
-Daten ersetzen keine realen Messwerte, und NeuronNetz ist nicht für
+Daten ersetzen keine realen Messwerte, und NeuronNet ist nicht für
 sicherheitskritische reale Steuerungen vorgesehen.
 
 ---
@@ -2285,10 +2285,10 @@ Projektfenster mit folgenden Angaben:
 
 Ohne einen bereits gespeicherten Projektpfad startet dieses Fenster
 automatisch im Ordner `Projekte` neben der EXE. Dadurch kann ein vollständig
-entpacktes NeuronNetz-Paket seine Beispielprojekte, neue Projekte und
+entpacktes NeuronNet-Paket seine Beispielprojekte, neue Projekte und
 Tutorials ohne vorherige Pfadauswahl verwenden. Fehlt `Projekte`, wird der
 Ordner angelegt. Ist der Programmort nicht beschreibbar, wird auf
-`Dokumente\NeuronNetz\Projekte` ausgewichen.
+`Dokumente\NeuronNet\Projekte` ausgewichen.
 Beim ersten Speichern eines neu angelegten Projekts wird immer dieser
 übergeordnete Ordner `Projekte` vorgeschlagen und nicht der Ordner des zuletzt
 verwendeten Einzelprojekts.
@@ -2362,7 +2362,7 @@ An derselben Stelle kann
 oder ausgeschaltet werden. Die Option ist standardmäßig aktiv. Eine beim
 Programmstart ausdrücklich übergebene `.nnproj`-Datei hat immer Vorrang. Ist
 der automatisch gemerkte Pfad nicht mehr vorhanden oder die Projektdatei
-beschädigt, startet NeuronNetz ohne Projekt und verwirft den ungültigen
+beschädigt, startet NeuronNet ohne Projekt und verwirft den ungültigen
 automatischen Startpfad.
 
 Wurde eine dort aufgeführte Projektdatei verschoben oder gelöscht, meldet
@@ -2637,7 +2637,7 @@ Beim Öffnen des Projekts kann eine andere `.nndata`-Datei ausgewählt werden.
 
 # 31. Mathematische Grundlagen
 
-Dieses Kapitel erklärt die Mathematik, die NeuronNetz bei der
+Dieses Kapitel erklärt die Mathematik, die NeuronNet bei der
 Vorwärtsberechnung und beim Training verwendet. Die Formeln sind so
 geschrieben, wie sie im Programm umgesetzt sind.
 
@@ -2694,7 +2694,7 @@ Ausgabewert des Neurons umgewandelt wird.
 
 ## Aktivierungsfunktionen
 
-NeuronNetz unterstützt **Linear**, **ReLU**, **Sigmoid** und **Tanh**.
+NeuronNet unterstützt **Linear**, **ReLU**, **Sigmoid** und **Tanh**.
 Für die Backpropagation wird jeweils auch die Ableitung benötigt.
 
 ### Linear
@@ -2837,7 +2837,7 @@ Der Bias eines Hidden- oder Output-Neurons wird entsprechend geändert:
 b_neu = b_alt + Δb
 ```
 
-Das Pluszeichen in diesen Formeln ergibt sich daraus, dass NeuronNetz
+Das Pluszeichen in diesen Formeln ergibt sich daraus, dass NeuronNet
 den Fehler als `t - y` definiert. Die Aktualisierung bewegt Gewicht und
 Bias dadurch in Richtung eines kleineren Fehlers.
 
@@ -3315,7 +3315,7 @@ kann der Bericht anschließend in Word als PDF gespeichert werden.
 
 Der experimentelle SPS-Export überträgt die Vorwärtsberechnung eines bereits
 trainierten neuronalen Netzes in einen Funktionsbaustein einer
-SPS-Entwicklungsumgebung. Das Training selbst findet weiterhin in NeuronNetz
+SPS-Entwicklungsumgebung. Das Training selbst findet weiterhin in NeuronNet
 statt. Gewichte und Bias-Werte werden durch den Export nicht verändert.
 
 Das Menü wird unter
@@ -3377,7 +3377,7 @@ Class | Label Name | Data Type | Constant | Comment
 Vorgehensweise:
 
 1. In GX Works2 einen leeren Funktionsbaustein anlegen.
-2. Im NeuronNetz-Exportfenster **Deklaration kopieren** wählen.
+2. Im NeuronNet-Exportfenster **Deklaration kopieren** wählen.
 3. In der Local-Label-Tabelle die erste freie Zeile markieren und einfügen.
 4. Im Exportfenster **ST-Code kopieren** wählen.
 5. Den Code in den leeren ST-Programmkörper einfügen.
@@ -3393,7 +3393,7 @@ EXP(TRUE, -1.0 * N_N_15_Sum, EXP_Ergebnis);
 ## Mitsubishi GX Works3
 
 GX Works3 besitzt eine andere Labeltabelle und eine andere Schnittstelle der
-Exponentialfunktion. Deshalb verwendet NeuronNetz dafür einen getrennten
+Exponentialfunktion. Deshalb verwendet NeuronNet dafür einen getrennten
 Exportadapter.
 
 Vor dem Einfügen muss im GX-Works3-Label-Editor **Show Details** aktiviert
@@ -3404,7 +3404,7 @@ Label Name | Data Type | Class | Initial Value | Constant | Comment
 ```
 
 Die Spalte **Initial Value** bleibt bei `VAR_CONSTANT` leer. Gewichte,
-Bias-Werte und Skalierungsgrenzen stehen unter **Constant**. NeuronNetz legt
+Bias-Werte und Skalierungsgrenzen stehen unter **Constant**. NeuronNet legt
 die Deklaration für GX Works3 gleichzeitig als formatierte HTML-Tabelle und als
 tabulatorgetrennten Text in die Windows-Zwischenablage. Dadurch bleiben die
 leere Zwischenspalte, Konstanten und Kommentare beim direkten Einfügen
@@ -3414,7 +3414,7 @@ Vorgehensweise:
 
 1. In GX Works3 einen leeren Funktionsbaustein mit ST-Programmkörper anlegen.
 2. Im Local-Label-Editor **Show Details** aktivieren.
-3. Im NeuronNetz-Exportfenster **Deklaration kopieren** wählen.
+3. Im NeuronNet-Exportfenster **Deklaration kopieren** wählen.
 4. In GX Works3 die erste freie Zeile unter **Label Name** markieren und
    einfügen.
 5. Prüfen, ob die Zahlen unter **Constant** und die Beschreibungen unter
@@ -3432,9 +3432,9 @@ EXP_Ergebnis := EXP(-1.0 * N_N_15_Sum);
 
 ## Genauigkeit und Prüfung
 
-NeuronNetz exportiert die trainierten Parameter mit ausreichender Genauigkeit
+NeuronNet exportiert die trainierten Parameter mit ausreichender Genauigkeit
 für die Mitsubishi-Datentypen mit einfacher Genauigkeit. Wegen der gerundeten
-Anzeige in NeuronNetz kann die SPS mehr Nachkommastellen darstellen, obwohl
+Anzeige in NeuronNet kann die SPS mehr Nachkommastellen darstellen, obwohl
 beide Berechnungen übereinstimmen.
 
 Nach dem ersten Einfügen sollten stets geprüft werden:
@@ -3447,7 +3447,7 @@ Nach dem ersten Einfügen sollten stets geprüft werden:
 
 GX Works2 und GX Works3 wurden praktisch mit demselben trainierten
 Feder-Masse-Netz getestet. Die SPS-Bausteine lieferten bei gleichen Eingängen
-denselben analogen Wert und dieselbe binäre Entscheidung wie NeuronNetz.
+denselben analogen Wert und dieselbe binäre Entscheidung wie NeuronNet.
 
 ---
 

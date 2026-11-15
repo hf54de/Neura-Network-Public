@@ -9,6 +9,8 @@ from settings import Settings
 
 
 class SettingsProfile:
+    FORMAT = "NeuronNet-settings-profile"
+    LEGACY_FORMAT = "NeuronNetz-settings-profile"
     LOCAL_KEYS = {"project_directory", "property_dock_width", "forward_dialog_width"}
 
     @staticmethod
@@ -18,13 +20,13 @@ class SettingsProfile:
 
     @classmethod
     def build(cls, display, ui):
-        return {"format": "NeuronNetz-settings-profile", "version": 1,
+        return {"format": cls.FORMAT, "version": 1,
                 "display": ProjectIO.normalize_display_settings(display),
                 "ui": {k: v for k, v in Settings.normalize_ui_settings(ui).items() if k not in cls.LOCAL_KEYS}}
 
     @classmethod
     def validate(cls, data):
-        if not isinstance(data, dict) or data.get("format") != "NeuronNetz-settings-profile" or data.get("version") != 1:
+        if not isinstance(data, dict) or data.get("format") not in (cls.FORMAT, cls.LEGACY_FORMAT) or data.get("version") != 1:
             raise ValueError("Unsupported profile format / Nicht unterstütztes Profilformat")
         display, ui = data.get("display", {}), data.get("ui", {})
         if not isinstance(display, dict) or not isinstance(ui, dict):

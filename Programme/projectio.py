@@ -1,6 +1,6 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: projectio.py
-# Zweck: Liest, schreibt und normalisiert NeuronNetz-Projektdateien.
+# Zweck: Liest, schreibt und normalisiert NeuronNet-Projektdateien.
 # Letzte Änderung: 05.09.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
@@ -24,7 +24,7 @@ from neurontype import NeuronType
 class ProjectIO:
     """
     Zuständig für das Speichern und Laden
-    von NeuronNetz-Projektdateien.
+    von NeuronNet-Projektdateien.
     """
 
     PROJECT_VERSION = 17

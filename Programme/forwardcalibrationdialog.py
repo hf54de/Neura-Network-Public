@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 
 from buildfeatures import author_html_export
 from trainingdataio import TrainingDataIO
-from applicationcurve import CurvePlot, sample_slice
+from applicationcurve import COLORS, CurvePlot, nice_ticks, sample_slice
 from graphicalexperimentdialog import (
     GraphicalExperimentDialog,
     show_yellow_information_dialog,
@@ -736,8 +736,7 @@ class ForwardCalibrationDialog(QDialog):
         self.characteristic_output = QComboBox()
         for index, mapping in enumerate(self.output_columns):
             if mapping.get("data_type") != "binary":
-                name = str(mapping.get("name") or mapping.get("column_name") or mapping["neuron"].name)
-                self.characteristic_output.addItem(name, index)
+                self.characteristic_output.addItem(self.characteristic_name(mapping), index)
         output_row.addWidget(self.characteristic_output, 1)
         characteristic_layout.addLayout(output_row)
         translate = lambda de, en: de if self.language.current_language.lower().startswith("de") else en
@@ -875,6 +874,7 @@ class ForwardCalibrationDialog(QDialog):
             )
             if file_path:
                 author_html_export.write_html_file(file_path, self.as_html())
+                author_html_export.offer_open_html(self, text, file_path)
         except (OSError, ValueError) as error:
             QMessageBox.critical(self, text("data.message.save_error_title"), str(error))
 
@@ -945,7 +945,6 @@ class ForwardCalibrationDialog(QDialog):
                 "invalid": text("forward.value.invalid"),
                 "within": text("forward.output.within_range"),
                 "outside": text("forward.output.outside_range"),
-                "completed": text("forward.status.completed_unchanged"),
                 "error": text("forward.html.calculation_error"),
             },
         }
@@ -965,7 +964,101 @@ class ForwardCalibrationDialog(QDialog):
                     "onColor": self.color_settings.get("binary_array_on", "#242424"),
                     "offColor": self.color_settings.get("binary_array_off", "#ffffff"),
                 }
+        characteristic = self.html_characteristic()
+        if characteristic is not None:
+            model["characteristic"] = characteristic
         return author_html_export.render_forward_html(self.language, model)
+
+    def html_characteristic(self):
+        if not self.characteristic_available():
+            return None
+
+        x = self.input_columns[0]
+        x_id = x["neuron"].id
+        row = self.input_widgets[0]
+        bounds = (row["minimum"], row["maximum"])
+        if not 0 < bounds[1] - bounds[0] < math.inf:
+            return None
+        try:
+            _, _, x_ticks = nice_ticks(*bounds, 9)
+        except (ArithmeticError, ValueError):
+            return None
+
+        specification = GraphicalExperimentDialog.create_forward_specification(self)
+        inputs = [dict(id=x_id, calibration=x["calibration"])]
+        raw = self.current_input_values()
+        curves = []
+        for index, y in enumerate(self.output_columns):
+            if y.get("data_type") == "binary":
+                continue
+            try:
+                points, _ = sample_slice(
+                    calculate_forward_snapshot, specification, inputs,
+                    dict(id=y["neuron"].id, calibration=y["calibration"]),
+                    raw, x_id, bounds, False, Event(),
+                )
+                if not all(math.isfinite(value) for point in points for value in point):
+                    continue
+                targets = self.characteristic_targets(x, y)
+                ys = [value for _, value in points] + [value for _, value, _ in targets]
+                low, high = min(ys), max(ys)
+                pad = max((high - low) * .05, abs(high) * .01, 1e-9)
+                if not math.isfinite(high - low + 2 * pad):
+                    continue
+                y_min, y_max, y_ticks = nice_ticks(low - pad, high + pad, 4, expand=True)
+                if not math.isfinite(y_max - y_min) or y_max <= y_min:
+                    continue
+                curves.append({
+                    "output": index,
+                    "name": self.characteristic_name(y),
+                    "axis": self.characteristic_axis(y),
+                    "points": points,
+                    "targets": [(tx, ty) for tx, ty, _ in targets if bounds[0] <= tx <= bounds[1]],
+                    "yBounds": [y_min, y_max],
+                    "yTicks": y_ticks,
+                })
+            except (ArithmeticError, KeyError, IndexError, TypeError, ValueError):
+                continue
+
+        if not curves:
+            return None
+
+        german = self.language.current_language.lower().startswith("de")
+        return {
+            "title": self.language.text("training.metric.characteristic"),
+            "outputLabel": self.language.text("training.characteristic.output"),
+            "trainingPoints": "Trainingspunkte anzeigen" if german else "Show training points",
+            "actual": "Istwert" if german else "Actual",
+            "targets": "Passende Sollwerte" if german else "Matching targets",
+            "inputLabel": "Eingangswert" if german else "Input value",
+            "xAxis": self.characteristic_axis(x),
+            "xBounds": bounds,
+            "xTicks": x_ticks,
+            "selectedOutput": self.characteristic_output.currentData(),
+            "colors": COLORS,
+            "curves": curves,
+        }
+
+    @staticmethod
+    def characteristic_name(mapping):
+        return str(mapping.get("name") or mapping.get("column_name") or mapping["neuron"].name)
+
+    @classmethod
+    def characteristic_axis(cls, mapping):
+        name = cls.characteristic_name(mapping)
+        unit = str(mapping.get("unit") or "").strip()
+        return f"{name} [{unit}]" if unit else name
+
+    def characteristic_targets(self, x, y):
+        targets = []
+        for number, record in enumerate(self.records, 1):
+            try:
+                tx, ty = float(record[x["column_index"]]), float(record[y["column_index"]])
+                if math.isfinite(tx) and math.isfinite(ty):
+                    targets.append((tx, ty, number))
+            except (IndexError, KeyError, TypeError, ValueError, OverflowError):
+                continue
+        return targets
 
     def characteristic_available(self):
         if (len(self.input_columns) != 1 or len(self.network.get_input_neurons()) != 1
@@ -1006,21 +1099,12 @@ class ForwardCalibrationDialog(QDialog):
                     raw, x["neuron"].id, bounds, False, Event())
                 plot.points = result[0]
                 self._characteristic_curve_key = key
-            plot.input_name = str(x.get("name") or x.get("column_name") or x["neuron"].name)
+            plot.input_name = self.characteristic_name(x)
             plot.input_unit = str(x.get("unit") or "").strip()
             plot.output_unit = str(y.get("unit") or "").strip()
-            plot.x_label = plot.input_name + (f" [{plot.input_unit}]" if plot.input_unit else "")
-            name = str(y.get("name") or y.get("column_name") or y["neuron"].name)
-            plot.y_label = name + (f" [{plot.output_unit}]" if plot.output_unit else "")
-            targets = []
-            for number, record in enumerate(self.records, 1):
-                try:
-                    tx, ty = float(record[x["column_index"]]), float(record[y["column_index"]])
-                    if math.isfinite(tx) and math.isfinite(ty):
-                        targets.append((tx, ty, number))
-                except (IndexError, KeyError, TypeError, ValueError, OverflowError):
-                    continue
-            plot.set_targets(targets)
+            plot.x_label = self.characteristic_axis(x)
+            plot.y_label = self.characteristic_axis(y)
+            plot.set_targets(self.characteristic_targets(x, y))
             actual = TrainingDataIO.unscale_value(y["neuron"].output_value, y["calibration"], self.language.text)
             editor = next(data["input_widget"] for data in self.input_widgets if data["mapping"] is x)
             plot.configure_input_slider(bounds, raw[x["neuron"].id], enabled=True,

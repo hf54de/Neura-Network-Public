@@ -11,7 +11,22 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray
+from PySide6.QtCore import QByteArray, QSettings
+
+APP_NAME = "NeuronNet"
+LEGACY_APP_NAME = "NeuronNetz"
+
+
+def qt_settings():
+    return QSettings(APP_NAME, APP_NAME)
+
+
+def read_qt_setting(key, default=None):
+    settings = qt_settings()
+    if settings.contains(key):
+        return settings.value(key)
+    legacy = QSettings(LEGACY_APP_NAME, LEGACY_APP_NAME)
+    return legacy.value(key, default)
 
 
 class Settings:
@@ -29,7 +44,7 @@ class Settings:
     """
 
     SETTINGS_FILE_NAME = "settings.json"
-    SETTINGS_DIRECTORY_NAME = "NeuronNetz"
+    SETTINGS_DIRECTORY_NAME = APP_NAME
     MAX_RECENT_PROJECTS = 5
     PROJECT_ASSISTANT_FIELDS = (
         "starting_point",
@@ -105,17 +120,16 @@ class Settings:
         if settings_path.exists():
             return cls.load_file(settings_path) or {}
 
-        legacy_path = cls.get_legacy_settings_path()
-
-        if legacy_path != settings_path and legacy_path.exists():
+        previous_path = settings_path.parent.with_name(LEGACY_APP_NAME) / settings_path.name
+        for legacy_path in (previous_path, cls.get_legacy_settings_path()):
+            if legacy_path == settings_path:
+                continue
             legacy_data = cls.load_file(legacy_path)
-
             if legacy_data is not None:
                 try:
                     cls.save(legacy_data)
                 except OSError:
                     pass
-
                 return legacy_data
 
         return {}

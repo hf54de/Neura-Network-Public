@@ -92,7 +92,7 @@ class XmlExportDialog(QDialog):
         layout.setContentsMargins(8, 8, 8, 8)
 
         self.settings_panel = PlcExportSettingsPanel(
-            export_data.get("fb_name", "FB_NeuronNetz"),
+            export_data.get("fb_name", "FB_NeuronNet"),
             export_data.get("model_version", "1.0"),
             self.german,
             self,

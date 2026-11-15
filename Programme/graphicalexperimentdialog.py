@@ -20,7 +20,6 @@ from PySide6.QtCore import (
     QPointF,
     QRectF,
     QSize,
-    QSettings,
     Signal,
     QStandardPaths,
     QTimer,
@@ -83,6 +82,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from colorpalette import choose_color, restore_custom_colors, save_custom_colors
+from settings import qt_settings, read_qt_setting
 from toolbaricons import ToolbarIcons as SharedToolbarIcons
 
 from numberformat import format_number
@@ -5575,7 +5575,13 @@ class GraphicalExperimentDialog(QDialog):
     COMPACT_IO_COLUMN_GAP = 12.0
     COMPACT_IO_ROW_GAP = 10.0
     COMPACT_IO_SECTION_GAP = 30.0
-    SHAPE_CLIPBOARD_MIME = "application/x-neuronnetz-design-shapes+json"
+    SHAPE_CLIPBOARD_MIME = "application/x-neuronnet-design-shapes+json"
+    LEGACY_SHAPE_CLIPBOARD_MIME = "application/x-neuronnetz-design-shapes+json"
+
+    @classmethod
+    def shape_clipboard_format(cls, mime_data):
+        return next((name for name in (cls.SHAPE_CLIPBOARD_MIME, cls.LEGACY_SHAPE_CLIPBOARD_MIME)
+                     if mime_data.hasFormat(name)), None)
 
     def __init__(
         self,
@@ -5634,7 +5640,7 @@ class GraphicalExperimentDialog(QDialog):
         self.drag_calculation_pending = False
         self.forward_executor = ThreadPoolExecutor(
             max_workers=1,
-            thread_name_prefix="NeuronNetzForward",
+            thread_name_prefix="NeuronNetForward",
         )
         self.forward_bridge = ForwardCalculationBridge(self)
         self.forward_bridge.completed.connect(self.forward_calculation_finished)
@@ -7797,7 +7803,7 @@ class GraphicalExperimentDialog(QDialog):
             if isinstance(item, MovableCardProxy) and item.card_role == "comment"
         ]
         mime_data = QApplication.clipboard().mimeData()
-        has_copied_elements = mime_data.hasFormat(self.SHAPE_CLIPBOARD_MIME)
+        has_copied_elements = bool(self.shape_clipboard_format(mime_data))
         has_image = (
             mime_data.hasImage()
             or self.image_path_from_mime_data(mime_data) is not None
@@ -8939,7 +8945,7 @@ class GraphicalExperimentDialog(QDialog):
         if not file_name:
             return
         if self.select_background_image(Path(file_name)):
-            QSettings("NeuronNetz", "NeuronNetz").setValue(
+            qt_settings().setValue(
                 "graphical_experiment/last_image_directory",
                 str(Path(file_name).resolve().parent),
             )
@@ -8976,15 +8982,14 @@ class GraphicalExperimentDialog(QDialog):
         self.begin_history_action()
         self.background_relative_path = str(image_path.resolve())
         self.set_background_pixmap(pixmap)
-        QSettings("NeuronNetz", "NeuronNetz").setValue(
+        qt_settings().setValue(
             "graphical_experiment/last_image_directory",
             str(image_path.resolve().parent),
         )
         self.start_element_placement([self.background_item])
 
     def initial_image_directory(self):
-        settings = QSettings("NeuronNetz", "NeuronNetz")
-        remembered_value = str(settings.value(
+        remembered_value = str(read_qt_setting(
             "graphical_experiment/last_image_directory", ""
         ) or "").strip()
         if remembered_value:
@@ -9038,7 +9043,7 @@ class GraphicalExperimentDialog(QDialog):
         self.begin_history_action()
         self.background_relative_path = str(image_path.resolve())
         self.set_background_pixmap(pixmap)
-        QSettings("NeuronNetz", "NeuronNetz").setValue(
+        qt_settings().setValue(
             "graphical_experiment/last_image_directory",
             str(image_path.resolve().parent),
         )
@@ -9082,10 +9087,11 @@ class GraphicalExperimentDialog(QDialog):
         if not self.edit_mode:
             return
         mime_data = QApplication.clipboard().mimeData()
-        if mime_data.hasFormat(self.SHAPE_CLIPBOARD_MIME):
+        shape_format = self.shape_clipboard_format(mime_data)
+        if shape_format:
             try:
                 payload = json.loads(
-                    bytes(mime_data.data(self.SHAPE_CLIPBOARD_MIME)).decode("utf-8")
+                    bytes(mime_data.data(shape_format)).decode("utf-8")
                 )
                 shapes = payload.get("shapes", [])
                 comments = payload.get("comments", [])
@@ -9826,8 +9832,7 @@ class GraphicalExperimentDialog(QDialog):
         QTimer.singleShot(0, self.view_show_all)
 
     def restore_window_geometry(self):
-        settings = QSettings("NeuronNetz", "NeuronNetz")
-        geometry = settings.value("graphical_experiment/window_geometry")
+        geometry = read_qt_setting("graphical_experiment/window_geometry")
         if geometry:
             self.restoreGeometry(geometry)
         desired_width, desired_height = self.project_window_size or (1100, 720)
@@ -9849,7 +9854,7 @@ class GraphicalExperimentDialog(QDialog):
             self.move(frame.topLeft())
 
     def save_window_geometry(self):
-        QSettings("NeuronNetz", "NeuronNetz").setValue(
+        qt_settings().setValue(
             "graphical_experiment/window_geometry", self.saveGeometry()
         )
         if self.layout_file is None or not self.layout_file.exists():

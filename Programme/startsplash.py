@@ -1,6 +1,6 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: startsplash.py
-# Zweck: Zeigt das Startbild während des Ladens von NeuronNetz an.
+# Zweck: Zeigt das Startbild während des Ladens von NeuronNet an.
 # Letzte Änderung: 04.09.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
@@ -68,7 +68,7 @@ class StartSplash(QSplashScreen):
         painter.drawText(
             QRectF(30, 34, self.WIDTH - 60, 52),
             Qt.AlignmentFlag.AlignCenter,
-            "NeuronNetz",
+            "NeuronNet",
         )
 
         subtitle_font = QFont(painter.font())

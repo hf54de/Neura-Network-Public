@@ -467,7 +467,7 @@ class ApplicationComparisonTests(unittest.TestCase):
                 self.assertAlmostEqual(plot.point[0], .4)
                 self.assertAlmostEqual(plot.point[1], 1.8)
                 self.assertEqual(([n.bias for n in net.get_neurons()], [c.weight for c in net.get_connections()]), before)
-                out = Path(os.environ.get("NEURONNETZ_CURVE_QA", tempfile.gettempdir()))
+                out = Path(os.environ.get("NEURONNET_CURVE_QA", tempfile.gettempdir()))
                 for width, height in ((840, 400), (440, 300), (260, 200)):
                     proxy.set_card_size(width, height)
                     APP.processEvents()
@@ -521,7 +521,7 @@ class ApplicationComparisonTests(unittest.TestCase):
                         self.assertEqual(set(d.scene.items()), scene_items)
                         self.assertEqual(proxy.geometry(), geometry)
                         self.assertEqual(d.scene.itemsBoundingRect(), bounds)
-                        out = Path(os.environ.get("NEURONNETZ_CURVE_QA", tempfile.gettempdir()))
+                        out = Path(os.environ.get("NEURONNET_CURVE_QA", tempfile.gettempdir()))
                         modal.grab().save(str(out / f"curve_information_{code}.png"))
                         QTest.mouseClick(close, Qt.MouseButton.LeftButton)
                     except BaseException as error:
@@ -540,7 +540,7 @@ class ApplicationComparisonTests(unittest.TestCase):
                 self.assertEqual(d.scene.itemsBoundingRect(), bounds)
                 self.assertEqual(plot.points, points)
                 self.assertEqual(runtime(net), state)
-                out = Path(os.environ.get("NEURONNETZ_CURVE_QA", tempfile.gettempdir()))
+                out = Path(os.environ.get("NEURONNET_CURVE_QA", tempfile.gettempdir()))
                 d.grab().save(str(out / f"curve_information_closed_{code}.png"))
             finally:
                 d.stop_forward_executor()
@@ -607,7 +607,7 @@ class ApplicationComparisonTests(unittest.TestCase):
                 d.curves.refresh()
                 plot.ensure_background()
                 self.assertTrue(plot._range[2] <= -3. <= 13. <= plot._range[3])
-                out = Path(os.environ.get("NEURONNETZ_CURVE_QA", tempfile.gettempdir()))
+                out = Path(os.environ.get("NEURONNET_CURVE_QA", tempfile.gettempdir()))
                 for width, height in ((900, 480), (440, 300), (260, 200)):
                     plot.resize(width, height)
                     self.assertTrue(plot.grab().save(str(out / f"application_comparison_{code}_{width}.png")))
@@ -702,7 +702,7 @@ class ForwardWindowCharacteristicTests(unittest.TestCase):
                 d.input_widgets[0]["input_widget"].setValue(-1.)
                 self.assertEqual(plot.point, (-1., -1.))
                 self.assertEqual(plot.input_slider.value(), 2500)
-                out = Path(os.environ.get("NEURONNETZ_CURVE_QA", tempfile.gettempdir()))
+                out = Path(os.environ.get("NEURONNET_CURVE_QA", tempfile.gettempdir()))
                 d.grab().save(str(out / f"forward_characteristic_{code}.png"))
                 d.characteristic_button.click(); self.settle(d)
                 self.assertTrue(d.characteristic_group.isHidden())
@@ -737,7 +737,7 @@ class ForwardWindowCharacteristicTests(unittest.TestCase):
                 d.array_view_button.click(); self.settle(d)
                 self.assertTrue(d.array_view_active)
                 self.assertTrue(d.array_group.isVisible())
-                out = Path(os.environ.get("NEURONNETZ_CURVE_QA", tempfile.gettempdir()))
+                out = Path(os.environ.get("NEURONNET_CURVE_QA", tempfile.gettempdir()))
                 d.grab().save(str(out / f"forward_binary_array_{code}.png"))
                 d.array_view_button.click(); self.settle(d)
                 self.assertTrue(d.input_scroll.isVisible())

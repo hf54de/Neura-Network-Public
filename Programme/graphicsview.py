@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QApplication, QGraphicsView
 
 class GraphicsView(QGraphicsView):
     """
-    Zeichenansicht des NeuronNetz-Editors.
+    Zeichenansicht des NeuronNet-Editors.
 
     Zuständig für:
         - Zoomen mit dem Mausrad

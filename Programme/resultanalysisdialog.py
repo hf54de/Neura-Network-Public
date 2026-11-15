@@ -2604,7 +2604,7 @@ class ResultAnalysisDialog(QDialog):
 
     def report_default_path(self, suffix):
         """Schlägt den Exporte-Ordner des aktuellen Projekts vor."""
-        name = str(self.report_context.get("project_name") or "NeuronNetz")
+        name = str(self.report_context.get("project_name") or "NeuronNet")
         report_suffix = self.t("analysis.report.file_suffix")
         filename = f"{name}_{report_suffix}.{suffix}".replace(" ", "-")
         export_dir = str(self.report_context.get("export_dir") or "").strip()
@@ -2743,6 +2743,10 @@ class ResultAnalysisDialog(QDialog):
 
     def offer_open_report(self, file_path):
         """Fragt nach erfolgreichem Export, ob die Datei geöffnet werden soll."""
+
+        if author_html_export is not None and Path(file_path).suffix.lower() in {".html", ".htm"}:
+            author_html_export.offer_open_html(self, self.t, file_path)
+            return
 
         message_box = QMessageBox(self)
         message_box.setIcon(QMessageBox.Icon.Information)

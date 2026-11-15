@@ -48,6 +48,7 @@ class HistoryCharacteristic(QWidget):
         if entry is not self.entry:
             self.entry = entry
             self.source = self.network = None
+            previous_output = self.output.currentData()
             self.output.blockSignals(True)
             self.output.clear()
             try:
@@ -58,6 +59,9 @@ class HistoryCharacteristic(QWidget):
                         if mapping.get("data_type") != "binary":
                             self.output.addItem(ResultAnalysisDialog.characteristic_axis_label(mapping),
                                                 mapping["neuron"].id)
+                    previous_index = self.output.findData(previous_output)
+                    if previous_index >= 0:
+                        self.output.setCurrentIndex(previous_index)
             except (ValueError, KeyError, TypeError):
                 self.source = self.network = None
             finally:

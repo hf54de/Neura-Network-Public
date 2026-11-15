@@ -130,7 +130,7 @@ class SpsExportDialog(QDialog):
         main_layout.setContentsMargins(7, 7, 7, 7)
 
         self.settings_panel = PlcExportSettingsPanel(
-            export_data.get("fb_name", "FB_NeuronNetz"),
+            export_data.get("fb_name", "FB_NeuronNet"),
             export_data.get("model_version", "1.0"),
             self.german,
             self,
@@ -374,7 +374,7 @@ class SpsExportDialog(QDialog):
                 "korrekte Integration, Validierung, Risikobeurteilung und Einhaltung aller "
                 "geltenden Sicherheitsvorschriften verantwortlich. Der Code ist nicht als "
                 "Sicherheitsfunktion, Not-Aus-Funktion oder Ersatz für zertifizierte "
-                "Schutzmaßnahmen vorgesehen. NeuronNetz übernimmt keine Verantwortung für "
+                "Schutzmaßnahmen vorgesehen. NeuronNet übernimmt keine Verantwortung für "
                 "Schäden, Betriebsunterbrechungen oder Fehlfunktionen, die aus der ungeprüften "
                 "oder unsachgemäßen Verwendung des erzeugten Codes entstehen.",
                 "The generated PLC code is provided as technical assistance and must be "
@@ -382,7 +382,7 @@ class SpsExportDialog(QDialog):
                 "professional before production use. The user is responsible for correct "
                 "integration, validation, risk assessment, and compliance with all applicable "
                 "safety requirements. The code is not intended as a safety function, emergency-"
-                "stop function, or replacement for certified protective measures. NeuronNetz "
+                "stop function, or replacement for certified protective measures. NeuronNet "
                 "assumes no responsibility for damage, operational interruptions, or "
                 "malfunctions resulting from unreviewed or improper use of the generated code.",
             ),

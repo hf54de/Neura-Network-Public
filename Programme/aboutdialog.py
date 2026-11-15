@@ -27,7 +27,7 @@ from startsplash import splash_image_path
 # ---------------------------------------------------------------------
 # Diese Angaben können später direkt hier angepasst werden.
 # ---------------------------------------------------------------------
-PROGRAM_NAME = "NeuronNetz"
+PROGRAM_NAME = "NeuronNet"
 DEVELOPER_NAME = "Helwig Fülling"
 COPYRIGHT_TEXT = "© 2026 Helwig Fülling"
 VERSION_FILE_NAME = "VERSION.txt"

@@ -1,5 +1,53 @@
 # Changelog
 
+## Unreleased – 15.11.2026
+
+### Training and history
+
+- Added Adam alongside SGD with Momentum. Training history stores the optimizer state for resuming compatible runs, and the mathematics view shows how Adam updates weights and biases.
+- Added training with the same initialization so different settings can be compared from the same starting weights and biases. Changed settings can also start a linked continuation run.
+- Added optional recording of two selected weights over the course of training. The 2D weight trajectory can be reviewed in the training window, compared across compatible runs in the history, and included in analysis and reports.
+- Added a network characteristic preview for compatible saved runs. The history can also display linked continuation runs on a shared epoch axis.
+- Added resizable live chart windows and a shared chart background setting. The training history gives more space to the plot and keeps the run table compact.
+- Added a project-specific training protocol for changes to the network, data, scaling, and training parameters. The protocol can display run details in a table and apply saved parameters to the training dialog.
+- Preserved incompatible history entries for documentation when training data, scaling, neuron assignments, or activations change, while preventing incompatible runs from being restored or continued.
+
+### Network, data, and analysis
+
+- Added interactive characteristic charts to the application view, with adjustable inputs, training points, and resizable chart windows. Improved the distinction between stored targets, interpolated targets, and predictions in the analysis view.
+- Added a preview for automatic training-data scaling, including editable bounds, and a field for recording the origin of the training data.
+- Added percentage deviations relative to the target or to the calibrated output range where applicable.
+- Added progress feedback when opening projects and validation that rejects invalid network topology before loading it into the editor.
+- Added display options to show, hide, or bundle network connections. Lowered the minimum zoom in the network overview from 20% to 10%.
+
+### Project reports and HTML exports
+
+- Redesigned HTML, PDF, and Word project reports with clearer sections, light-blue panels, and side-by-side charts where space permits. The HTML report places the full-width network diagram below the network summary.
+- Added data origin, training-run details, weight trajectories, and classification results where available. Classification reports show how many cases the network classified correctly.
+- Added separate public and author Windows builds. The build script lets the user choose the edition and writes either edition to the usual `dist/NeuronNet.exe` path. HTML exports are available in the author build.
+- Added author HTML exports for project reports, training data tables, and the interactive Explore view. Training-data exports default to the project's training-data folder, and suggested filenames use hyphens in place of spaces.
+- Added support for matrix controls and eligible network characteristics in Explore HTML. The characteristic slider stays aligned with the current point, and the transparent export can be embedded on a website.
+- Added standalone HTML training clips for MSE, maximum individual error, recorded 2D weight trajectories, and network characteristics. The clip uses the chart and applicable scale selected in the training history, with configurable playback duration and end pause.
+- Added colored labels and curve segments for linked runs. The clip displays the active run's training parameters alongside the results.
+- Network-characteristic clips recompute the selected runs on a copy of the network at export time. A progress dialog shows the current run and epoch count and lets the user cancel before the file is written.
+- Added an option to open the generated HTML in the browser after export.
+- Aligned the headers of HTML training clips by removing the time-lapse and original-duration line.
+- Added on-demand recomputation of missing 2D weight trajectories for HTML clips, with weight selection, progress, and cancellation.
+- Use the same playback pace for all HTML training clips, with more time for the early epochs of each run.
+- Renamed the application, exports, and Windows executable to NeuronNet. Existing settings and profiles remain compatible.
+
+### Examples and documentation
+
+- Updated the German and English example collections, including localized English project data and layouts.
+- Updated the German and English integrated help and refreshed the packaged manuals. Added a web example for the three-zone temperature and process control project.
+
+### Earlier unreleased changes
+
+- Update the tested development runtime to Python 3.14.7 (64-bit), retaining PySide6 6.11.1 and PyInstaller 6.21.0. Document the environment in both README languages. The About dialog already reads the active Python runtime dynamically; existing executables retain their bundled runtime until rebuilt.
+
+- Add optional automatic pruning to PLC exports (GX Works2, GX Works3 and IEC XML). The configurable absolute threshold defaults to 0.001; pruning is disabled by default. Omitted connections and weight constants affect only the export, and the preview shows the number removed. Nonzero thresholds may change model results.
+- Confirm input/output structure changes before clearing training history; offer immediate training-data adjustment or cancellation. Preserve history for name-only changes. Add German and English warnings.
+
 ## 0.10.0-beta.07 – 10.10.2026
 
 - improve speed during training
@@ -17,13 +65,6 @@
 ## 0.10.0-beta.05 – 16.09.2026
 
 - add profile storage
-
-## Unreleased
-
-- Update the tested development runtime to Python 3.14.7 (64-bit), retaining PySide6 6.11.1 and PyInstaller 6.21.0. Document the environment in both README languages. The About dialog already reads the active Python runtime dynamically; existing executables retain their bundled runtime until rebuilt.
-
-- Add optional automatic pruning to PLC exports (GX Works2, GX Works3 and IEC XML). The configurable absolute threshold defaults to 0.001; pruning is disabled by default. Omitted connections and weight constants affect only the export, and the preview shows the number removed. Nonzero thresholds may change model results.
-- Confirm input/output structure changes before clearing training history; offer immediate training-data adjustment or cancellation. Preserve history for name-only changes. Add German and English warnings.
 
 ## 0.10.0-beta.04 – 05.09.2026
 
@@ -114,7 +155,7 @@
   purpose and expected results
 - Prevented unwanted separate error-message windows when returning from the
   compact or minimized view to the full view
-- Added a calm, optional splash screen with a NeuronNetz graphic, tagline,
+- Added a calm, optional splash screen with a NeuronNet graphic, tagline,
   version information, and actual loading messages; centered it over the saved
   main-window position and kept it visible for 2.5 seconds after loading
 - Preserved the last saved network view when a startup project is opened
@@ -159,4 +200,4 @@
 
 ## 0.9.0-beta.1 – 26.07.2026
 
-- First centrally versioned public beta release of NeuronNetz.
+- First centrally versioned public beta release of NeuronNet.

@@ -1,10 +1,10 @@
-# NeuronNetz – Help and User Guide
+# NeuronNet – Help and User Guide
 
 This integrated help explains the principal workflows, windows, and controls directly in the program. The illustrated Word or PDF manual can additionally be opened through **Help → Tutorials**.
 
-## Positioning and Particular Benefits of NeuronNetz
+## Positioning and Particular Benefits of NeuronNet
 
-NeuronNetz is a transparent development and learning tool for small neural
+NeuronNet is a transparent development and learning tool for small neural
 networks in automation engineering. It combines training-data preparation,
 graphical network design, training, result validation, application-view design,
 and the export of the trained network as PLC code in one working environment.
@@ -17,7 +17,7 @@ through error development, individual records, and saved comparison runs.
 
 ### A Continuous Workflow
 
-NeuronNetz supports a project from the original data through to the later use
+NeuronNet supports a project from the original data through to the later use
 of the trained network:
 
 1. Create, import, and describe training data.
@@ -37,7 +37,7 @@ checked deliberately.
 
 ### A Visible and Traceable Learning Process
 
-Many tools primarily treat a trained model as a finished file. NeuronNetz
+Many tools primarily treat a trained model as a finished file. NeuronNet
 focuses on the individual steps that lead to that model.
 
 Users can examine, among other things:
@@ -60,7 +60,7 @@ structures instead of considering only the final result.
 ### More Complete Validation of the Trained Network
 
 A small mean training error alone is not enough to assess the quality of a
-network. NeuronNetz therefore provides several complementary evaluations.
+network. NeuronNet therefore provides several complementary evaluations.
 
 These include:
 
@@ -86,7 +86,7 @@ training error alone.
 ### Importance of the Training Data
 
 The significance of a neural network depends greatly on its training data.
-NeuronNetz therefore distinguishes the origin of the data:
+NeuronNet therefore distinguishes the origin of the data:
 
 - **Empirical measurement data**
 - **Formula-generated data**
@@ -141,7 +141,7 @@ A controlled workflow is appropriate for industrial applications:
 2. Missing target values are added from laboratory results, quality checks, or
    confirmed plant conditions.
 3. The data are prepared outside the PLC.
-4. NeuronNetz trains and validates the network.
+4. NeuronNet trains and validates the network.
 5. The user evaluates training and test data, error development, and individual
    errors.
 6. The approved network is exported as a versioned PLC function block.
@@ -154,7 +154,7 @@ affects the plant only after it has been validated and deliberately approved.
 The deterministic PLC cycle is not burdened by an active training process.
 
 Independent and uncontrolled continued learning in the PLC is not an objective
-of NeuronNetz. Changes to the model should remain traceable, comparable, and
+of NeuronNet. Changes to the model should remain traceable, comparable, and
 reversible when required.
 
 ### Positioning in Relation to Industrial AI Solutions
@@ -164,9 +164,9 @@ model versions, using powerful hardware, and integrating with larger data and
 automation infrastructures. Depending on the manufacturer, this may require
 special runtime components, edge devices, or additional licenses.
 
-NeuronNetz follows a manageable and transparent approach:
+NeuronNet follows a manageable and transparent approach:
 
-| NeuronNetz | Typical industrial AI platform |
+| NeuronNet | Typical industrial AI platform |
 |---|---|
 | The network can be built graphically | The model is often created with external tools |
 | The learning process is visible and can be examined | Training generally remains outside the runtime environment |
@@ -178,7 +178,7 @@ NeuronNetz follows a manageable and transparent approach:
 | Designed for small and understandable networks | Also suitable for large and complex models |
 | Learning, analysis, and engineering tool | Industrial infrastructure and execution platform |
 
-NeuronNetz does not replace a comprehensive industrial AI infrastructure. Its
+NeuronNet does not replace a comprehensive industrial AI infrastructure. Its
 strength lies in combining comprehensibility, data preparation, visible
 training, detailed analysis, and traceable PLC code.
 
@@ -205,7 +205,7 @@ Before practical use, the following questions in particular must be resolved:
 - Has the exported network been tested under realistic conditions?
 - Have the requirements for safety, documentation, and approval been met?
 
-NeuronNetz supports this assessment through transparent presentation and
+NeuronNet supports this assessment through transparent presentation and
 several validation tools. Responsibility for data quality, technical
 plausibility, and the safe use of the exported network remains with the user.
 
@@ -213,7 +213,7 @@ plausibility, and the safe use of the exported network remains with the user.
 
 # 1. Overview
 
-**NeuronNetz** is a graphical editor for creating, training, and examining small neural networks. Neurons, connections, weights, activation functions, and calculation values remain visible and can be edited deliberately.
+**NeuronNet** is a graphical editor for creating, training, and examining small neural networks. Neurons, connections, weights, activation functions, and calculation values remain visible and can be edited deliberately.
 
 A typical workflow is:
 
@@ -494,7 +494,7 @@ Previously saved characteristic elements are hidden for unsupported networks. Th
 
 ### Graphics, comments, and shapes
 
-A picture can be loaded from a file, dragged into the window, or pasted from the clipboard. When the layout is saved, NeuronNetz copies it into the project area and stores its position and size. Selecting the picture and pressing **Delete** performs the same confirmed removal as the menu command.
+A picture can be loaded from a file, dragged into the window, or pasted from the clipboard. When the layout is saved, NeuronNet copies it into the project area and stores its position and size. Selecting the picture and pressing **Delete** performs the same confirmed removal as the menu command.
 
 Comments provide freely placeable explanatory text with configurable font, alignment, text color, background, and frame. Lines, rectangles, and ellipses can be used to group or connect parts of the presentation. Their line color, width, and optional transparent or colored fill are stored in the layout. A line can show an arrowhead at its end; **Reverse arrow direction** moves it to the opposite endpoint. A categorized symbol library also includes logical symbols. The same selection is used when inserting a symbol and when choosing **Change symbol…** from its context menu. These graphical elements remain behind the interactive input and output cards.
 
@@ -566,7 +566,7 @@ The project report can be exported as a Word or PDF document. The author edition
 
 **File → Example Projects** searches the currently selected project folder for marked examples. German and English project collections can be selected independently of the interface language.
 
-The project assistant helps develop original ideas. It creates an editable prompt for an external AI containing project description, inputs, outputs, ranges, foundations, network proposal, and tab-separated training data. NeuronNetz does not send data to an external service.
+The project assistant helps develop original ideas. It creates an editable prompt for an external AI containing project description, inputs, outputs, ranges, foundations, network proposal, and tab-separated training data. NeuronNet does not send data to an external service.
 
 # 30. Typical Problems
 
@@ -623,7 +623,7 @@ If all runs are deleted, result values and curve disappear from the open trainin
 
 # 34. PLC Export
 
-The experimental PLC export transfers the forward calculation of an already trained network to a PLC function block. Training remains in NeuronNetz; exporting does not change weights or bias values.
+The experimental PLC export transfers the forward calculation of an already trained network to a PLC function block. Training remains in NeuronNet; exporting does not change weights or bias values.
 
 Enable the menu under **Settings → Program Settings... → Experimental → Show PLC Export in the menu bar**. **Mitsubishi GX Works2** and **Mitsubishi GX Works3** have been tested in practice. CODESYS, TwinCAT, and Siemens SCL are visible as **In preparation**, but remain disabled.
 
@@ -634,9 +634,9 @@ The export window contains two read-only output areas:
 1. Declarations for inputs, outputs, internal variables, scaling values, weights, and biases.
 2. Indented and syntax-highlighted Structured Text for forward calculation.
 
-Above the export data, NeuronNetz shows the variable count split into inputs/outputs, scaling values, weights `W`, biases `B`, internal neuron values `N`, and helper values. A static effort estimate lists multiplications, additions, `EXP` calls, and a size rating. It is not a guaranteed cycle time, which depends on the PLC type, CPU, and project.
+Above the export data, NeuronNet shows the variable count split into inputs/outputs, scaling values, weights `W`, biases `B`, internal neuron values `N`, and helper values. A static effort estimate lists multiplications, additions, `EXP` calls, and a size rating. It is not a guaranteed cycle time, which depends on the PLC type, CPU, and project.
 
-The metadata header contains the export date, NeuronNetz version, editable model version, automatically calculated model signature, network architecture, activation functions, and training-run information.
+The metadata header contains the export date, NeuronNet version, editable model version, automatically calculated model signature, network architecture, activation functions, and training-run information.
 
 The **IEC 61131-10 XML** menu item uses a dedicated manufacturer-neutral IEC generator. It contains neither Mitsubishi designations nor GX Works-specific function calls. The separate **Mitsubishi GX Works3 – XML** command uses the same individual-variable layout and the same GX Works3-compatible ST code, but writes variable comments as general comment No. 1 in Mitsubishi's `AddData/VariableComments` structure. This keeps the neutral export unchanged and clearly separates the vendor extension. How completely a development environment imports the IEC 61131-10 standard must be verified in the respective target system.
 
@@ -644,15 +644,15 @@ An exported block can include the `Enable` input and the `Network_Active` status
 
 The **Block settings** area allows these additional connections to be selected individually. Dependent options that are not meaningful are disabled automatically. Without fallback connections, the last outputs are retained when calculation is skipped. If fallback is selected but `Hold_Last_Output` is not, the substitute values are always written. With both connections, the behavior can be selected at runtime. If `Range_Tolerance_Percent` is not generated as an input, the tolerance remains an internal constant of 10%. Preview, declarations, ST, ASC, and XML code are regenerated immediately after each selection.
 
-Declarations, Structured Text, and XML are read-only in the export window. The FB name, model version, and additional-connection selection remain editable; NeuronNetz regenerates the output from these settings. If individual code changes are required, make them after export in the PLC development environment or an external editor. Final checking, compilation, and approval must always take place in the compiler of the respective PLC target system.
+Declarations, Structured Text, and XML are read-only in the export window. The FB name, model version, and additional-connection selection remain editable; NeuronNet regenerates the output from these settings. If individual code changes are required, make them after export in the PLC development environment or an external editor. Final checking, compilation, and approval must always take place in the compiler of the respective PLC target system.
 
 Each area has its own copy button. First create an empty function block in the PLC environment, then transfer the declarations and finally the ST program body. `REAL` is recognized as **FLOAT (Single Precision)** and `BOOL` as **Bit**.
 
-Alternatively, **Save complete ASC file...** stores the complete function block for GX Works2 or GX Works3. **IEC 61131-10 XML...** opens the complete read-only, manufacturer-neutral XML code. For direct import into GX Works3, use **Mitsubishi GX Works3 – XML...**. **Copy XML** copies the complete current document to the clipboard, while **Save XML file...** stores exactly the visible content. Small result differences compared with NeuronNetz can be caused by the respective PLC's 32-bit single-precision calculation.
+Alternatively, **Save complete ASC file...** stores the complete function block for GX Works2 or GX Works3. **IEC 61131-10 XML...** opens the complete read-only, manufacturer-neutral XML code. For direct import into GX Works3, use **Mitsubishi GX Works3 – XML...**. **Copy XML** copies the complete current document to the clipboard, while **Save XML file...** stores exactly the visible content. Small result differences compared with NeuronNet can be caused by the respective PLC's 32-bit single-precision calculation.
 
 ## Safety and responsibility
 
-The generated PLC code is provided as technical assistance and must be reviewed, tested, and approved for the specific installation by a qualified professional before production use. The user is responsible for correct integration, validation, risk assessment, and compliance with all applicable safety requirements. The code is not intended as a safety function, emergency-stop function, or replacement for certified protective measures. NeuronNetz assumes no responsibility for damage, operational interruptions, or malfunctions resulting from unreviewed or improper use of the generated code.
+The generated PLC code is provided as technical assistance and must be reviewed, tested, and approved for the specific installation by a qualified professional before production use. The user is responsible for correct integration, validation, risk assessment, and compliance with all applicable safety requirements. The code is not intended as a safety function, emergency-stop function, or replacement for certified protective measures. NeuronNet assumes no responsibility for damage, operational interruptions, or malfunctions resulting from unreviewed or improper use of the generated code.
 
 This responsibility notice is shown once for acknowledgement before the first PLC export. A short version remains visible in the export window, and the **(i)** button opens the complete notice at any time. The generated ST code also contains a compact safety notice.
 
@@ -678,7 +678,7 @@ Before pasting, enable **Show Details** in the Local Label editor. The extended 
 Label Name | Data Type | Class | Initial Value | Constant | Comment
 ```
 
-**Initial Value** remains empty for `VAR_CONSTANT`. Weights, biases, and scaling values must appear under **Constant**, while descriptions must appear under **Comment**. NeuronNetz therefore provides both an Excel-like HTML table and tab-separated text on the Windows clipboard.
+**Initial Value** remains empty for `VAR_CONSTANT`. Weights, biases, and scaling values must appear under **Constant**, while descriptions must appear under **Comment**. NeuronNet therefore provides both an Excel-like HTML table and tab-separated text on the Windows clipboard.
 
 GX Works3 uses the IEC function form with a return value:
 
@@ -686,10 +686,10 @@ GX Works3 uses the IEC function form with a return value:
 EXP_Result := EXP(-1.0 * N_N_15_Sum);
 ```
 
-After transferring, verify the constants, input scaling, at least one analog output, and any binary outputs. GX Works2 and GX Works3 were tested in practice with a mass-spring network and produced the same results as NeuronNetz for equal inputs.
+After transferring, verify the constants, input scaling, at least one analog output, and any binary outputs. GX Works2 and GX Works3 were tested in practice with a mass-spring network and produced the same results as NeuronNet for equal inputs.
 
 # 35. Illustrated Manual
 
 This Markdown file is the integrated operational reference. The illustrated manual supplements it with screenshots, marked controls, and complete examples.
 
-Use **Help → Tutorials** to select and open the German or English manual as a Word or PDF file with the associated Windows application. NeuronNetz remembers the most recently selected tutorial folder.
+Use **Help → Tutorials** to select and open the German or English manual as a Word or PDF file with the associated Windows application. NeuronNet remembers the most recently selected tutorial folder.

@@ -33,8 +33,9 @@ from PySide6.QtWidgets import (
     QWidget
 )
 
+from buildfeatures import author_html_export
 from weighttrajectory import WeightTrajectoryPlot
-from chartcolors import ChartColors
+from chartcolors import ChartColors, adapted
 from historycharacteristic import HistoryCharacteristic
 from numberformat import format_number as format_display_number
 from numberformat import linear_axis_ticks, linear_axis_label
@@ -86,6 +87,16 @@ class TrainingHistoryChart(ChartColors, QWidget):
         self.setMinimumHeight(300)
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
+
+    def run_colors(self, runs, background=None):
+        colors = {}
+        for index, run in enumerate(runs):
+            base = self.COLORS[index % len(self.COLORS)]
+            color = self.chart_color(base)
+            if background is not None:
+                color = QColor.fromRgba(adapted(base.rgba(), background))
+            colors[run["run_id"]] = color
+        return colors
 
     def set_runs(self, runs, history=None):
         self.runs = list(runs)
@@ -456,10 +467,7 @@ class TrainingHistoryChart(ChartColors, QWidget):
 
         legend_x = plot_rect.left()
 
-        run_colors = {
-            run["run_id"]: self.chart_color(self.COLORS[index % len(self.COLORS)])
-            for index, run in enumerate(self.runs)
-        }
+        run_colors = self.run_colors(self.runs)
         for run_index, run in enumerate(valid_runs[:6]):
             color = run_colors[run["run_id"]]
             painter.setPen(QPen(color, 2.0))
@@ -544,6 +552,7 @@ class TrainingHistoryDialog(QDialog):
         restorable_run_ids=None,
         active_run_id=None,
         characteristic_provider=None,
+        project_path=None,
     ):
         super().__init__(parent)
         self.language = language_manager or LanguageManager()
@@ -555,6 +564,7 @@ class TrainingHistoryDialog(QDialog):
         }
         self.active_run_id = active_run_id
         self.restore_run_id = None
+        self.project_path = project_path
         # Run identifiers remain permanent, including gaps after deletions.
 
         self.setWindowTitle(self.t("history.title"))
@@ -692,6 +702,11 @@ class TrainingHistoryDialog(QDialog):
         )
         self.close_button.clicked.connect(self.accept)
         button_layout.addWidget(self.export_button)
+        self.clip_button = None
+        if author_html_export is not None:
+            self.clip_button = QPushButton(self.t("history.clip.button"))
+            self.clip_button.clicked.connect(self.export_html_clip)
+            button_layout.addWidget(self.clip_button)
         button_layout.addWidget(self.delete_button)
         button_layout.addWidget(self.restore_button)
         button_layout.addStretch(1)
@@ -840,6 +855,8 @@ class TrainingHistoryDialog(QDialog):
             + 2*self.table.frameWidth() + self.table.horizontalScrollBar().sizeHint().height())
         has_entries = bool(self.training_history)
         self.export_button.setEnabled(has_entries)
+        if self.clip_button is not None:
+            self.clip_button.setEnabled(False)
         self.delete_button.setEnabled(has_entries)
         self.restore_button.setEnabled(False)
 
@@ -926,7 +943,8 @@ class TrainingHistoryDialog(QDialog):
         self.scale_combo.setVisible(not trajectory and not characteristic)
         self.full_range_button.setVisible(True)
         if characteristic:
-            self.characteristic_view.set_runs(selected_runs)
+            chain = author_html_export.ordered_runs(self.training_history, selected_ids) if self.clip_button else []
+            self.characteristic_view.set_runs(chain[-1:] if chain else selected_runs)
         elif trajectory:
             if len(selected_runs) == 1:
                 run = selected_runs[0]
@@ -963,6 +981,10 @@ class TrainingHistoryDialog(QDialog):
             reason = run.get("invalidated_reason")
             item.setToolTip(self.t("history.invalid." + reason) if reason else (
                 self.t("training.metric.unavailable") if missing else ""
+            ))
+        if self.clip_button is not None:
+            self.clip_button.setEnabled(bool(selected_ids) and (
+                not characteristic or not self.characteristic_view.controls.isHidden()
             ))
         self.delete_button.setEnabled(bool(selected_ids))
         self.restore_button.setEnabled(
@@ -1057,6 +1079,20 @@ class TrainingHistoryDialog(QDialog):
         self.active_run_id = run_id
         self.restore_run_id = run_id
         self.accept()
+
+    def export_html_clip(self):
+        metric = self.metric_combo.currentData()
+        selected_ids = self.selected_run_ids()
+        selected_runs = [run for run in self.training_history if run["run_id"] in selected_ids]
+        colors = self.chart.run_colors(selected_runs, author_html_export.CLIP_BACKGROUND)
+        author_html_export.export_clip(
+            self, self.language, self.training_history, selected_ids,
+            self.project_path, author_html_export.choose_html_path, author_html_export.write_html_file,
+            metric=metric, scale_mode=self.scale_combo.currentData(), offer_open=author_html_export.offer_open_html,
+            run_colors={run_id: color.name() for run_id, color in colors.items()},
+            characteristic_provider=self.characteristic_view.provider,
+            characteristic_output=self.characteristic_view.output.currentData(),
+        )
 
     def export_csv(self):
         if not self.training_history:

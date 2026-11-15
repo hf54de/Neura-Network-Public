@@ -53,9 +53,10 @@ class ProfileTests(unittest.TestCase):
             SettingsProfile.write(path, data)
         self.assertEqual(path.read_bytes(), before)
         minimal = SettingsProfile.validate(dict(format="NeuronNetz-settings-profile", version=1))
+        self.assertEqual(minimal["format"], "NeuronNet-settings-profile")
         self.assertEqual(minimal["display"], ProjectIO.default_display_settings())
-        for bad in ({}, [], dict(format="NeuronNetz-settings-profile", version=99),
-                    dict(format="NeuronNetz-settings-profile", version=1, ui={"toolbar_show_text": "false"})):
+        for bad in ({}, [], dict(format="NeuronNet-settings-profile", version=99),
+                    dict(format="NeuronNet-settings-profile", version=1, ui={"toolbar_show_text": "false"})):
             with self.assertRaises(ValueError):
                 SettingsProfile.validate(bad)
 

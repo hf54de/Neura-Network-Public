@@ -92,7 +92,7 @@ from projectoverviewdialog import ProjectCheckDialog, ProjectOverviewDialog
 from resultanalysisdialog import ResultAnalysisDialog
 from projectsavedialog import ProjectSaveDialog
 from projectloadprogress import ProjectLoadProgress
-from settings import Settings
+from settings import APP_NAME, LEGACY_APP_NAME, Settings
 from chartcolors import set_chart_background
 from settingsdialog import SettingsDialog
 from spsexportdialog import SpsExportDialog
@@ -111,7 +111,7 @@ from trainingprotocol import TrainingProtocolMixin
 
 class MainWindow(QMainWindow, TrainingProtocolMixin):
     """
-    Hauptfenster des NeuronNetz-Editors.
+    Hauptfenster des NeuronNet-Editors.
 
     Aufgabe:
         Enthält die komplette Benutzeroberfläche.
@@ -3108,14 +3108,16 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
         else:
             base_directory = Path.home() / "Documents"
 
-        return base_directory / "NeuronNetz" / str(directory_name)
+        target = base_directory / APP_NAME / str(directory_name)
+        legacy = base_directory / LEGACY_APP_NAME / str(directory_name)
+        return legacy if not target.exists() and legacy.is_dir() else target
 
     @classmethod
     def portable_content_directory(cls, directory_name):
         """
         Verwendet bevorzugt einen sichtbaren Ordner neben der Anwendung.
 
-        Kann dieser nicht angelegt werden, wird auf Dokumente\\NeuronNetz
+        Kann dieser nicht angelegt werden, wird auf Dokumente\\NeuronNet
         ausgewichen. Dadurch funktioniert sowohl ein entpacktes ZIP-Paket
         als auch eine Installation in einem schreibgeschützten Verzeichnis.
         """
@@ -7018,7 +7020,7 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
             project_name = (
                 Path(self.current_project_path).stem
                 if self.current_project_path
-                else "NeuronNetz"
+                else "NeuronNet"
             )
             from plcquality import PruningQualitySnapshot
             quality_snapshot = PruningQualitySnapshot(
@@ -8146,6 +8148,7 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
             restorable_run_ids=restorable_run_ids,
             active_run_id=self.active_training_run_id,
             characteristic_provider=self.history_characteristic_source,
+            project_path=self.current_project_path,
         )
         if delete_run_id is None:
             dialog.exec()
@@ -8284,7 +8287,7 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
                 or not self.training_network_state_is_compatible(state)):
             return None
         from mathematicsdialog import MathematicsDialog
-        network = MathematicsDialog.clone_network(self.scene.network)
+        network = MathematicsDialog.clone_network(self.scene.network, copy_optimizer=False)
         for item in state["neurons"]:
             network.get_neuron(item["id"]).bias = float(item["bias"])
         for item in state["connections"]:

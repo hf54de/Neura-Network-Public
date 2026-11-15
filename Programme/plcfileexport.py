@@ -192,7 +192,7 @@ class Iec61131XmlExporter:
         )
         ET.SubElement(root, "FileHeader", {
             "companyName": "",
-            "productName": "NeuronNetz",
+            "productName": "NeuronNet",
             "productVersion": "",
         })
         ET.SubElement(root, "ContentHeader", {

@@ -19,7 +19,7 @@ from trainingdataio import TrainingDataIO
 
 
 class GxWorks2ExportGenerator:
-    """Übersetzt ein NeuronNetz-Modell in einen Mitsubishi-GX-Works2-FB."""
+    """Übersetzt ein NeuronNet-Modell in einen Mitsubishi-GX-Works2-FB."""
 
     MAX_LABEL_LENGTH = 32
     RESERVED_WORDS = {
@@ -36,7 +36,7 @@ class GxWorks2ExportGenerator:
         network,
         input_mappings,
         output_mappings,
-        project_name="NeuronNetz",
+        project_name="NeuronNet",
         language_code="de",
         application_version="",
         training_entry=None,
@@ -46,7 +46,7 @@ class GxWorks2ExportGenerator:
         self.network = network
         self.input_mappings = list(input_mappings or [])
         self.output_mappings = list(output_mappings or [])
-        self.project_name = str(project_name or "NeuronNetz")
+        self.project_name = str(project_name or "NeuronNet")
         self.language_code = "de" if str(language_code).lower() == "de" else "en"
         self.application_version = str(application_version or "").strip()
         self.training_entry = dict(training_entry or {})
@@ -443,11 +443,11 @@ class GxWorks2ExportGenerator:
         })
         lines = [
             "(*",
-            self.text("    Automatisch erzeugt mit NeuronNetz", "    Automatically generated with NeuronNetz"),
+            self.text("    Automatisch erzeugt mit NeuronNet", "    Automatically generated with NeuronNet"),
             f"    {self.text('Projekt', 'Project')}: {project}",
             "    Zielsystem: Mitsubishi GX Works2",
             f"    {self.text('Exportdatum', 'Export date')}: {datetime.now().astimezone().isoformat(timespec='seconds')}",
-            f"    NeuronNetz: {self.application_version or '-'}",
+            f"    NeuronNet: {self.application_version or '-'}",
             f"    {self.text('Modellversion', 'Model version')}: {st_comment_text(self.model_version)}",
             f"    {self.text('Modellkennung', 'Model signature')}: {self.model_signature()}",
             f"    {self.text('Netzarchitektur', 'Network architecture')}: {architecture}",
@@ -682,7 +682,7 @@ class GxWorks2ExportGenerator:
             raise ValueError("\n".join(validation.get("errors") or []))
         self.prepare_labels()
         return {
-            "fb_name": self.identifier_text(f"FB_{Path(self.project_name).stem}", "FB_NeuronNetz"),
+            "fb_name": self.identifier_text(f"FB_{Path(self.project_name).stem}", "FB_NeuronNet"),
             "target_system": "Mitsubishi GX Works2",
             "headers": ("Class", "Label Name", "Data Type", "Constant", "Comment"),
             "declarations": self.rows,

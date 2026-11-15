@@ -5,17 +5,17 @@
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
 # -------------------------------------------------------------------------------------------------
-from PySide6.QtCore import QSettings
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QColorDialog, QDialog
+
+from settings import qt_settings, read_qt_setting
 
 
 SETTINGS_KEY = "program/custom_colors"
 
 
 def restore_custom_colors():
-    settings = QSettings("NeuronNetz", "NeuronNetz")
-    stored = settings.value(SETTINGS_KEY, [])
+    stored = read_qt_setting(SETTINGS_KEY, [])
     if isinstance(stored, str):
         stored = [stored]
     for index, value in enumerate(list(stored or [])):
@@ -31,7 +31,7 @@ def save_custom_colors():
     for index in range(QColorDialog.customCount()):
         color = QColor(QColorDialog.customColor(index))
         colors.append(color.name() if color.isValid() else "")
-    QSettings("NeuronNetz", "NeuronNetz").setValue(SETTINGS_KEY, colors)
+    qt_settings().setValue(SETTINGS_KEY, colors)
 
 
 def choose_color(initial, parent=None, title=""):

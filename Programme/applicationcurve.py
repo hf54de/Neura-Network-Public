@@ -523,7 +523,7 @@ class CurveController(QObject):
         super().__init__(host)
         self.host, self.card_class, self.proxy_class, self.forward = host, card_class, proxy_class, forward
         self.proxies = []
-        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="NeuronNetzCurve")
+        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="NeuronNetCurve")
         self.cancel = Event()
         self.serial = 0
         self.busy = False

@@ -16,7 +16,7 @@ LOG_DIR.mkdir(exist_ok=True)
 LOG_PATH = LOG_DIR / f"diagnose_{datetime.now():%Y%m%d_%H%M%S}_{os.getpid()}.log"
 logging.basicConfig(filename=LOG_PATH, encoding="utf-8", level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s")
-LOG = logging.getLogger("NeuronNetz.Diagnose")
+LOG = logging.getLogger("NeuronNet.Diagnose")
 
 
 def unhandled(exc_type, value, tb):

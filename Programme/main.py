@@ -1,6 +1,6 @@
 # -------------------------------------------------------------------------------------------------
 # Datei: main.py
-# Purpose: Launches NeuronNetz and controls the flow of the intro and main window.
+# Purpose: Launches NeuronNet and controls the flow of the intro and main window.
 # Last modified: 03.08.2026
 # Copyright © 2026 Helwig Fülling
 # Licensed under the GNU General Public License v3.0
@@ -16,7 +16,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication, QMainWindow
 from aboutdialog import program_version
 from language import LanguageManager
-from settings import Settings
+from settings import APP_NAME, Settings
 from startsplash import StartSplash
 
 
@@ -100,6 +100,8 @@ def center_splash_on_saved_window(app, splash):
 
 
 app = QApplication(sys.argv)
+app.setApplicationName(APP_NAME)
+app.setApplicationDisplayName(APP_NAME)
 
 selected_language = Settings.get_ui_settings().get("language", "en")
 german_interface = selected_language == "de"

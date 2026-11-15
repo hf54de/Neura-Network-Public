@@ -2,11 +2,13 @@
 
 import json
 from html import escape
+from pathlib import Path
 
-from PySide6.QtCore import QIODevice, QSaveFile
-from PySide6.QtGui import QColor, QFontInfo, QPalette
-from PySide6.QtWidgets import QDialog, QFileDialog, QStyle, QStyleOptionViewItem
+from PySide6.QtCore import QIODevice, QSaveFile, Qt, QUrl
+from PySide6.QtGui import QColor, QDesktopServices, QFontInfo, QPalette
+from PySide6.QtWidgets import QDialog, QFileDialog, QMessageBox, QStyle, QStyleOptionViewItem
 
+from trainingclipexport import CLIP_BACKGROUND, export_clip, ordered_runs
 from forwardhtmlexport import network_snapshot, render_forward_html, web_input_grid
 from reportdescription import report_description_parts
 
@@ -15,7 +17,7 @@ def choose_html_path(parent, title, directory, file_filter, filename):
     dialog = QFileDialog(parent, title, str(directory), file_filter)
     dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
     dialog.setDefaultSuffix("htm")
-    dialog.selectFile(filename)
+    dialog.selectFile(filename.replace(" ", "-"))
     if dialog.exec() != QDialog.DialogCode.Accepted:
         return None
     return dialog.selectedFiles()[0]
@@ -32,6 +34,22 @@ def write_html_file(file_path, document):
         raise OSError(error)
     if not target.commit():
         raise OSError(target.errorString())
+
+
+def offer_open_html(parent, text, file_path):
+    message = QMessageBox(parent)
+    message.setIcon(QMessageBox.Icon.Information)
+    message.setWindowTitle(text("html.export.saved_title"))
+    message.setTextFormat(Qt.TextFormat.PlainText)
+    message.setText(text("html.export.saved", file=file_path))
+    open_button = message.addButton(text("html.export.open"), QMessageBox.ButtonRole.AcceptRole)
+    close_button = message.addButton(text("common.close"), QMessageBox.ButtonRole.RejectRole)
+    message.setDefaultButton(open_button)
+    message.setEscapeButton(close_button)
+    message.exec()
+    if message.clickedButton() is open_button:
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(Path(file_path).resolve()))):
+            QMessageBox.warning(parent, text("html.export.saved_title"), text("html.export.open_failed"))
 
 
 def training_table_html(table, language, title):
