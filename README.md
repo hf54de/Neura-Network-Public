@@ -1,23 +1,23 @@
-# NeuronNetz
+# NeuronNet
 
 [English](#english-version) | [Deutsch](#deutsche-version)
 
 **Current version / Aktuelle Version:** `0.10.0-beta.03`\
 [Download the latest Windows release / Aktuelle Windows-Version herunterladen](https://github.com/hf54de/Neura-Network-Public/releases/latest)
 
-> **Project status:** Public beta. NeuronNetz is a personal
+> **Project status:** Public beta. NeuronNet is a personal
 > learning and experimentation project and is not developed as a commercial product.
 > Feedback and reproducible bug reports
 > are welcome; continuous maintenance or individual support cannot be
 > guaranteed.
 
-> **Projektstatus:** Öffentliche Beta-Version. NeuronNetz ist ein persönliches
+> **Projektstatus:** Öffentliche Beta-Version. NeuronNet ist ein persönliches
 > Lern- und Experimentierprojekt und wird nicht als kommerzielles Produkt
 > entwickelt. Rückmeldungen und
 > nachvollziehbare Fehlermeldungen sind willkommen; eine dauerhafte Pflege oder
 > individuelle Unterstützung kann nicht zugesagt werden.
 
-![NeuronNetz graphical network editor](Netzwerkstruktur.png)
+![NeuronNet graphical network editor](Netzwerkstruktur.png)
 
 ---
 
@@ -27,16 +27,16 @@
 
 ### Graphical Editor for Neural Networks
 
-**NeuronNetz** is designed for graphically creating, editing, training, and testing small neural networks. The program combines practical work with neural networks with a clear representation of their structure and mathematical processes.
+**NeuronNet** is designed for graphically creating, editing, training, and testing small neural networks. The program combines practical work with neural networks with a clear representation of their structure and mathematical processes.
 
 ### Quick Start
 
 1. Open the [latest release](https://github.com/hf54de/Neura-Network-Public/releases/latest)
-   and download `NeuronNetz-...-Windows.zip`. The version number is part of
+   and download `NeuronNet-...-Windows.zip`. The version number is part of
    the file name.
 2. Extract the complete archive into a folder of your choice. Do not start the
    program directly from inside the ZIP archive.
-3. Start `NeuronNetz.exe`.
+3. Start `NeuronNet.exe`.
 4. Open one of the included example projects or create a new project.
 
 Python and PySide6 do not need to be installed for the packaged Windows
@@ -58,13 +58,13 @@ an existing EXE retains its bundled runtime until it is rebuilt.
 
 The current executable is not digitally signed. Windows SmartScreen or an
 antivirus product may therefore warn about an unknown publisher or quarantine
-a newly created release. Only download NeuronNetz from a source you trust,
+a newly created release. Only download NeuronNet from a source you trust,
 verify the archive if checksums are supplied, and inspect the published source
 code when in doubt.
 
 ### Purpose and Basic Concept
 
-NeuronNetz allows neural networks to be created directly on a graphical canvas. Input, hidden, and output neurons are shown as clear visual elements; connections display their weights and the direction of information flow. Names, neuron types, activation functions, positions, and other properties can be edited directly.
+NeuronNet allows neural networks to be created directly on a graphical canvas. Input, hidden, and output neurons are shown as clear visual elements; connections display their weights and the direction of information flow. Names, neuron types, activation functions, positions, and other properties can be edited directly.
 
 A network can be drawn freely, generated automatically from a specified layer structure, or derived from the structure of existing training data. This makes the program suitable both for small experimental setups and for clearly structured practical applications.
 
@@ -86,11 +86,11 @@ A network can be drawn freely, generated automatically from a specified layer st
 
 ### Understanding, Not Just Calculating
 
-A distinctive feature of NeuronNetz is the visible link between the network representation and its calculations. Neurons can display values such as the input, weighted sum, and output. Colors and line widths make the direction and significance of the weights recognizable.
+A distinctive feature of NeuronNet is the visible link between the network representation and its calculations. Neurons can display values such as the input, weighted sum, and output. Colors and line widths make the direction and significance of the weights recognizable.
 
 The guided mathematics mode breaks down a complete learning step into clear sections: starting values, input and target values, weighted sum, activation, error and delta, momentum contribution, and the resulting new parameters. A selected input, hidden, or output neuron can be examined individually. The experiment uses a separate copy of the network and does not modify the saved project.
 
-Training runs can be repeated with the same start conditions. NeuronNetz then
+Training runs can be repeated with the same start conditions. NeuronNet then
 reuses the initial weights and bias values together with the training-data
 order, making the effect of changed learning parameters directly comparable.
 
@@ -105,7 +105,7 @@ to explain the application. The complete layout is stored with the project.
 
 ### Experimental PLC Export
 
-NeuronNetz generates the declarations and forward-calculation code of a trained
+NeuronNet generates the declarations and forward-calculation code of a trained
 network exclusively with the transparent, practically tested
 **individual-variable structure**. The separate ASC exports for
 **Mitsubishi GX Works2** and **Mitsubishi GX Works3** use dedicated adapters for
@@ -122,7 +122,7 @@ The neutral XML output remains unchanged.
 For the transparent ASC transfer:
 
 1. Create an empty function block in the Mitsubishi project.
-2. Copy the generated declarations from NeuronNetz into the local-label table.
+2. Copy the generated declarations from NeuronNet into the local-label table.
 3. Copy the generated Structured Text into the empty program body.
 4. Compile, inspect, and test the function block in the PLC environment.
 
@@ -134,7 +134,7 @@ its project data.
 
 The export windows keep declarations, Structured Text, and XML read-only.
 Block name, model version, and additional connections remain configurable;
-NeuronNetz immediately regenerates the preview and all generated output.
+NeuronNet immediately regenerates the preview and all generated output.
 Optional connections provide enable control, input-range checking, diagnostics,
 fallback values, and retention of the last outputs. Complete ASC and XML files
 can be saved directly, and the generated content can be copied to the
@@ -155,13 +155,13 @@ settings independently of the interface language.
 
 ### Target Audience and Applications
 
-NeuronNetz is intended for beginners, learners, educators, and technically interested users who want to explore neural networks as more than an abstract formula or software library. It is also suitable for developers and users who want to build, examine, and clearly present small models quickly.
+NeuronNet is intended for beginners, learners, educators, and technically interested users who want to explore neural networks as more than an abstract formula or software library. It is also suitable for developers and users who want to build, examine, and clearly present small models quickly.
 
 The program is deliberately designed as a learning and experimentation tool for small, manageable networks. It does not replace industrial machine-learning platforms, but it provides a direct, transparent, and largely intuitive way of working.
 
 ### Important Limitations and Disclaimer
 
-- NeuronNetz is intended for learning, demonstration, and experimentation.
+- NeuronNet is intended for learning, demonstration, and experimentation.
 - It is not a replacement for established machine-learning frameworks or a
   certified engineering tool.
 - Example projects describing buildings, machines, alarms, or control systems
@@ -178,18 +178,18 @@ The program is deliberately designed as a learning and experimentation tool for 
 
 ### Source Code, License, and Contributions
 
-NeuronNetz is free software licensed under the **GNU General Public License,
+NeuronNet is free software licensed under the **GNU General Public License,
 version 3.0 (GPL-3.0-only)**. The source code may be used, studied, modified,
 and redistributed under the conditions stated in the `LICENSE` file in this
 repository. Distributed modified versions must also remain available under
 the GPL. Copyright © 2026 Helwig Fülling.
 
-When reporting a problem, please include the NeuronNetz version, the steps
+When reporting a problem, please include the NeuronNet version, the steps
 needed to reproduce it, the expected result, and—where possible—a small sample
 project. Contributions may be reviewed, but acceptance and response times
 cannot be guaranteed.
 
-> *In short: NeuronNetz makes the structure, training, and behavior of a neural network visible. It combines graphical work, practical experimentation, and mathematical understanding in a single tool.*
+> *In short: NeuronNet makes the structure, training, and behavior of a neural network visible. It combines graphical work, practical experimentation, and mathematical understanding in a single tool.*
 
 ---
 
@@ -199,16 +199,16 @@ cannot be guaranteed.
 
 ### Grafischer Editor für neuronale Netzwerke
 
-**NeuronNetz** dient dazu, kleine neuronale Netzwerke grafisch zu erstellen, zu bearbeiten, zu trainieren und zu testen. Das Programm verbindet die praktische Arbeit mit neuronalen Netzen mit einer anschaulichen Darstellung ihrer Struktur und mathematischen Abläufe.
+**NeuronNet** dient dazu, kleine neuronale Netzwerke grafisch zu erstellen, zu bearbeiten, zu trainieren und zu testen. Das Programm verbindet die praktische Arbeit mit neuronalen Netzen mit einer anschaulichen Darstellung ihrer Struktur und mathematischen Abläufe.
 
 ### Schnellstart
 
 1. Die [aktuelle Veröffentlichung](https://github.com/hf54de/Neura-Network-Public/releases/latest)
-   öffnen und `NeuronNetz-...-Windows.zip` herunterladen. Die Versionsnummer
+   öffnen und `NeuronNet-...-Windows.zip` herunterladen. Die Versionsnummer
    ist Bestandteil des Dateinamens.
 2. Das vollständige Archiv in einen Ordner eigener Wahl entpacken. Das Programm
    nicht direkt aus dem geöffneten ZIP-Archiv starten.
-3. `NeuronNetz.exe` starten.
+3. `NeuronNet.exe` starten.
 4. Eines der mitgelieferten Beispielprojekte öffnen oder ein neues Projekt
    anlegen.
 
@@ -232,14 +232,14 @@ eine bestehende EXE behält ihre eingebettete Laufzeit bis zum nächsten Neubau.
 
 Die aktuelle EXE ist nicht digital signiert. Windows SmartScreen oder ein
 Virenscanner kann deshalb vor einem unbekannten Herausgeber warnen oder eine
-neu erstellte Version vorsorglich in Quarantäne verschieben. NeuronNetz sollte
+neu erstellte Version vorsorglich in Quarantäne verschieben. NeuronNet sollte
 nur aus einer vertrauenswürdigen Quelle geladen werden. Sind Prüfsummen
 angegeben, sollten diese kontrolliert werden; im Zweifel kann zusätzlich der
 veröffentlichte Quellcode geprüft werden.
 
 ### Zweck und Grundidee
 
-NeuronNetz ermöglicht den Aufbau neuronaler Netzwerke direkt auf einer grafischen Zeichenfläche. Input-, Hidden- und Output-Neuronen werden als übersichtliche Elemente dargestellt; Verbindungen zeigen ihre Gewichte und die Richtung des Informationsflusses. Namen, Neuron-Typen, Aktivierungsfunktionen, Positionen und weitere Eigenschaften können unmittelbar bearbeitet werden.
+NeuronNet ermöglicht den Aufbau neuronaler Netzwerke direkt auf einer grafischen Zeichenfläche. Input-, Hidden- und Output-Neuronen werden als übersichtliche Elemente dargestellt; Verbindungen zeigen ihre Gewichte und die Richtung des Informationsflusses. Namen, Neuron-Typen, Aktivierungsfunktionen, Positionen und weitere Eigenschaften können unmittelbar bearbeitet werden.
 
 Ein Netzwerk kann frei gezeichnet, aus einer vorgegebenen Schichtenstruktur automatisch erzeugt oder aus der Struktur vorhandener Trainingsdaten abgeleitet werden. Dadurch eignet sich das Programm sowohl für kleine Versuchsaufbauten als auch für übersichtlich strukturierte praktische Anwendungen.
 
@@ -261,12 +261,12 @@ Ein Netzwerk kann frei gezeichnet, aus einer vorgegebenen Schichtenstruktur auto
 
 ### Verstehen statt nur berechnen
 
-Eine Besonderheit von NeuronNetz ist die sichtbare Verbindung zwischen Netzwerkdarstellung und Berechnung. In den Neuronen können unter anderem Eingangswert, gewichtete Summe und Ausgangswert angezeigt werden. Farben und Linienstärken machen Richtung und Bedeutung der Gewichte erkennbar.
+Eine Besonderheit von NeuronNet ist die sichtbare Verbindung zwischen Netzwerkdarstellung und Berechnung. In den Neuronen können unter anderem Eingangswert, gewichtete Summe und Ausgangswert angezeigt werden. Farben und Linienstärken machen Richtung und Bedeutung der Gewichte erkennbar.
 
 Der geführte Mathematikmodus zerlegt einen vollständigen Lernschritt in nachvollziehbare Abschnitte: Startwerte, Eingangs- und Sollwerte, gewichtete Summe, Aktivierung, Fehler und Delta, Momentumanteil sowie die daraus entstehenden neuen Parameter. Ein ausgewähltes Input-, Hidden- oder Output-Neuron kann dabei gezielt betrachtet werden. Das Experiment arbeitet mit einer getrennten Kopie des Netzwerks und verändert das gespeicherte Projekt nicht.
 
 Trainingsläufe lassen sich mit denselben Startbedingungen wiederholen. Dabei
-übernimmt NeuronNetz die anfänglichen Gewichte und Bias-Werte zusammen mit der
+übernimmt NeuronNet die anfänglichen Gewichte und Bias-Werte zusammen mit der
 Reihenfolge der Trainingsdaten. So kann die Wirkung geänderter Lernparameter
 direkt verglichen werden.
 
@@ -282,7 +282,7 @@ Anwendungsfall. Die vollständige Gestaltung wird mit dem Projekt gespeichert.
 
 ### Experimenteller SPS-Export
 
-NeuronNetz erzeugt Deklarationen und Vorwärtsberechnung eines trainierten Netzes
+NeuronNet erzeugt Deklarationen und Vorwärtsberechnung eines trainierten Netzes
 ausschließlich im transparenten und praktisch geprüften
 **Einzelvariablenaufbau**. Die getrennten ASC-Exporte für
 **Mitsubishi GX Works2** und **Mitsubishi GX Works3** berücksichtigen mit eigenen
@@ -301,7 +301,7 @@ unberührt.
 Für die transparente ASC-Übertragung gilt:
 
 1. Im Mitsubishi-Projekt einen leeren Funktionsbaustein anlegen.
-2. Die erzeugten Deklarationen aus NeuronNetz in die Local-Label-Tabelle kopieren.
+2. Die erzeugten Deklarationen aus NeuronNet in die Local-Label-Tabelle kopieren.
 3. Den erzeugten Structured Text in den leeren Programmkörper kopieren.
 4. Den Baustein in der SPS-Umgebung übersetzen, prüfen und testen.
 
@@ -313,7 +313,7 @@ das trainierte Netz noch seine Projektdaten.
 
 Deklarationen, Structured Text und XML bleiben in den Exportfenstern
 schreibgeschützt. Änderbar sind FB-Name, Modellversion und Zusatzanschlüsse;
-NeuronNetz erzeugt daraus Vorschau und sämtliche Ausgabedaten unmittelbar neu.
+NeuronNet erzeugt daraus Vorschau und sämtliche Ausgabedaten unmittelbar neu.
 Optionale Anschlüsse ermöglichen Freigabe, Eingangsbereichsprüfung, Diagnose,
 Ersatzwerte und das Halten der letzten Ausgänge. Vollständige ASC- und XML-Dateien
 können direkt gespeichert und die erzeugten Inhalte in die Zwischenablage
@@ -335,13 +335,13 @@ unabhängig von der Sprache der Oberfläche gewählt werden.
 
 ### Zielgruppe und Einsatzbereich
 
-NeuronNetz richtet sich an Einsteiger, Lernende, Lehrende und technisch Interessierte, die neuronale Netzwerke nicht nur als abstrakte Formel oder Programmbibliothek kennenlernen möchten. Es eignet sich außerdem für Entwickler und Anwender, die kleine Modelle schnell aufbauen, untersuchen und verständlich präsentieren wollen.
+NeuronNet richtet sich an Einsteiger, Lernende, Lehrende und technisch Interessierte, die neuronale Netzwerke nicht nur als abstrakte Formel oder Programmbibliothek kennenlernen möchten. Es eignet sich außerdem für Entwickler und Anwender, die kleine Modelle schnell aufbauen, untersuchen und verständlich präsentieren wollen.
 
 Das Programm ist bewusst als Lern- und Experimentierwerkzeug für kleine, überschaubare Netze ausgelegt. Es ersetzt keine industriellen Machine-Learning-Plattformen, bietet dafür aber eine direkte, transparente und weitgehend intuitive Arbeitsweise.
 
 ### Wichtige Grenzen und Haftungshinweis
 
-- NeuronNetz ist für Lernen, Demonstration und Experimente vorgesehen.
+- NeuronNet ist für Lernen, Demonstration und Experimente vorgesehen.
 - Es ersetzt weder etablierte Machine-Learning-Frameworks noch ein geprüftes
   technisches Entwicklungswerkzeug.
 - Beispielprojekte zu Gebäuden, Maschinen, Alarmen oder Steuerungen sind reine
@@ -360,15 +360,15 @@ Das Programm ist bewusst als Lern- und Experimentierwerkzeug für kleine, übers
 
 ### Quellcode, Lizenz und Mitwirkung
 
-NeuronNetz ist freie Software unter der **GNU General Public License,
+NeuronNet ist freie Software unter der **GNU General Public License,
 Version 3.0 (GPL-3.0-only)**. Der Quellcode darf unter den Bedingungen der
 Datei `LICENSE` in diesem Repository verwendet, untersucht, verändert und
 weitergegeben werden. Veröffentlichte veränderte Fassungen müssen ebenfalls
 unter der GPL verfügbar bleiben. Copyright © 2026 Helwig Fülling.
 
-Eine Fehlermeldung sollte möglichst die verwendete NeuronNetz-Version, die
+Eine Fehlermeldung sollte möglichst die verwendete NeuronNet-Version, die
 Schritte zum Nachstellen, das erwartete Ergebnis und – wenn möglich – ein
 kleines Beispielprojekt enthalten. Beiträge können geprüft werden; eine
 Übernahme oder bestimmte Reaktionszeit kann jedoch nicht zugesagt werden.
 
-> *Kurz gesagt: NeuronNetz macht Aufbau, Training und Verhalten eines neuronalen Netzwerks sichtbar. Es verbindet grafisches Arbeiten, praktische Versuche und mathematisches Verständnis in einem gemeinsamen Werkzeug.*
+> *Kurz gesagt: NeuronNet macht Aufbau, Training und Verhalten eines neuronalen Netzwerks sichtbar. Es verbindet grafisches Arbeiten, praktische Versuche und mathematisches Verständnis in einem gemeinsamen Werkzeug.*
