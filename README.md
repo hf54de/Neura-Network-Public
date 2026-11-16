@@ -90,6 +90,9 @@ A distinctive feature of NeuronNet is the visible link between the network repre
 
 The guided mathematics mode breaks down a complete learning step into clear sections: starting values, input and target values, weighted sum, activation, error and delta, momentum contribution, and the resulting new parameters. A selected input, hidden, or output neuron can be examined individually. The experiment uses a separate copy of the network and does not modify the saved project.
 
+The fast-mode training engine is written in **Rust** and supports Adam
+and SGD with momentum.
+
 Training runs can be repeated with the same start conditions. NeuronNet then
 reuses the initial weights and bias values together with the training-data
 order, making the effect of changed learning parameters directly comparable.
@@ -184,6 +187,11 @@ and redistributed under the conditions stated in the `LICENSE` file in this
 repository. Distributed modified versions must also remain available under
 the GPL. Copyright © 2026 Helwig Fülling.
 
+The Rust training DLL includes components from the Rust standard library,
+MinGW-w64 and GCC. Their license notices are in `Programme-Rust/rust/licenses/`
+in the development repository and `Programme/rust/licenses/` in the public
+source repository. The Windows ZIP includes the notices in `LICENSES/`.
+
 When reporting a problem, please include the NeuronNet version, the steps
 needed to reproduce it, the expected result, and—where possible—a small sample
 project. Contributions may be reviewed, but acceptance and response times
@@ -264,6 +272,9 @@ Ein Netzwerk kann frei gezeichnet, aus einer vorgegebenen Schichtenstruktur auto
 Eine Besonderheit von NeuronNet ist die sichtbare Verbindung zwischen Netzwerkdarstellung und Berechnung. In den Neuronen können unter anderem Eingangswert, gewichtete Summe und Ausgangswert angezeigt werden. Farben und Linienstärken machen Richtung und Bedeutung der Gewichte erkennbar.
 
 Der geführte Mathematikmodus zerlegt einen vollständigen Lernschritt in nachvollziehbare Abschnitte: Startwerte, Eingangs- und Sollwerte, gewichtete Summe, Aktivierung, Fehler und Delta, Momentumanteil sowie die daraus entstehenden neuen Parameter. Ein ausgewähltes Input-, Hidden- oder Output-Neuron kann dabei gezielt betrachtet werden. Das Experiment arbeitet mit einer getrennten Kopie des Netzwerks und verändert das gespeicherte Projekt nicht.
+
+Der Rechenkern für das Training im Schnellmodus ist in **Rust**
+geschrieben. Er unterstützt Adam und SGD mit Momentum.
 
 Trainingsläufe lassen sich mit denselben Startbedingungen wiederholen. Dabei
 übernimmt NeuronNet die anfänglichen Gewichte und Bias-Werte zusammen mit der
@@ -365,6 +376,11 @@ Version 3.0 (GPL-3.0-only)**. Der Quellcode darf unter den Bedingungen der
 Datei `LICENSE` in diesem Repository verwendet, untersucht, verändert und
 weitergegeben werden. Veröffentlichte veränderte Fassungen müssen ebenfalls
 unter der GPL verfügbar bleiben. Copyright © 2026 Helwig Fülling.
+
+Die Rust-Trainings-DLL enthält Komponenten der Rust-Standardbibliothek
+sowie von MinGW-w64 und GCC. Die Lizenzhinweise stehen im Entwicklungsrepo
+unter `Programme-Rust/rust/licenses/` und im öffentlichen Quellcode-Repo
+unter `Programme/rust/licenses/`. Im Windows-ZIP liegen sie unter `LICENSES/`.
 
 Eine Fehlermeldung sollte möglichst die verwendete NeuronNet-Version, die
 Schritte zum Nachstellen, das erwartete Ergebnis und – wenn möglich – ein
