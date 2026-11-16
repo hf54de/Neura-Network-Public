@@ -1,9 +1,19 @@
 # Changelog
 
-## Unreleased – 15.11.2026
+## 0.10.0-beta.08 – 16.11.2026
+
+- Add a Rust training engine for Adam and SGD with momentum in fast mode
+- Use Rust to recompute network characteristics and missing 2D weight trajectories for HTML training clips
+- Embed the Rust training DLL in the public and author Windows builds
+- Add a dedicated GitHub release script that verifies the public Rust build and includes third party license notices
+- Add a dedicated private GitHub transfer script for the Rust source and preserve the previous Python version in Git history
+- Document the Rust training engine and its dependencies in the English and German README
+
+## Unreleased – 16.11.2026
 
 ### Training and history
 
+- Added a Rust backend for fast-mode training with Adam and SGD with Momentum. Live network updates continue to use Python.
 - Added Adam alongside SGD with Momentum. Training history stores the optimizer state for resuming compatible runs, and the mathematics view shows how Adam updates weights and biases.
 - Added training with the same initialization so different settings can be compared from the same starting weights and biases. Changed settings can also start a linked continuation run.
 - Added optional recording of two selected weights over the course of training. The 2D weight trajectory can be reviewed in the training window, compared across compatible runs in the history, and included in analysis and reports.
@@ -33,8 +43,16 @@
 - Added an option to open the generated HTML in the browser after export.
 - Aligned the headers of HTML training clips by removing the time-lapse and original-duration line.
 - Added on-demand recomputation of missing 2D weight trajectories for HTML clips, with weight selection, progress, and cancellation.
+- Use the Rust training engine when recomputing network characteristics and missing 2D weight trajectories for HTML training clips. Python remains available when the Rust DLL is unavailable.
 - Use the same playback pace for all HTML training clips, with more time for the early epochs of each run.
+- Allow HTML training clips embedded together on a website to share playback, pause, and restart controls.
 - Renamed the application, exports, and Windows executable to NeuronNet. Existing settings and profiles remain compatible.
+
+### Windows builds and GitHub
+
+- Added `RUST-EXE-erstellen.bat` to build public and author Windows releases with the embedded Rust training DLL. Its version prompt updates `Programme-Rust/VERSION.txt` and records version changes in the central changelog.
+- Added `RUST-GitHub-Release-erstellen.bat` to verify the public EXE and publish the Windows package with Rust, MinGW and GCC license notices and the corresponding build source.
+- Added `RUST-GitHub-Entwicklung-uebertragen.bat` for the private GitHub repository. Its first confirmed transfer removes the legacy `Programme` folder from the current branch while preserving the local files and earlier commits. Future transfers include `Programme-Rust` source and selected shared files.
 
 ### Examples and documentation
 

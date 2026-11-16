@@ -382,6 +382,7 @@ let displayedSection;
 const weights = document.querySelectorAll("dd.weight");
 const maximumError = document.querySelector("#max-error");
 const motion = matchMedia("(prefers-reduced-motion: reduce)");
+const waitsForGroup = window.parent !== window && new URLSearchParams(location.search).get("sync") === "1";
 const numbers = new Intl.NumberFormat(document.documentElement.lang, { maximumSignificantDigits: 7 });
 const integer = new Intl.NumberFormat(document.documentElement.lang);
 const last = clip.sections.at(-1);
@@ -399,10 +400,11 @@ const readout = value => value == null ? "–" : numbers.format(value);
 if (!clip.weight) document.querySelector("#initial-error").textContent = readout(clip.initial);
 let width, height, axes, scale;
 let paths = [];
-let time = motion.matches ? clip.duration : 0;
+let time = !waitsForGroup && motion.matches ? clip.duration : 0;
 let previous = null;
 let frame = 0;
-let playing = !motion.matches;
+let playing = !waitsForGroup && !motion.matches;
+let requestGroupToggle;
 let visible = !("IntersectionObserver" in window);
 
 function countAt(points, at) {
@@ -658,21 +660,27 @@ function sync() {
     cancelAnimationFrame(frame);
     previous = null;
     button.textContent = playing ? clip.text.pause : clip.text.play;
-    if (playing && visible) frame = requestAnimationFrame(tick);
+    if (!requestGroupToggle && playing && visible) frame = requestAnimationFrame(tick);
 }
 
+button.disabled = waitsForGroup;
 button.addEventListener("click", () => {
+    if (requestGroupToggle) {
+        requestGroupToggle();
+        return;
+    }
     playing = !playing;
     if (playing && motion.matches && time >= clip.duration) time = 0;
     sync();
 });
 motion.addEventListener("change", () => {
+    if (waitsForGroup || requestGroupToggle) return;
     playing = !motion.matches;
     if (!playing) time = clip.duration;
     paint(time);
     sync();
 });
-if (!visible) {
+if (!visible && !waitsForGroup) {
     const observer = new IntersectionObserver(entries => {
         visible = entries.some(entry => entry.isIntersecting);
         sync();
@@ -686,6 +694,25 @@ if (ctx) {
     paint(time);
 }
 sync();
+
+window.neuronNetTrainingClip = Object.freeze({
+    duration: clip.duration,
+    hold: clip.hold,
+    connect(toggle) {
+        requestGroupToggle = toggle;
+        playing = false;
+        sync();
+        return (elapsed, active) => {
+            time = elapsed;
+            button.disabled = false;
+            if (playing !== active) {
+                playing = active;
+                sync();
+            }
+            paint(time);
+        };
+    }
+});
 </script>
 </body>
 </html>"""

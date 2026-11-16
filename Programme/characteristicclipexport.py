@@ -1,4 +1,4 @@
-"""Recompute author HTML clip data on detached networks with the existing trainer."""
+"""Recompute author HTML clip data on detached networks."""
 
 import math
 import random
@@ -8,6 +8,7 @@ from functools import partial
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QProgressDialog
 
+from rusttraining import RustTrainingSession, selected_backend
 from trainingdataio import TrainingDataIO
 from weighttrajectory import connection_label
 
@@ -138,6 +139,12 @@ def replay_run(network, data, run, text, sample_epochs, sample, canceled):
     network.set_learning_rate(run["learning_rate"])
     network.set_momentum(run.get("momentum") or 0.0)
     network.prepare_training_calculation()
+    backend = selected_backend()
+    session = None
+    if backend is not None:
+        session = RustTrainingSession(
+            backend, network, data["records"], data["inputs"], data["outputs"], text
+        )
 
     inputs = [(m["neuron"], m["column_index"], m["calibration"]) for m in data["inputs"]]
     outputs = [(m["neuron"], m["column_index"], m["calibration"]) for m in data["outputs"]]
@@ -158,29 +165,40 @@ def replay_run(network, data, run, text, sample_epochs, sample, canceled):
     frames = []
     for epoch in range(run["completed_epochs"] + 1):
         if epoch:
-            ordered = list(records)
-            epoch_seed = (seed + epoch * 0x9E3779B97F4A7C15) & ((1 << 64) - 1)
-            random.Random(epoch_seed).shuffle(ordered)
-            for values, targets in ordered:
+            if session is not None:
                 if canceled(epoch - 1):
                     return None
-                apply_input(values)
-                network.train_step(targets)
+                session.advance_epoch(epoch, seed)
+            else:
+                ordered = list(records)
+                epoch_seed = (seed + epoch * 0x9E3779B97F4A7C15) & ((1 << 64) - 1)
+                random.Random(epoch_seed).shuffle(ordered)
+                for values, targets in ordered:
+                    if canceled(epoch - 1):
+                        return None
+                    apply_input(values)
+                    network.train_step(targets)
         if epoch not in sample_epochs:
             continue
 
-        squared_error = 0.0
-        maximum_error = 0.0
-        for values, targets in records:
-            if canceled(epoch):
-                return None
-            apply_input(values)
-            network.forward_pass()
-            for neuron in output_neurons:
-                error = abs(targets[neuron.id] - neuron.output_value)
-                squared_error += error * error
-                maximum_error = max(maximum_error, error)
-        mse = squared_error / (len(records) * len(outputs))
+        if session is not None and epoch:
+            # The clip only reads weights and biases at sampled epochs.
+            session.synchronize_parameters()
+            mse = session.metrics.mean_squared_error
+            maximum_error = session.metrics.maximum_absolute_error
+        else:
+            squared_error = 0.0
+            maximum_error = 0.0
+            for values, targets in records:
+                if canceled(epoch):
+                    return None
+                apply_input(values)
+                network.forward_pass()
+                for neuron in output_neurons:
+                    error = abs(targets[neuron.id] - neuron.output_value)
+                    squared_error += error * error
+                    maximum_error = max(maximum_error, error)
+            mse = squared_error / (len(records) * len(outputs))
         values = sample(mse, maximum_error, lambda: canceled(epoch))
         if values is None:
             return None

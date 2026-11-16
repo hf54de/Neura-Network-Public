@@ -7,6 +7,7 @@
 # -------------------------------------------------------------------------------------------------
 import math
 import random
+from rusttraining import RustTrainingSession, selected_backend
 import time
 from copy import deepcopy
 from datetime import datetime
@@ -5744,6 +5745,8 @@ class TrainingDialog(QDialog):
 
         try:
             self.network.prepare_training_calculation()
+            backend = selected_backend()
+            rust_session = None
             update_interval = max(
                 1,
                 min(
@@ -5758,10 +5761,27 @@ class TrainingDialog(QDialog):
                 maximum_epochs
             ):
                 current_epoch = base_epochs + epoch_index + 1
-                metrics = self.train_epoch(
-                    current_epoch,
-                    base_epochs + maximum_epochs
-                )
+                if backend is not None:
+                    self.process_training_events()
+                    if self.stop_requested and completed_epochs > base_epochs:
+                        training_stopped = True
+                        break
+                    if self.fast_mode.isChecked() and rust_session is None:
+                        rust_session = RustTrainingSession(
+                            backend, self.network, self.records,
+                            self.input_columns, self.output_columns, self.language.text,
+                        )
+                    elif not self.fast_mode.isChecked() and rust_session is not None:
+                        rust_session.store_optimizer_state()
+                        rust_session = None
+
+                if rust_session is None:
+                    metrics = self.train_epoch(current_epoch, base_epochs + maximum_epochs)
+                else:
+                    epoch_started = time.monotonic()
+                    metrics = rust_session.run_epoch(current_epoch, self.current_run_shuffle_seed)
+                    self.processed_training_records += len(self.records)
+                    self.update_epoch_time_display(time.monotonic() - epoch_started)
 
                 mean_squared_error = metrics[
                     "mean_squared_error"
@@ -5892,6 +5912,11 @@ class TrainingDialog(QDialog):
                             last_characteristic_refresh = current_time
 
                     self.process_training_events()
+
+            if rust_session is not None:
+                rust_session.store_optimizer_state()
+                self.apply_record(self.records[-1], update_display=False)
+                self.network.forward_pass()
 
         except (
             TypeError,

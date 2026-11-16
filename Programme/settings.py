@@ -7,7 +7,6 @@
 # -------------------------------------------------------------------------------------------------
 import base64
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -15,18 +14,29 @@ from PySide6.QtCore import QByteArray, QSettings
 
 APP_NAME = "NeuronNet"
 LEGACY_APP_NAME = "NeuronNetz"
+def test_settings_directory():
+    if not getattr(sys, "frozen", False):
+        return Path(__file__).resolve().parent / ".test-settings"
+    executable_directory = Path(sys.executable).resolve().parent
+    source_directory = executable_directory.parent
+    if executable_directory.name.casefold() == "dist" and (source_directory / "main.py").is_file():
+        return source_directory / ".test-settings"
+    return executable_directory / ".test-settings"
+
+
+TEST_SETTINGS = test_settings_directory()
 
 
 def qt_settings():
-    return QSettings(APP_NAME, APP_NAME)
+    TEST_SETTINGS.mkdir(exist_ok=True)
+    return QSettings(str(TEST_SETTINGS / "qt.ini"), QSettings.Format.IniFormat)
 
 
 def read_qt_setting(key, default=None):
     settings = qt_settings()
     if settings.contains(key):
         return settings.value(key)
-    legacy = QSettings(LEGACY_APP_NAME, LEGACY_APP_NAME)
-    return legacy.value(key, default)
+    return default
 
 
 class Settings:
@@ -67,21 +77,7 @@ class Settings:
 
     @classmethod
     def get_settings_path(cls):
-        app_data_directory = os.environ.get("APPDATA")
-
-        if app_data_directory:
-            settings_directory = (
-                Path(app_data_directory)
-                / cls.SETTINGS_DIRECTORY_NAME
-            )
-        else:
-            settings_directory = (
-                Path.home()
-                / ".config"
-                / cls.SETTINGS_DIRECTORY_NAME
-            )
-
-        return settings_directory / cls.SETTINGS_FILE_NAME
+        return TEST_SETTINGS / cls.SETTINGS_FILE_NAME
 
     @classmethod
     def get_legacy_settings_path(cls):

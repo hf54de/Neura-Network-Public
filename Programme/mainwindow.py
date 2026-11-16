@@ -9527,9 +9527,7 @@ class MainWindow(QMainWindow, TrainingProtocolMixin):
         if self.project_modified:
             title += " *"
 
-        self.setWindowTitle(
-            title
-        )
+        self.setWindowTitle(f"{title} · Rust-Test")
 
     def confirm_unsaved_changes(self):
         """
